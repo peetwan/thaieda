@@ -132,6 +132,56 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
     <p class="empty">✓ {{ L('no_issues') }}</p>
   {% endif %}
 
+  <!-- ============ ANOMALIES ============ -->
+  <h2>{{ L('anomalies') }} <span class="ng">({{ anomalies|length }})</span></h2>
+  {% if anomalies %}
+    {% for an in anomalies %}
+    <div class="issue {{ an.severity }}">
+      <div>
+        <span class="sev {{ an.severity }}">{{ L('severity_' ~ an.severity) }}</span>
+        <b>{{ an.column }}</b> · <span class="ng">{{ an.check_name }}</span>
+        <span class="badge">{{ an.type_label }}</span>
+      </div>
+      <div class="meta">{{ L('count') }}: {{ "{:,}".format(an.count) }} ({{ an.percentage }}%)</div>
+      <div class="desc-th">{{ an.description_th }}</div>
+      <div class="desc-en">{{ an.description }}</div>
+      {% if an.examples %}
+      <div class="examples">
+        {% for ex in an.examples %}<span class="ex mono">{{ ex }}</span>{% endfor %}
+      </div>
+      {% endif %}
+      <div class="suggest"><span class="lbl">{{ L('suggestion') }}:</span> {{ an.suggestion_th }} <span class="ng">— {{ an.suggestion }}</span></div>
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="empty">✓ {{ L('no_anomalies') }}</p>
+  {% endif %}
+
+  <!-- ============ CLEANING SUGGESTIONS ============ -->
+  <h2>{{ L('cleaning_suggestions') }} <span class="ng">({{ cleaning_suggestions|length }})</span></h2>
+  {% if cleaning_suggestions %}
+    <table>
+      <tr>
+        <th>{{ L('column') }}</th>
+        <th>{{ L('operation') }}</th>
+        <th>{{ L('rows_affected') }}</th>
+        <th>{{ L('before') }}</th>
+        <th>{{ L('after') }}</th>
+      </tr>
+      {% for c in cleaning_suggestions %}
+      <tr>
+        <td><b>{{ c.column }}</b></td>
+        <td>{{ c.operation }}<div class="ng">{{ c.description_th }}</div></td>
+        <td>{{ "{:,}".format(c.rows_affected) }}</td>
+        <td>{% for ex in c.before_examples %}<span class="ex mono">{{ ex }}</span>{% endfor %}</td>
+        <td>{% for ex in c.after_examples %}<span class="ex mono">{{ ex }}</span>{% endfor %}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  {% else %}
+    <p class="empty">✓ {{ L('no_cleaning') }}</p>
+  {% endif %}
+
   <!-- ============ COLUMN DETAILS ============ -->
   <h2>{{ L('column_details') }}</h2>
   {% for col in columns %}

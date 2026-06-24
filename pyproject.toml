@@ -54,6 +54,8 @@ fast = ["nlpo3>=1.2"]
 dl = ["attacut>=1.0"]
 # Word cloud visualization
 viz = ["wordcloud>=1.9"]
+# Encoding/mojibake repair (clean.normalize_encoding)
+fix = ["ftfy>=6.0"]
 # LLM Q&A (v0.3+)
 llm = ["litellm>=1.0"]
 # Development dependencies

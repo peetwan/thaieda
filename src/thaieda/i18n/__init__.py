@@ -46,6 +46,25 @@ LABELS: dict[str, dict[str, str]] = {
     "examples": {"en": "Examples", "th": "ตัวอย่าง"},
     "suggestion": {"en": "Suggestion", "th": "ข้อเสนอแนะ"},
     "no_issues": {"en": "No data quality issues detected.", "th": "ไม่พบปัญหาคุณภาพข้อมูล"},
+    # --- anomalies ---
+    "anomalies": {"en": "Anomalies", "th": "ความผิดปกติ"},
+    "anomaly_type": {"en": "Type", "th": "ประเภท"},
+    "no_anomalies": {"en": "No anomalies detected.", "th": "ไม่พบความผิดปกติ"},
+    "antype_statistical": {"en": "Statistical", "th": "เชิงสถิติ"},
+    "antype_text": {"en": "Text", "th": "ข้อความ"},
+    "antype_encoding": {"en": "Encoding", "th": "การเข้ารหัส"},
+    "antype_pattern": {"en": "Pattern", "th": "รูปแบบ"},
+    "antype_categorical": {"en": "Categorical", "th": "หมวดหมู่"},
+    # --- cleaning suggestions ---
+    "cleaning_suggestions": {"en": "Cleaning Suggestions", "th": "คำแนะนำการทำความสะอาด"},
+    "no_cleaning": {
+        "en": "No cleaning operations needed.",
+        "th": "ไม่มีคำแนะนำการทำความสะอาด",
+    },
+    "operation": {"en": "Operation", "th": "การดำเนินการ"},
+    "rows_affected": {"en": "Rows Affected", "th": "แถวที่ได้รับผลกระทบ"},
+    "before": {"en": "Before", "th": "ก่อน"},
+    "after": {"en": "After", "th": "หลัง"},
     # --- text metrics ---
     "text_metrics": {"en": "Text Metrics", "th": "สถิติข้อความ"},
     "avg_char_length": {"en": "Avg. Characters", "th": "จำนวนอักขระเฉลี่ย"},

@@ -12,6 +12,8 @@ from typing import Any
 import pandas as pd
 
 from thaieda import __version__
+from thaieda.anomaly import AnomalyIssue, detect_anomalies
+from thaieda.clean import CleaningResult, clean_thai_text
 from thaieda.detect import ColumnType, detect_all
 from thaieda.i18n import label
 from thaieda.quality import QualityIssue, run_quality_checks
@@ -22,6 +24,14 @@ from thaieda.text import TextMetrics, text_metrics
 _TEXT_METRIC_TYPES = {ColumnType.THAI_TEXT, ColumnType.MIXED_TEXT}
 # ประเภทที่ถือว่าเป็นข้อความสำหรับสร้างกราฟ
 _TEXT_TYPES = {ColumnType.THAI_TEXT, ColumnType.MIXED_TEXT, ColumnType.ENGLISH_TEXT}
+# ประเภทคอลัมน์ที่ควรลองเสนอการทำความสะอาดข้อความ
+_CLEANABLE_TYPES = {
+    ColumnType.THAI_TEXT,
+    ColumnType.MIXED_TEXT,
+    ColumnType.ENGLISH_TEXT,
+    ColumnType.CATEGORICAL,
+    ColumnType.ID,
+}
 
 
 class ProfileReport:
@@ -46,6 +56,8 @@ class ProfileReport:
         self._ran = False
         self._column_types: dict[str, ColumnType] = {}
         self._quality_issues: list[QualityIssue] = []
+        self._anomalies: list[AnomalyIssue] = []
+        self._cleaning: list[CleaningResult] = []
         self._text_metrics: dict[str, TextMetrics] = {}
         self._overview: dict[str, Any] = {}
         self._charts: dict[str, dict[str, str]] = {}
@@ -71,6 +83,12 @@ class ProfileReport:
                     self.df[col], tokenizer, max_sample=self.max_sample
                 )
 
+        # ความผิดปกติ (statistical/text/encoding/categorical) — text checks ต้องมี tokenizer
+        self._anomalies = detect_anomalies(self.df, self._column_types, tokenizer)
+
+        # คำแนะนำการทำความสะอาด (dry-run — ไม่แก้ข้อมูลจริง)
+        self._cleaning = self._compute_cleaning_suggestions()
+
         # สถิติพื้นฐานของทุกคอลัมน์
         for col in self.df.columns:
             self._basic_stats[str(col)] = self._compute_basic_stats(str(col))
@@ -81,6 +99,21 @@ class ProfileReport:
 
         self._ran = True
         return self
+
+    def _compute_cleaning_suggestions(self) -> list[CleaningResult]:
+        """ลองทำความสะอาดคอลัมน์ข้อความแบบ dry-run และเก็บเฉพาะการดำเนินการที่มีผล (>0 แถว)."""
+        suggestions: list[CleaningResult] = []
+        for col in self.df.columns:
+            ctype = self._column_types.get(str(col), ColumnType.EMPTY)
+            if ctype not in _CLEANABLE_TYPES:
+                continue
+            try:
+                _, results = clean_thai_text(self.df[col])
+            except Exception as exc:  # noqa: BLE001 — การทำความสะอาดพังไม่ควรล้มทั้งรายงาน
+                self._notes.append(f"cleaning suggestions failed for '{col}': {exc}")
+                continue
+            suggestions.extend(r for r in results if r.rows_affected > 0)
+        return suggestions
 
     def _ensure_ran(self) -> None:
         if not self._ran:
@@ -210,6 +243,16 @@ class ProfileReport:
         return self._quality_issues
 
     @property
+    def anomalies(self) -> list[AnomalyIssue]:
+        self._ensure_ran()
+        return self._anomalies
+
+    @property
+    def cleaning_suggestions(self) -> list[CleaningResult]:
+        self._ensure_ran()
+        return self._cleaning
+
+    @property
     def text_metrics(self) -> dict[str, TextMetrics]:
         self._ensure_ran()
         return self._text_metrics
@@ -244,6 +287,8 @@ class ProfileReport:
             "overview": self._overview,
             "column_types": {k: v.value for k, v in self._column_types.items()},
             "quality_issues": [i.to_dict() for i in self._quality_issues],
+            "anomalies": [a.to_dict() for a in self._anomalies],
+            "cleaning_suggestions": [c.to_dict() for c in self._cleaning],
             "columns": columns,
             "notes": self._notes,
         }
@@ -290,6 +335,13 @@ class ProfileReport:
         # เตรียมข้อมูลต่อคอลัมน์
         columns = [self._render_column_context(str(col), L) for col in self.df.columns]
 
+        # ความผิดปกติ — แนบ label ของประเภท (anomaly_type) ไว้ใช้ในเทมเพลต
+        anomalies = []
+        for a in self._anomalies:
+            entry = a.to_dict()
+            entry["type_label"] = L(f"antype_{a.anomaly_type}")
+            anomalies.append(entry)
+
         context = {
             "lang": lang,
             "L": L,
@@ -297,6 +349,8 @@ class ProfileReport:
             "overview": self._overview,
             "type_distribution": type_distribution,
             "quality_issues": [i.to_dict() for i in self._quality_issues],
+            "anomalies": anomalies,
+            "cleaning_suggestions": [c.to_dict() for c in self._cleaning],
             "columns": columns,
             "notes": self._notes,
         }
