@@ -1,0 +1,96 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "thaieda"
+version = "0.1.0"
+description = "AutoEDA สำหรับข้อมูลภาษาไทย — Exploratory data analysis that speaks Thai"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+authors = [
+    { name = "Peet Wannasarnmetha" },
+]
+keywords = [
+    "eda",
+    "exploratory-data-analysis",
+    "thai",
+    "nlp",
+    "text-analysis",
+    "data-quality",
+    "profiling",
+    "autoeda",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Natural Language :: Thai",
+    "Natural Language :: English",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+
+# Core dependencies — ติดตั้งได้ทุกที่ ไม่ต้องมี Thai tokenizer
+dependencies = [
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "matplotlib>=3.7",
+    "jinja2>=3.1",
+]
+
+[project.optional-dependencies]
+# Thai word tokenization (แนะนำ)
+thai = ["pythainlp>=5.0"]
+# Fast tokenizer (Rust-based)
+fast = ["nlpo3>=1.2"]
+# Deep learning tokenizer
+dl = ["attacut>=1.0"]
+# Word cloud visualization
+viz = ["wordcloud>=1.9"]
+# LLM Q&A (v0.3+)
+llm = ["litellm>=1.0"]
+# Development dependencies
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "hypothesis>=6.0",
+    "ruff>=0.4",
+    "mypy>=1.10",
+    "pre-commit>=3.7",
+]
+
+[project.urls]
+Homepage = "https://github.com/peetwan/thaieda"
+Repository = "https://github.com/peetwan/thaieda"
+Issues = "https://github.com/peetwan/thaieda/issues"
+Changelog = "https://github.com/peetwan/thaieda/blob/main/CHANGELOG.md"
+
+[project.scripts]
+thaieda = "thaieda.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/thaieda"]
+
+[tool.ruff]
+src = ["src", "tests"]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
