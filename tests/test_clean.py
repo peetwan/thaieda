@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import unicodedata
 
 import pandas as pd
@@ -20,6 +21,14 @@ from thaieda.clean import (
 )
 
 MOJIBAKE = "สวัสดี".encode().decode("latin-1")
+
+
+def _ftfy_installed() -> bool:
+    try:
+        import ftfy  # noqa: F401
+    except ImportError:
+        return False
+    return True
 
 
 # ------------------------------------------------------------- zero-width
@@ -94,6 +103,35 @@ def test_normalize_encoding_fixes_mojibake():
     cleaned, result = normalize_encoding(s)
     assert cleaned.iloc[0] == "สวัสดี"
     assert result.rows_affected == 1
+
+
+def test_cleaning_result_has_explanation_field():
+    # ฟิลด์ explanation ต้องมีเสมอ (ค่าเริ่มต้นเป็นสตริงว่าง) และอยู่ใน to_dict
+    s = pd.Series(["๑"])
+    _, result = normalize_thai_numerals(s)
+    assert hasattr(result, "explanation")
+    assert isinstance(result.explanation, str)
+    assert "explanation" in result.to_dict()
+
+
+@pytest.mark.skipif(not _ftfy_installed(), reason="ftfy not installed")
+def test_normalize_encoding_explanation_with_ftfy():
+    # เมื่อมี ftfy: ใช้ fix_and_explain -> explanation ต้องอธิบายว่าซ่อมอะไร
+    s = pd.Series([MOJIBAKE, "ปกติ"])
+    cleaned, result = normalize_encoding(s)
+    assert cleaned.iloc[0] == "สวัสดี"
+    assert result.explanation  # ไม่ว่าง
+    assert "ftfy" in result.explanation
+
+
+def test_normalize_encoding_without_ftfy_falls_back(monkeypatch):
+    # จำลองว่าไม่มี ftfy -> ใช้วิธี manual, ยังแก้ mojibake ได้ แต่ explanation ว่าง
+    monkeypatch.setitem(sys.modules, "ftfy", None)
+    s = pd.Series([MOJIBAKE, "ปกติ"])
+    cleaned, result = normalize_encoding(s)
+    assert cleaned.iloc[0] == "สวัสดี"
+    assert result.rows_affected == 1
+    assert result.explanation == ""
 
 
 # ------------------------------------------------------------- composite

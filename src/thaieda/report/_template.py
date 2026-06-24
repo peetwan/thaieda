@@ -171,7 +171,7 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
       {% for c in cleaning_suggestions %}
       <tr>
         <td><b>{{ c.column }}</b></td>
-        <td>{{ c.operation }}<div class="ng">{{ c.description_th }}</div></td>
+        <td>{{ c.operation }}<div class="ng">{{ c.description_th }}</div>{% if c.explanation %}<div class="ng">{{ L('explanation') }}: <span class="mono">{{ c.explanation }}</span></div>{% endif %}</td>
         <td>{{ "{:,}".format(c.rows_affected) }}</td>
         <td>{% for ex in c.before_examples %}<span class="ex mono">{{ ex }}</span>{% endfor %}</td>
         <td>{% for ex in c.after_examples %}<span class="ex mono">{{ ex }}</span>{% endfor %}</td>
@@ -180,6 +180,39 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
     </table>
   {% else %}
     <p class="empty">✓ {{ L('no_cleaning') }}</p>
+  {% endif %}
+
+  <!-- ============ DISTRIBUTIONS & CORRELATIONS ============ -->
+  {% if has_dist_charts %}
+  <h2>{{ L('distributions_correlations') }}</h2>
+  {% if dist_charts.correlation_heatmap %}
+  <div class="imgrow full">
+    <div><div class="imgcap">{{ L('correlation_heatmap') }}</div><img src="data:image/png;base64,{{ dist_charts.correlation_heatmap }}" alt="correlation heatmap"></div>
+  </div>
+  {% endif %}
+  <div class="imgrow">
+    {% if dist_charts.boxplot %}
+    <div><div class="imgcap">{{ L('boxplot') }}</div><img src="data:image/png;base64,{{ dist_charts.boxplot }}" alt="box plot"></div>
+    {% endif %}
+    {% if dist_charts.violinplot %}
+    <div><div class="imgcap">{{ L('violinplot') }}</div><img src="data:image/png;base64,{{ dist_charts.violinplot }}" alt="violin plot"></div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- ============ MISSING DATA ============ -->
+  <h2>{{ L('missing_data') }}</h2>
+  {% if has_missing_charts %}
+  <div class="imgrow">
+    {% if missing_charts.missing_matrix %}
+    <div><div class="imgcap">{{ L('missing_matrix') }}</div><img src="data:image/png;base64,{{ missing_charts.missing_matrix }}" alt="missing value matrix"></div>
+    {% endif %}
+    {% if missing_charts.missing_heatmap %}
+    <div><div class="imgcap">{{ L('missing_heatmap') }}</div><img src="data:image/png;base64,{{ missing_charts.missing_heatmap }}" alt="missing nullity correlation heatmap"></div>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="empty">✓ {{ L('no_missing') }}</p>
   {% endif %}
 
   <!-- ============ COLUMN DETAILS ============ -->
@@ -233,6 +266,11 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
         <tr><th>{{ k }}</th><td>{{ v }}</td></tr>
         {% endfor %}
       </table>
+      {% if col.dist_chart %}
+      <div class="imgrow full">
+        <div><div class="imgcap">{{ L('distribution') }}</div><img src="data:image/png;base64,{{ col.dist_chart }}" alt="value distribution"></div>
+      </div>
+      {% endif %}
       {% if col.top_values %}
       <h3>{{ L('top_values') }}</h3>
       <table>

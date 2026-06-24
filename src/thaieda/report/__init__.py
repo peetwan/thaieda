@@ -61,6 +61,8 @@ class ProfileReport:
         self._text_metrics: dict[str, TextMetrics] = {}
         self._overview: dict[str, Any] = {}
         self._charts: dict[str, dict[str, str]] = {}
+        # กราฟระดับชุดข้อมูล (correlation/box/violin/missing/distribution) จาก auto_visualize
+        self._dataset_charts: dict[str, str] = {}
         self._basic_stats: dict[str, dict[str, Any]] = {}
         self._notes: list[str] = []
 
@@ -85,6 +87,7 @@ class ProfileReport:
 
         # ความผิดปกติ (statistical/text/encoding/categorical) — text checks ต้องมี tokenizer
         self._anomalies = detect_anomalies(self.df, self._column_types, tokenizer)
+        self._note_if_ml_skipped()
 
         # คำแนะนำการทำความสะอาด (dry-run — ไม่แก้ข้อมูลจริง)
         self._cleaning = self._compute_cleaning_suggestions()
@@ -93,12 +96,46 @@ class ProfileReport:
         for col in self.df.columns:
             self._basic_stats[str(col)] = self._compute_basic_stats(str(col))
 
-        # กราฟ (เฉพาะคอลัมน์ข้อความที่มี metrics)
-        if self.make_charts and tokenizer is not None:
-            self._build_charts(tokenizer)
+        # กราฟ
+        if self.make_charts:
+            # กราฟต่อคอลัมน์ข้อความ (word cloud/top tokens/length) — ต้องมี tokenizer
+            if tokenizer is not None:
+                self._build_charts(tokenizer)
+            # กราฟระดับชุดข้อมูล (correlation/box/violin/missing/distribution) — ไม่ต้องใช้ tokenizer
+            self._build_dataset_charts()
 
         self._ran = True
         return self
+
+    def _note_if_ml_skipped(self) -> None:
+        """ถ้ามีคอลัมน์ตัวเลขใหญ่ (>100 แถว) แต่ไม่มี scikit-learn ให้บันทึก note ว่าข้ามวิธี ML."""
+        from thaieda.anomaly import sklearn_available
+
+        if sklearn_available():
+            return
+        big_numeric = [
+            str(c)
+            for c in self.df.columns
+            if self._column_types.get(str(c)) == ColumnType.NUMERIC
+            and int(self.df[c].notna().sum()) > 100
+        ]
+        if big_numeric:
+            self._notes.append(
+                "ML-based anomaly detection (Isolation Forest / LOF) skipped: "
+                "install pip install thaieda[ml] (scikit-learn)"
+            )
+
+    def _build_dataset_charts(self) -> None:
+        """สร้างกราฟระดับชุดข้อมูลด้วย auto_visualize (เลือกกราฟที่เหมาะกับข้อมูลให้อัตโนมัติ)."""
+        from thaieda.viz import auto_visualize, get_thai_font_path
+
+        try:
+            self._dataset_charts = auto_visualize(
+                self.df, self._column_types, font_path=get_thai_font_path()
+            )
+        except Exception as exc:  # noqa: BLE001 — กราฟพังไม่ควรล้มทั้งรายงาน
+            self._notes.append(f"dataset charts failed: {exc}")
+            self._dataset_charts = {}
 
     def _compute_cleaning_suggestions(self) -> list[CleaningResult]:
         """ลองทำความสะอาดคอลัมน์ข้อความแบบ dry-run และเก็บเฉพาะการดำเนินการที่มีผล (>0 แถว)."""
@@ -342,6 +379,17 @@ class ProfileReport:
             entry["type_label"] = L(f"antype_{a.anomaly_type}")
             anomalies.append(entry)
 
+        dc = self._dataset_charts
+        dist_charts = {
+            "correlation_heatmap": dc.get("correlation_heatmap", ""),
+            "boxplot": dc.get("boxplot", ""),
+            "violinplot": dc.get("violinplot", ""),
+        }
+        missing_charts = {
+            "missing_matrix": dc.get("missing_matrix", ""),
+            "missing_heatmap": dc.get("missing_heatmap", ""),
+        }
+
         context = {
             "lang": lang,
             "L": L,
@@ -353,6 +401,10 @@ class ProfileReport:
             "cleaning_suggestions": [c.to_dict() for c in self._cleaning],
             "columns": columns,
             "notes": self._notes,
+            "dist_charts": dist_charts,
+            "has_dist_charts": any(dist_charts.values()),
+            "missing_charts": missing_charts,
+            "has_missing_charts": any(missing_charts.values()),
         }
         return template.render(**context)
 
@@ -384,6 +436,7 @@ class ProfileReport:
             "is_text": is_text,
             "metrics": metrics.to_dict() if metrics is not None else None,
             "charts": self._charts.get(name, {}),
+            "dist_chart": self._dataset_charts.get(f"distribution::{name}", ""),
             "basic_stats": basic_pairs,
             "top_values": stats.get("top_values"),
         }

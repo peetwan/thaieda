@@ -2,21 +2,35 @@
 
 from __future__ import annotations
 
+import sys
+
+import numpy as np
 import pandas as pd
+import pytest
 
 from thaieda.anomaly import (
     AnomalyIssue,
     detect_anomalies,
     detect_categorical_anomalies,
     detect_column_anomalies,
+    detect_isolation_forest,
+    detect_lof,
     detect_numeric_outliers,
     detect_text_anomalies,
+    detect_thai_mojibake,
     detect_thai_text_anomalies,
+    sklearn_available,
 )
 from thaieda.detect import ColumnType
 
 # ข้อความ mojibake: ไบต์ UTF-8 ของ "สวัสดี" ถูกถอดเป็น Latin-1
 MOJIBAKE = "สวัสดี".encode().decode("latin-1")
+# mojibake แบบ cp874/tis-620 ของ "สวัสดี" (อักษรไทยทุกตัวกลายเป็น "เ"+x)
+MOJIBAKE_CP874 = "สวัสดี".encode().decode("cp874")
+
+# ต้องมี scikit-learn จึงจะทดสอบว่าวิธี ML จับ outlier ได้จริง
+sklearn_installed = sklearn_available()
+requires_sklearn = pytest.mark.skipif(not sklearn_installed, reason="scikit-learn not installed")
 
 
 # ----------------------------------------------------------- numeric outliers
@@ -197,3 +211,106 @@ def test_anomaly_issue_to_dict():
     d = issue.to_dict()
     for key in ("check_name", "severity", "column", "anomaly_type", "count", "indices"):
         assert key in d
+
+
+# ------------------------------------------------------------- ML-based outliers
+def _numeric_with_outliers(n: int = 130, seed: int = 42) -> pd.Series:
+    """ค่าปกติ n ตัว (รอบ ๆ 50) แล้วเติม outlier สุดขั้วเข้าไป (รวม > 100 แถว)."""
+    rng = np.random.default_rng(seed)
+    normal = rng.normal(50, 1.5, n)
+    return pd.Series(list(normal) + [500.0, -400.0, 1000.0])
+
+
+@requires_sklearn
+def test_isolation_forest_detects_outliers():
+    s = _numeric_with_outliers()
+    issue = detect_isolation_forest(s)
+    assert issue is not None
+    assert issue.check_name == "isolation_forest"
+    assert issue.anomaly_type == "statistical"
+    assert issue.count >= 1
+    # ตำแหน่งของ outlier ที่เติมไว้ (3 ตัวท้าย)
+    n = len(s)
+    assert any(idx in issue.indices for idx in (n - 1, n - 2, n - 3))
+    # คะแนนความผิดปกติถูกแนบในตัวอย่าง
+    assert any("score=" in ex for ex in issue.examples)
+
+
+@requires_sklearn
+def test_lof_detects_outliers():
+    s = _numeric_with_outliers()
+    issue = detect_lof(s)
+    assert issue is not None
+    assert issue.check_name == "local_outlier_factor"
+    assert issue.anomaly_type == "statistical"
+    assert issue.count >= 1
+    assert any("LOF=" in ex for ex in issue.examples)
+
+
+@requires_sklearn
+def test_ml_methods_skip_when_too_many_flagged():
+    # การกระจายแบบ uniform ไม่มี outlier จริง — contamination='auto' อาจ flag จำนวนมาก
+    # guard ต้องตัดผลที่ flag เกิน ~20% ทิ้ง (คืน None) เพื่อลด noise
+    s = pd.Series(range(200))
+    assert detect_isolation_forest(s) is None
+
+
+@requires_sklearn
+def test_ml_methods_skip_small_samples():
+    # <=100 แถว -> วิธี ML ต้องคืน None (ผลไม่น่าเชื่อถือ)
+    s = pd.Series([1.0] * 50 + [9999.0])
+    assert detect_isolation_forest(s) is None
+    assert detect_lof(s) is None
+
+
+def test_ml_methods_skip_gracefully_without_sklearn(monkeypatch):
+    # จำลองว่าไม่มี scikit-learn -> ต้องคืน None อย่างสุภาพ ไม่ crash
+    monkeypatch.setitem(sys.modules, "sklearn", None)
+    monkeypatch.setitem(sys.modules, "sklearn.ensemble", None)
+    monkeypatch.setitem(sys.modules, "sklearn.neighbors", None)
+    s = _numeric_with_outliers()
+    assert detect_isolation_forest(s) is None
+    assert detect_lof(s) is None
+    assert sklearn_available() is False
+
+
+def test_detect_anomalies_runs_ml_when_available():
+    if not sklearn_installed:
+        pytest.skip("scikit-learn not installed")
+    df = pd.DataFrame({"v": _numeric_with_outliers()})
+    issues = detect_anomalies(df)
+    names = {i.check_name for i in issues}
+    # มีทั้งวิธีเชิงสถิติและวิธี ML อย่างน้อยหนึ่งวิธี
+    assert "isolation_forest" in names or "local_outlier_factor" in names
+
+
+# ------------------------------------------------------------- thai mojibake
+def test_thai_mojibake_latin1_detected():
+    # ตัวอย่างจากโจทย์: "สวัสดี" UTF-8 ถูกถอดเป็น latin-1
+    s = pd.Series(["ปกติ", "à¸ªà¸§à¸±à¸ªà¸”à¸µ", "ดีมาก"])
+    issue = detect_thai_mojibake(s)
+    assert issue is not None
+    assert issue.check_name == "thai_mojibake"
+    assert issue.anomaly_type == "encoding"
+    assert issue.severity == "critical"
+    assert issue.count == 1
+
+
+def test_thai_mojibake_cp874_detected():
+    s = pd.Series(["ปกติ", MOJIBAKE_CP874, "ข้อความ"])
+    issue = detect_thai_mojibake(s)
+    assert issue is not None
+    assert issue.count == 1
+
+
+def test_thai_mojibake_no_false_positive_on_real_thai():
+    # คำไทยจริงที่ขึ้นต้นด้วย "เธ"/"เน" ต้องไม่ถูก flag
+    s = pd.Series(["เธอเป็นเพื่อนของเนื้อคู่", "ปกติ", "อร่อยมาก"])
+    assert detect_thai_mojibake(s) is None
+
+
+def test_thai_mojibake_integrated_in_text_anomalies():
+    s = pd.Series(["ปกติ", "à¸ªà¸§à¸±à¸ªà¸”à¸µ", "ดี"])
+    issues = detect_text_anomalies(s, tokenizer=None)
+    names = {i.check_name for i in issues}
+    assert "thai_mojibake" in names

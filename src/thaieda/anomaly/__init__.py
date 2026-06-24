@@ -27,6 +27,12 @@ SEVERITY_ORDER = {"critical": 0, "warning": 1, "info": 2}
 _MIN_STAT_SAMPLE = 8
 # จำนวนค่าขั้นต่ำสำหรับตรวจ outlier ตัวเลข
 _MIN_NUMERIC_SAMPLE = 5
+# จำนวนแถวขั้นต่ำสำหรับวิธี ML (Isolation Forest / LOF) — น้อยกว่านี้ผลไม่น่าเชื่อถือ
+_MIN_ML_SAMPLE = 100
+# สัดส่วน outlier สูงสุดที่ยอมรับจากวิธี ML — เกินนี้ถือว่า "ไม่ใช่ค่าหายากแล้ว"
+# (contamination='auto' อาจ flag จำนวนมากบนการกระจายแบบ uniform/discrete ซึ่งไม่มี outlier จริง)
+# ความผิดปกติควรเป็นของหายาก จึงตัดผลที่กว้างเกินไปทิ้งเพื่อลด noise ในรายงาน
+_MAX_ML_OUTLIER_FRAC = 0.20
 # จำนวนแถวขั้นต่ำสำหรับกฎ "หมวดหมู่หายาก <1%"
 _RARE_MIN_TOTAL = 100
 # จำนวน index ตัวอย่างสูงสุดที่เก็บต่อหนึ่ง issue
@@ -45,6 +51,13 @@ _THAI_LETTER_RANGE = (0x0E01, 0x0E2E)  # พยัญชนะ ก–ฮ (ไม
 #   - "â€"      : เครื่องหมายคำพูด/ขีดที่เพี้ยน (smart punctuation)
 #   - "Â."     : NBSP/สัญลักษณ์ที่เพี้ยน
 _MOJIBAKE_RE = re.compile("(?:à[¸¹]|Ã[\x80-\xbf]|â€[\x80-\xbf]?|Â[\xa0-\xbf])")
+
+# ลายเซ็น mojibake เฉพาะภาษาไทย (ละเอียดกว่า _MOJIBAKE_RE ทั่วไป):
+#   - latin-1/cp1252: อักษรไทย UTF-8 (ไบต์ E0 B8.. / E0 B9..) -> "à¸"/"à¹"
+_THAI_MOJIBAKE_LATIN1_RE = re.compile(r"à[¸¹]")
+#   - cp874/tis-620: อักษรไทย UTF-8 ทุกตัวกลายเป็น "เ"+อักขระ -> ขึ้นต้นด้วย "เธ"/"เน" ถี่ผิดปกติ
+#     (เช่น "สวัสดี" -> "เธชเธงเธฑเธชเธ”เธต") ระวัง false positive จากคำไทยจริงอย่าง "เธอ"/"เนื้อ"
+_THAI_MOJIBAKE_CP874_RE = re.compile(r"เธ|เน")
 
 # อักขระเดียวกันซ้ำ 5+ ครั้ง (ผิดปกติเชิงสถิติ — ต่างจาก quality ที่ใช้ 3+)
 _EXCESSIVE_REPEAT_RE = re.compile(r"(.)\1{4,}")
@@ -103,6 +116,33 @@ def _pct(count: int, total: int) -> float:
 def _trunc(text: str, limit: int = 60) -> str:
     """ตัดข้อความยาวให้สั้นลงเพื่อใช้เป็นตัวอย่าง."""
     return text if len(text) <= limit else text[: limit - 3] + "..."
+
+
+# แคชแบ็กเอนด์การวัดความคล้ายสตริง: rapidfuzz (เร็วกว่า) ถ้ามี ไม่งั้น difflib
+# 0 = ยังไม่ตรวจ, 1 = ใช้ rapidfuzz, 2 = ใช้ difflib
+_SIMILARITY_BACKEND = 0
+
+
+def _string_similarity(a: str, b: str) -> float:
+    """คืนค่าความคล้ายของสองสตริงในช่วง 0–1 — ใช้ rapidfuzz (ติดตั้งผ่าน thaieda[fuzzy]) ถ้ามี.
+
+    ถ้าไม่มี rapidfuzz จะถอยไปใช้ difflib.SequenceMatcher (พฤติกรรมเดิม)
+    rapidfuzz.fuzz.ratio คืน 0–100 จึงหารด้วย 100 ให้เทียบเท่ากับ SequenceMatcher (0–1)
+    """
+    global _SIMILARITY_BACKEND
+    if _SIMILARITY_BACKEND == 0:
+        try:
+            from rapidfuzz import fuzz  # noqa: F401 — lazy probe ว่ามีไหม
+
+            _SIMILARITY_BACKEND = 1
+        except ImportError:
+            _SIMILARITY_BACKEND = 2
+
+    if _SIMILARITY_BACKEND == 1:
+        from rapidfuzz import fuzz
+
+        return fuzz.ratio(a, b) / 100.0
+    return difflib.SequenceMatcher(None, a, b).ratio()
 
 
 def _positional_items(series: pd.Series) -> list[tuple[int, str]]:
@@ -243,6 +283,144 @@ def _fmt_number(value: float) -> str:
 
 
 # ----------------------------------------------------------------------------
+# (a2) ML-based numeric outliers (optional — ต้องติดตั้ง thaieda[ml] = scikit-learn)
+# ----------------------------------------------------------------------------
+def sklearn_available() -> bool:
+    """คืน True ถ้าติดตั้ง scikit-learn (สำหรับวิธี ML) — ใช้ตัดสินใจระดับบนว่าจะรันวิธี ML ไหม."""
+    try:
+        import sklearn  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def _numeric_valid(series: pd.Series) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """คืน (ค่าตัวเลขที่ไม่ใช่ NaN, ตำแหน่งแถวของค่าเหล่านั้น, อาร์เรย์เต็มหลัง coerce)."""
+    numeric = pd.to_numeric(series, errors="coerce").to_numpy(dtype="float64")
+    valid_mask = ~np.isnan(numeric)
+    return numeric[valid_mask], np.flatnonzero(valid_mask), numeric
+
+
+def detect_isolation_forest(series: pd.Series) -> AnomalyIssue | None:
+    """ตรวจ outlier ด้วย Isolation Forest (วิธี ML) — เหมาะกับคอลัมน์ตัวเลขที่มี >100 แถว.
+
+    ใช้ contamination='auto', random_state=42 เพื่อให้ผลทำซ้ำได้
+    คืน None อย่างสุภาพถ้าไม่ได้ติดตั้ง scikit-learn (thaieda[ml]) หรือข้อมูลน้อยเกินไป
+    คะแนน decision_function (ยิ่งต่ำยิ่งผิดปกติ) ถูกแนบไว้ในคำอธิบายและตัวอย่าง
+    """
+    col = _col_name(series)
+    valid, valid_positions, _ = _numeric_valid(series)
+    if valid.size <= _MIN_ML_SAMPLE:
+        return None
+    try:
+        from sklearn.ensemble import IsolationForest
+    except ImportError:
+        return None
+
+    x = valid.reshape(-1, 1)
+    model = IsolationForest(contamination="auto", random_state=42)
+    preds = model.fit_predict(x)  # -1 = outlier, 1 = ปกติ
+    scores = model.decision_function(x)  # ยิ่งต่ำ (ติดลบ) ยิ่งผิดปกติ
+    out_mask = preds == -1
+    count = int(out_mask.sum())
+    # 0 = ไม่พบ, มากเกินไป = การกระจายไม่มี outlier จริง (ผลไม่น่าเชื่อถือ) -> ข้าม
+    if count == 0 or count / valid.size > _MAX_ML_OUTLIER_FRAC:
+        return None
+
+    order = np.argsort(scores[out_mask])  # ผิดปกติสุดก่อน
+    out_positions = valid_positions[out_mask][order]
+    out_values = valid[out_mask][order]
+    out_scores = scores[out_mask][order]
+    min_score = float(out_scores[0])
+
+    examples = [
+        f"{_fmt_number(float(v))} (score={s:.3f})"
+        for v, s in zip(out_values[:_MAX_INDICES], out_scores[:_MAX_INDICES], strict=True)
+    ]
+    return AnomalyIssue(
+        check_name="isolation_forest",
+        severity="warning",
+        column=col,
+        anomaly_type="statistical",
+        count=count,
+        percentage=_pct(count, int(valid.size)),
+        description=(
+            f"Isolation Forest flagged {count} outlier(s) (most anomalous score "
+            f"{min_score:.3f}; lower = more anomalous)."
+        ),
+        description_th=(
+            f"Isolation Forest พบค่าผิดปกติ {count} ค่า (คะแนนผิดปกติสุด {min_score:.3f}; ยิ่งต่ำยิ่งผิดปกติ)"
+        ),
+        examples=examples,
+        suggestion=(
+            "ML-based outliers complement statistical methods; cross-check flagged points."
+        ),
+        suggestion_th="ค่าผิดปกติแบบ ML ใช้เสริมวิธีเชิงสถิติ — ควรตรวจสอบจุดที่ถูก flag ประกอบกัน",
+        indices=[int(p) for p in out_positions[:_MAX_INDICES]],
+    )
+
+
+def detect_lof(series: pd.Series) -> AnomalyIssue | None:
+    """ตรวจ outlier ด้วย Local Outlier Factor (LOF) — เปรียบเทียบความหนาแน่นกับเพื่อนบ้าน.
+
+    n_neighbors=20 (ปรับลงอัตโนมัติถ้าตัวอย่างน้อยกว่า) เหมาะกับคอลัมน์ตัวเลข >100 แถว
+    คืน None อย่างสุภาพถ้าไม่ได้ติดตั้ง scikit-learn (thaieda[ml]) หรือข้อมูลน้อยเกินไป
+    """
+    col = _col_name(series)
+    valid, valid_positions, _ = _numeric_valid(series)
+    if valid.size <= _MIN_ML_SAMPLE:
+        return None
+    try:
+        from sklearn.neighbors import LocalOutlierFactor
+    except ImportError:
+        return None
+
+    n_neighbors = min(20, int(valid.size) - 1)
+    x = valid.reshape(-1, 1)
+    model = LocalOutlierFactor(n_neighbors=n_neighbors)
+    preds = model.fit_predict(x)  # -1 = outlier
+    scores = model.negative_outlier_factor_  # ยิ่งต่ำ (ติดลบมาก) ยิ่งผิดปกติ
+    out_mask = preds == -1
+    count = int(out_mask.sum())
+    # 0 = ไม่พบ, มากเกินไป = การกระจายไม่มี outlier จริง (ผลไม่น่าเชื่อถือ) -> ข้าม
+    if count == 0 or count / valid.size > _MAX_ML_OUTLIER_FRAC:
+        return None
+
+    order = np.argsort(scores[out_mask])  # ผิดปกติสุดก่อน
+    out_positions = valid_positions[out_mask][order]
+    out_values = valid[out_mask][order]
+    out_scores = scores[out_mask][order]
+    min_score = float(out_scores[0])
+
+    examples = [
+        f"{_fmt_number(float(v))} (LOF={s:.3f})"
+        for v, s in zip(out_values[:_MAX_INDICES], out_scores[:_MAX_INDICES], strict=True)
+    ]
+    return AnomalyIssue(
+        check_name="local_outlier_factor",
+        severity="warning",
+        column=col,
+        anomaly_type="statistical",
+        count=count,
+        percentage=_pct(count, int(valid.size)),
+        description=(
+            f"Local Outlier Factor flagged {count} outlier(s) (most anomalous factor "
+            f"{min_score:.3f}; more negative = more anomalous)."
+        ),
+        description_th=(
+            f"Local Outlier Factor พบค่าผิดปกติ {count} ค่า (ค่าผิดปกติสุด {min_score:.3f}; "
+            "ยิ่งติดลบมากยิ่งผิดปกติ)"
+        ),
+        examples=examples,
+        suggestion=(
+            "LOF finds density-based local outliers; useful when global statistics miss them."
+        ),
+        suggestion_th="LOF จับค่าผิดปกติเชิงความหนาแน่นเฉพาะถิ่น — มีประโยชน์เมื่อสถิติรวมมองไม่เห็น",
+        indices=[int(p) for p in out_positions[:_MAX_INDICES]],
+    )
+
+
+# ----------------------------------------------------------------------------
 # (b) Text anomalies
 # ----------------------------------------------------------------------------
 def _length_anomalies(items: list[tuple[int, str]], col: str) -> AnomalyIssue | None:
@@ -317,6 +495,69 @@ def _mojibake_anomalies(items: list[tuple[int, str]], col: str) -> AnomalyIssue 
     )
 
 
+def _looks_thai_mojibake(text: str) -> str | None:
+    """คืนชื่อ encoding ต้นทางที่น่าจะทำให้เกิด mojibake ('latin-1'/'cp874') หรือ None ถ้าไม่ใช่.
+
+    latin-1/cp1252 : พบลายเซ็น "à¸"/"à¹" (อักษรไทย UTF-8 ถูกถอดเป็น latin-1) — เชื่อถือได้สูง
+    cp874/tis-620  : พบ "เธ"/"เน" ถี่ผิดปกติ (อักษรไทยทุกตัวกลายเป็น "เ"+x)
+                     ต้องเข้มงวด (>=3 ครั้ง และคิดเป็นสัดส่วน >=40%) เพื่อกัน "เธอ"/"เนื้อ" จริง
+    """
+    if _THAI_MOJIBAKE_LATIN1_RE.search(text):
+        return "latin-1"
+    hits = len(_THAI_MOJIBAKE_CP874_RE.findall(text))
+    if hits >= 3 and (hits * 2) / max(len(text), 1) >= 0.4:
+        return "cp874"
+    return None
+
+
+def _thai_mojibake_anomalies(items: list[tuple[int, str]], col: str) -> AnomalyIssue | None:
+    """ตรวจ mojibake เฉพาะภาษาไทย — ระบุ encoding ต้นทาง (latin-1/cp874) ที่น่าจะเป็นสาเหตุ."""
+    flagged: list[tuple[int, str]] = []
+    sources: set[str] = set()
+    for pos, s in items:
+        src = _looks_thai_mojibake(s)
+        if src is not None:
+            flagged.append((pos, s))
+            sources.add(src)
+    if not flagged:
+        return None
+    count = len(flagged)
+    src_label = "/".join(sorted(sources))
+    return AnomalyIssue(
+        check_name="thai_mojibake",
+        severity="critical",
+        column=col,
+        anomaly_type="encoding",
+        count=count,
+        percentage=_pct(count, len(items)),
+        description=(
+            f"{count} cell(s) contain Thai mojibake — UTF-8 Thai text mis-decoded as "
+            f"{src_label} (e.g. 'à¸ªà¸§à¸±à¸ªà¸”à¸µ' or 'เธชเธงเธฑเธชเธ”เธต')."
+        ),
+        description_th=(
+            f"{count} เซลล์มี mojibake ภาษาไทย — ข้อความไทย UTF-8 ถูกถอดผิดเป็น {src_label} "
+            "(เช่น 'à¸ªà¸§à¸±à¸ªà¸”à¸µ' หรือ 'เธชเธงเธฑเธชเธ”เธต')"
+        ),
+        examples=[_trunc(s) for _, s in flagged[:_MAX_INDICES]],
+        suggestion=(
+            "Repair with ftfy (clean.normalize_encoding) or re-decode from the source encoding."
+        ),
+        suggestion_th="ซ่อมด้วย ftfy (clean.normalize_encoding) หรือถอดรหัสใหม่จาก encoding ต้นทาง",
+        indices=[pos for pos, _ in flagged[:_MAX_INDICES]],
+    )
+
+
+def detect_thai_mojibake(series: pd.Series) -> AnomalyIssue | None:
+    """ตรวจ mojibake ภาษาไทยในคอลัมน์เดียว — คืน AnomalyIssue หรือ None ถ้าไม่พบ.
+
+    รองรับทั้ง mojibake แบบ latin-1/cp1252 ('à¸ª...') และ cp874/tis-620 ('เธช...')
+    """
+    items = _positional_items(series)
+    if not items:
+        return None
+    return _thai_mojibake_anomalies(items, _col_name(series))
+
+
 def _garbled_anomalies(items: list[tuple[int, str]], col: str) -> AnomalyIssue | None:
     """ตรวจข้อความเสียหาย — มี replacement char (U+FFFD) หรืออักขระควบคุม."""
     flagged = [(pos, s) for pos, s in items if _control_or_replacement_count(s) > 0]
@@ -385,6 +626,7 @@ def detect_text_anomalies(series: pd.Series, tokenizer) -> list[AnomalyIssue]:
     for check in (
         _length_anomalies,
         _mojibake_anomalies,
+        _thai_mojibake_anomalies,
         _garbled_anomalies,
         _repetition_anomalies,
     ):
@@ -606,7 +848,7 @@ def _fuzzy_duplicate_anomaly(
             a, b = cats[i], cats[j]
             if a.casefold() == b.casefold():
                 continue  # ต่างแค่ตัวพิมพ์ -> จัดเป็น case inconsistency แทน
-            if difflib.SequenceMatcher(None, a, b).ratio() > 0.8:
+            if _string_similarity(a, b) > 0.8:
                 pairs.append((a, b))
                 involved.update((a, b))
                 if len(pairs) >= _MAX_INDICES:
@@ -891,13 +1133,23 @@ def detect_anomalies(
 
     issues: list[AnomalyIssue] = list(detect_column_anomalies(df, column_types))
 
+    # รันวิธี ML เฉพาะเมื่อมี scikit-learn (ตรวจครั้งเดียว ไม่ import ซ้ำต่อคอลัมน์)
+    run_ml = sklearn_available()
+
     for col in df.columns:
         col_name = str(col)
         series = df[col]
         ctype = column_types.get(col_name, ColumnType.EMPTY)
 
-        if ctype == ColumnType.NUMERIC and (issue := detect_numeric_outliers(series)) is not None:
-            issues.append(issue)
+        if ctype == ColumnType.NUMERIC:
+            if (issue := detect_numeric_outliers(series)) is not None:
+                issues.append(issue)
+            # วิธี ML — เสริมวิธีเชิงสถิติเมื่อข้อมูลพอ (>100 แถว) และมี sklearn
+            # ไม่ deduplicate: การที่หลายวิธี flag จุดเดียวกันช่วยเพิ่มความมั่นใจ
+            if run_ml:
+                for ml_detect in (detect_isolation_forest, detect_lof):
+                    if (issue := ml_detect(series)) is not None:
+                        issues.append(issue)
 
         if ctype in _TEXT_TYPES:
             if tokenizer is not None:
@@ -916,9 +1168,13 @@ def detect_anomalies(
 __all__ = [
     "AnomalyIssue",
     "detect_numeric_outliers",
+    "detect_isolation_forest",
+    "detect_lof",
+    "detect_thai_mojibake",
     "detect_text_anomalies",
     "detect_thai_text_anomalies",
     "detect_categorical_anomalies",
     "detect_column_anomalies",
     "detect_anomalies",
+    "sklearn_available",
 ]

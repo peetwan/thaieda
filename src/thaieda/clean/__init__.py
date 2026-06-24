@@ -52,6 +52,8 @@ class CleaningResult:
     before_examples: list[str] = field(default_factory=list)
     after_examples: list[str] = field(default_factory=list)
     description_th: str = ""
+    # คำอธิบายว่า "แก้อะไรไป" (เช่น แผนการซ่อมของ ftfy) — โปร่งใสขึ้น มีค่าเฉพาะบางการดำเนินการ
+    explanation: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -61,6 +63,7 @@ class CleaningResult:
             "before_examples": self.before_examples,
             "after_examples": self.after_examples,
             "description_th": self.description_th,
+            "explanation": self.explanation,
         }
 
 
@@ -150,26 +153,60 @@ def _manual_demojibake(text: str) -> str:
     return text
 
 
+def _format_ftfy_plan(explanation) -> str:
+    """แปลงแผนการซ่อมของ ftfy ให้เป็นข้อความอ่านง่าย (เช่น 'encode latin-1 → decode utf-8').
+
+    ftfy.fix_and_explain คืน explanation เป็น list ของ tuple (operation, ...) แต่ละขั้นตอน
+    """
+    steps: list[str] = []
+    for step in explanation or []:
+        if isinstance(step, (tuple, list)):
+            steps.append(" ".join(str(part) for part in step))
+        else:
+            steps.append(str(step))
+    return " → ".join(steps)
+
+
 def normalize_encoding(
     series: pd.Series, target: str = "utf-8"
 ) -> tuple[pd.Series, CleaningResult]:
     """แก้ mojibake ที่พบบ่อย — ใช้ ftfy ถ้ามี (ติดตั้งผ่าน thaieda[fix]) ไม่งั้นใช้วิธี manual.
 
+    เมื่อมี ftfy จะใช้ fix_and_explain เพื่อเก็บ "คำอธิบายว่าซ่อมอะไรไป" ไว้ใน CleaningResult.explanation
+    (โปร่งใสกว่า fix_text เพราะบอกว่าข้อความถูกถอด/เข้ารหัสผิดแบบไหน)
     target เก็บไว้เพื่อความเข้ากันได้ของ API (ปัจจุบันคืนผลเป็นสตริง UTF-8 เสมอ)
     """
     try:
-        from ftfy import fix_text  # lazy import — optional dependency [fix]
-
-        fixer: Callable[[str], str] = fix_text
+        from ftfy import fix_and_explain  # lazy import — optional dependency [fix]
     except ImportError:
-        fixer = _manual_demojibake
+        # ไม่มี ftfy — ถอยไปใช้วิธี manual (ไม่มีคำอธิบายการซ่อม)
+        return _apply_str_transform(
+            series,
+            _manual_demojibake,
+            operation="normalize_encoding",
+            description_th="แก้ข้อความที่เข้ารหัสผิด (mojibake)",
+        )
 
-    return _apply_str_transform(
+    # เก็บแผนการซ่อมที่ "ไม่ว่าง" ทั้งหมด (เซลล์ที่ถูกแก้จริง) แบบไม่ซ้ำ เพื่อรายงานรวม
+    plans: dict[str, None] = {}  # dict รักษาลำดับที่พบ
+
+    def fixer(text: str) -> str:
+        result = fix_and_explain(text)
+        if result.explanation:
+            plan = _format_ftfy_plan(result.explanation)
+            if plan:
+                plans.setdefault(plan, None)
+        return result.text
+
+    out, cleaning = _apply_str_transform(
         series,
         fixer,
         operation="normalize_encoding",
         description_th="แก้ข้อความที่เข้ารหัสผิด (mojibake)",
     )
+    if plans:
+        cleaning.explanation = "ftfy: " + "; ".join(plans)
+    return out, cleaning
 
 
 def _strip_whitespace_str(text: str) -> str:
