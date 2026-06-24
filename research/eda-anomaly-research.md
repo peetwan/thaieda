@@ -158,3 +158,37 @@
 - QUIS (ซับซ้อนเกินไป, เก็บไว้ใน LLM v0.3)
 - Data drift detection (นอกขอบเขต EDA)
 - Record Linkage Toolkit (เกินขอบเขต)
+
+---
+
+## 2026-06-25 — Research Update
+
+### Extended Isolation Forest (EIF)
+
+เป็นการพัฒนาของ Isolation Forest โดย Hariri et al. แก้ bias จาก axis-aligned splits ของ IF ดั้งเดิม — ใช้ random slope + intercept (oblique cuts) แทนการเลือก feature + threshold ทำให้ anomaly score แม่นยำขึ้นโดยเฉพาะข้อมูลที่มี structure ซับซ้อน มี `extension_level` ควบคุม degree ของ extension (0 = IF ปกติ, P-1 = full extension) มี implementation ใน H2O และ `sahandha/eif` บน GitHub แต่ยังไม่อยู่ใน scikit-learn อย่างเป็นทางการ
+- **เหมาะกับ ThaiEDA:** เป็นทางเลือกขั้นสูงให้ผู้ใช้ที่ต้องการ accuracy สูงกว่า IF ปกติ — แต่ dependency หนัก แนะนำเก็บเป็น roadmap ไม่ใส่ v0.1.1
+- Source: https://docs.h2o.ai/h2o/latest-stable/h2o-docs/data-science/eif.html
+
+### PyCaret Anomaly Detection — Multi-Algorithm API Design
+
+PyCaret มี anomaly module ที่รวมหลาย algorithms ไว้ใน API เดียว (`iforest`, `lof`, `knn`, `svm`, `pca`, `mcd`, `sod`, `abod`, `cluster`, `cof`, `histogram`, `sos`) พร้อม auto-preprocessing pipeline (imputation, encoding, scaling) และ visualization ผ่าน t-SNE/UMAP ใช้ pattern `setup() → create_model() → assign_model() → predict_model()` ที่สะอาดมาก มี `contamination` parameter ควบคุม threshold และ `plot_model()` สร้าง embedding plots
+- **เหมาะกับ ThaiEDA:** เอา API design pattern มาอ้างอิง — แนวคิด unified `detect_anomalies(df, method='iforest'|'lof'|'zscore')` ที่รวมหลาย method ในฟังก์ชันเดียว ทำให้ user เปรียบเทียบได้ง่าย
+- Source: https://pycaret.readthedocs.io/en/latest/api/anomaly.html
+
+### AutoViz — Smart Chart Selection
+
+AutoViz วิเคราะห์ data structure อัตโนมัติแล้วเลือก chart type ที่เหมาะสม — สร้าง 35+ visualizations ด้วย code บรรทัดเดียว เลือก chart ตาม data type และจำนวน variables: numeric×numeric → scatter, distribution → histogram/violin, categorical → bar, missing → matrix ทำงานกับ CSV/DataFrame ได้โดยตรง
+- **เหมาะกับ ThaiEDA:** ยืนยันแนวคิด auto chart selection ที่อยู่ใน research ก่อนหน้า — ควร implement logic แบบนี้ใน `viz/` module โดยไม่ depend AutoViz เอง (เพราะ ThaiEDA ต้องการ Thai font support ที่ AutoViz ไม่มี)
+- Source: https://www.autoviz.ai/features
+
+### Sweetviz — Target Analysis & Dataset Comparison
+
+Sweetviz สร้าง HTML report ครอบคลุม distributions, missing values, correlations, data types ด้วย `analyze()` บรรทัดเดียว — จุดเด่นคือ **target variable analysis** (แสดงความสัมพันธ์ของทุก column กับ target) และ **dataset comparison** (เปรียบเทียบ train vs test หรือ 2 dataset ใน report เดียว) เป็น inspiration จาก Pandas-Profiling แต่ focus ที่ comparison
+- **เหมาะกับ ThaiEDA:** เอา pattern target analysis มาใช้ใน `report/` module — ถ้า user ระบุ target column ให้ report แสดง correlation/association ของทุก column กับ target และ dataset comparison มีประโยชน์สำหรับเปรียบเทียบ before/after cleaning
+- Source: https://www.statology.org/automated-exploratory-data-analysis-with-sweetviz-in-python
+
+### PyThaiNLP `normalize()` — Thai Text Normalization Utility
+
+PyThaiNLP `pythainlp.util.normalize()` เป็นฟังก์ชันรวม normalization ภาษาไทย — เรียก `remove_zw()` (ลบ zero-width spaces), `remove_dup_spaces()` (ลบช่องว่างซ้ำ) ภายในฟังก์ชันเดียว มี `tis620_to_utf8()` สำหรับ convert encoding เก่า และ `eng_to_thai()` แก้ keyboard layout พิมพ์ผิด (Kedmanee) รวมถึง `count_thai_chars()` นับ consonants/vowels/tone marks แยก
+- **เหมาะกับ ThaiEDA:** ควร integrate `normalize()` เข้ากับ `clean/` module สำหรับทำ text cleaning ก่อน profiling, และ `tis620_to_utf8()` สำหรับ fix encoding เก่า — เป็น optional dep ที่มีอยู่แล้ว เพิ่ม wrapper ให้ใช้ง่ายใน ThaiEDA context
+- Source: https://pythainlp.org/dev-docs/api/util.html
