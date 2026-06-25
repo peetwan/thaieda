@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "thaieda"
-version = "0.2.0"
+version = "0.3.0"
 description = "AutoEDA สำหรับข้อมูลภาษาไทย — Exploratory data analysis that speaks Thai"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -64,6 +64,8 @@ stats = ["scipy>=1.11"]
 ner = ["pythainlp>=5.0", "python-crfsuite>=0.9"]
 # Fast fuzzy matching for categorical near-duplicates (faster than difflib)
 fuzzy = ["rapidfuzz>=3.0"]
+# Automatic encoding detection for read_data (thaieda.io)
+detect = ["chardet>=5.0"]
 # LLM Q&A (v0.3+)
 llm = ["litellm>=1.0"]
 # Development dependencies

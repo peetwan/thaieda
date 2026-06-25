@@ -10,9 +10,19 @@
 
 ThaiEDA คือ library สำหรับทำ Exploratory Data Analysis (EDA) โดยเฉพาะข้อมูลที่มีภาษาไทย — ตรวจจับปัญหาข้อมูลที่ tool ทั่วไปมองข้าม เช่น ปีพุทธศักราชผสมคริสต์ศักราช เลขไทยผสมเลขอารบิก อักขระ zero-width space ที่ทำให้ groupby พัง และอื่น ๆ
 
+> 🆕 **v0.3** — ครบจบในคำสั่งเดียว: `thaieda run data.csv -o report.html` → ทำความสะอาด + หา insight + สร้างรายงานอัตโนมัติ พร้อมรองรับ JSON, ตรวจ encoding อัตโนมัติ และสรุปข้อค้นพบสำคัญเป็นภาษาไทย
+
 ---
 
 ## ✨ ฟีเจอร์
+
+### 🆕 Single-command Pipeline & Auto Insights (v0.3)
+
+- ⚡ **คำสั่งเดียวจบ** — `thaieda run data.csv` ทำความสะอาด → วิเคราะห์ → สร้างรายงาน + ไฟล์ที่สะอาดแล้ว ในขั้นตอนเดียว
+- 💡 **Auto insight summary** — สรุป "อะไรสำคัญ ควรทำอะไรต่อ" เป็นภาษาไทย พร้อมบทสรุปผู้บริหาร (executive summary) ไม่ใช่แค่ทวนตัวเลข
+- 📁 **JSON/JSONL input** — อ่าน `.csv`, `.json`, `.jsonl`, `.ndjson` อัตโนมัติ (ระบุ `--format` ได้)
+- 🔠 **Auto encoding detection** — เดา encoding เอง (utf-8 → tis-620 → cp874 → cp1252) ไม่ต้องระบุ `--encoding`
+- 🔁 **Before/after cleaning diff** — รายงานแสดงตารางก่อน/หลังการทำความสะอาด ว่าแก้อะไรไปกี่เซลล์
 
 ### จุดเด่น — Thai Data Quality (สิ่งที่ tool อื่นมองข้าม)
 
@@ -80,8 +90,11 @@ pip install "thaieda[stats]"
 # พร้อม fast tokenizer (Rust-based)
 pip install "thaieda[fast]"
 
+# พร้อมตรวจ encoding อัตโนมัติ (chardet)
+pip install "thaieda[detect]"
+
 # ครบทุกอย่าง
-pip install "thaieda[thai,ner,viz,ml,stats]"
+pip install "thaieda[thai,ner,viz,ml,stats,detect]"
 ```
 
 ---
@@ -92,13 +105,19 @@ pip install "thaieda[thai,ner,viz,ml,stats]"
 
 ```python
 import pandas as pd
-from thaieda import profile
+from thaieda import profile, read_data
 
-df = pd.read_csv("data.csv")
+# อ่านไฟล์อัตโนมัติ (CSV/JSON, เดา encoding ให้เอง)
+df = read_data("data.json")
 
-# สร้าง report
-report = profile(df)
+# สร้าง report พร้อมทำความสะอาด + auto insight
+report = profile(df, clean=True)
 report.to_html("report.html")  # → เปิดใน browser
+
+# ดูสรุปข้อค้นพบสำคัญ (ภาษาไทย)
+print(report.insights.executive_summary_th)
+for ins in report.insights.insights:
+    print(ins.severity, ins.title_th, "→", ins.recommendation_th)
 
 # หรือใน Jupyter
 report  # → แสดงผลใน cell
@@ -107,7 +126,21 @@ report  # → แสดงผลใน cell
 ### CLI
 
 ```bash
-thaieda profile data.csv -o report.html
+# ครบจบในคำสั่งเดียว: ทำความสะอาด → วิเคราะห์ → รายงาน + ไฟล์ที่สะอาดแล้ว
+thaieda run data.csv -o report.html --cleaned-output cleaned.csv
+
+# ระบุคอลัมน์เป้าหมาย (target analysis)
+thaieda run data.csv -o report.html --target price
+
+# อ่าน JSON (auto-detect)
+thaieda run data.json -o report.html
+
+# วิเคราะห์อย่างเดียว (ไม่ทำความสะอาด)
+thaieda run data.csv -o report.html --no-clean
+
+# คำสั่งย่อยอื่น ๆ
+thaieda profile data.csv -o report.html --clean   # วิเคราะห์ + ทำความสะอาด
+thaieda clean data.csv -o cleaned.csv             # ทำความสะอาดอย่างเดียว
 ```
 
 ---
@@ -118,8 +151,9 @@ thaieda profile data.csv -o report.html
 |---------|----------|--------|
 | **v0.1** | Thai text profiling + data quality + HTML report + CLI | ✅ เสร็จ |
 | **v0.2** | Thai NER, pythainlp normalize, auto chart, unified anomaly API, target analysis | ✅ เสร็จ |
-| **v0.3** | LLM Q&A (litellm + Ollama local), Thai explanations | 📋 วางแผน |
-| **v0.4** | Interactive dashboard (Streamlit/FastAPI), Thai UI | 📋 วางแผน |
+| **v0.3** | Single-command pipeline (`run`), JSON input, auto encoding, auto insights, cleaning diff | ✅ เสร็จ |
+| **v0.4** | LLM Q&A (litellm + Ollama local), Thai explanations | 📋 วางแผน |
+| **v0.5** | Interactive dashboard (Streamlit/FastAPI), Thai UI | 📋 วางแผน |
 
 ---
 
@@ -127,6 +161,7 @@ thaieda profile data.csv -o report.html
 
 ```
 thaieda/
+  io/         # อ่าน CSV/JSON อัตโนมัติ + ตรวจ encoding/format (v0.3)
   detect/     # ตรวจจับประเภทคอลัมน์ (Thai text classifier)
   tokenize/   # adapter สำหรับ pythainlp / nlpo3 / attacut
   text/       # วัดค่า text metrics (length, freq, ngrams, TF-IDF)
@@ -135,10 +170,11 @@ thaieda/
   clean/      # data cleaning (encoding, zwspace, keyboard layout, pythainlp normalize)
   ner/        # Thai NER — สกัดชื่อคน/สถานที่/องค์กร (v0.2)
   analysis/   # target variable analysis — Pearson/ANOVA/Chi-square (v0.2)
+  insight/    # auto insight summary — ตีความผลเป็นภาษาไทย (v0.3)
   viz/        # visualization + auto chart selection + Thai font
   report/     # สร้าง HTML report (Jinja2)
   i18n/       # ป้ายและคำอธิบาย TH/EN
-  llm/        # LLM Q&A (v0.3+)
+  llm/        # LLM Q&A (v0.4+)
 ```
 
 ---

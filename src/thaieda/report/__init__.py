@@ -17,6 +17,7 @@ from thaieda.anomaly import AnomalyIssue, detect_anomalies
 from thaieda.clean import CleaningResult, clean_thai_text
 from thaieda.detect import ColumnType, detect_all
 from thaieda.i18n import label
+from thaieda.insight import InsightSummary, generate_insights
 from thaieda.ner import NERResult, extract_entities, ner_available
 from thaieda.quality import QualityIssue, run_quality_checks
 from thaieda.report._template import REPORT_TEMPLATE
@@ -47,6 +48,7 @@ class ProfileReport:
         max_sample: int = 5000,
         make_charts: bool = True,
         target_column: str | None = None,
+        clean: bool = False,
     ) -> None:
         if not isinstance(df, pd.DataFrame):
             raise TypeError("ProfileReport expects a pandas DataFrame.")
@@ -58,15 +60,20 @@ class ProfileReport:
         self.max_sample = max_sample
         self.make_charts = make_charts
         self.target_column = target_column
+        # clean=True: ทำความสะอาดข้อความก่อนวิเคราะห์ และเก็บ diff (ก่อน/หลัง) ไว้แสดงในรายงาน
+        self.clean = clean
 
         self._ran = False
         self._column_types: dict[str, ColumnType] = {}
         self._quality_issues: list[QualityIssue] = []
         self._anomalies: list[AnomalyIssue] = []
         self._cleaning: list[CleaningResult] = []
+        # cleaning_diff: การทำความสะอาดที่ "ลงมือทำจริง" (เมื่อ clean=True) — ต่างจาก _cleaning (dry-run)
+        self._cleaning_diff: list[CleaningResult] = []
         self._text_metrics: dict[str, TextMetrics] = {}
         self._ner: dict[str, NERResult] = {}
         self._target_associations: list[TargetAssociation] = []
+        self._insights: InsightSummary | None = None
         self._overview: dict[str, Any] = {}
         self._charts: dict[str, dict[str, str]] = {}
         # กราฟระดับชุดข้อมูล (correlation/scatter/box/violin/missing) จาก auto_select_charts
@@ -77,6 +84,10 @@ class ProfileReport:
     # ------------------------------------------------------------------ run
     def run(self) -> ProfileReport:
         """รันการวิเคราะห์ทั้งหมด (idempotent — เรียกซ้ำได้)."""
+        # ถ้า clean=True ทำความสะอาดข้อความก่อน แล้ววิเคราะห์ข้อมูลที่สะอาดแล้ว (เก็บ diff ไว้แสดง)
+        if self.clean:
+            self._apply_cleaning()
+
         self._column_types = detect_all(self.df)
         self._overview = self._compute_overview()
         self._quality_issues = run_quality_checks(self.df, self._column_types)
@@ -109,6 +120,17 @@ class ProfileReport:
         # สถิติพื้นฐานของทุกคอลัมน์
         for col in self.df.columns:
             self._basic_stats[str(col)] = self._compute_basic_stats(str(col))
+
+        # สรุปข้อค้นพบสำคัญอัตโนมัติ (ตีความผลทั้งหมดเป็นภาษาไทย) — ทำหลังวิเคราะห์ครบ
+        self._insights = generate_insights(
+            self.df,
+            self._quality_issues,
+            self._anomalies,
+            self._text_metrics,
+            target_associations=self._target_associations,
+            cleaning_results=self._cleaning_diff,
+            column_types=self._column_types,
+        )
 
         # กราฟ
         if self.make_charts:
@@ -181,6 +203,33 @@ class ProfileReport:
         except Exception as exc:  # noqa: BLE001 — การวิเคราะห์ target พังไม่ควรล้มทั้งรายงาน
             self._notes.append(f"target analysis failed: {exc}")
             self._target_associations = []
+
+    def _apply_cleaning(self) -> None:
+        """ทำความสะอาดข้อความทุกคอลัมน์ (object/string) จริง — แทนที่ self.df และเก็บ diff.
+
+        ใช้ DEFAULT_OPERATIONS ของ clean_thai_text (แก้ encoding/zw/ช่องว่าง/normalize ฯลฯ)
+        เก็บเฉพาะการดำเนินการที่มีผล (>0 แถว) ไว้ใน self._cleaning_diff เพื่อแสดงก่อน/หลังในรายงาน
+        """
+        cleaned_df = self.df.copy()
+        diffs: list[CleaningResult] = []
+        for col in cleaned_df.columns:
+            series = cleaned_df[col]
+            # ทำความสะอาดเฉพาะคอลัมน์ข้อความ — ข้ามตัวเลข/วันที่/บูลีน
+            if (
+                pd.api.types.is_numeric_dtype(series)
+                or pd.api.types.is_datetime64_any_dtype(series)
+                or pd.api.types.is_bool_dtype(series)
+            ):
+                continue
+            try:
+                cleaned, results = clean_thai_text(series)
+            except Exception as exc:  # noqa: BLE001 — การทำความสะอาดพังไม่ควรล้มทั้งรายงาน
+                self._notes.append(f"cleaning failed for '{col}': {exc}")
+                continue
+            cleaned_df[col] = cleaned
+            diffs.extend(r for r in results if r.rows_affected > 0)
+        self.df = cleaned_df
+        self._cleaning_diff = diffs
 
     def _compute_cleaning_suggestions(self) -> list[CleaningResult]:
         """ลองทำความสะอาดคอลัมน์ข้อความแบบ dry-run และเก็บเฉพาะการดำเนินการที่มีผล (>0 แถว)."""
@@ -335,6 +384,18 @@ class ProfileReport:
         return self._cleaning
 
     @property
+    def cleaning_diff(self) -> list[CleaningResult]:
+        """การทำความสะอาดที่ลงมือทำจริง (มีค่าเมื่อสร้างรายงานด้วย clean=True)."""
+        self._ensure_ran()
+        return self._cleaning_diff
+
+    @property
+    def insights(self) -> InsightSummary | None:
+        """สรุปข้อค้นพบสำคัญอัตโนมัติ (InsightSummary) — None ถ้ายังไม่ได้รัน."""
+        self._ensure_ran()
+        return self._insights
+
+    @property
     def text_metrics(self) -> dict[str, TextMetrics]:
         self._ensure_ran()
         return self._text_metrics
@@ -378,12 +439,15 @@ class ProfileReport:
             "thaieda_version": __version__,
             "overview": self._overview,
             "column_types": {k: v.value for k, v in self._column_types.items()},
+            "insights": self._insights.to_dict() if self._insights is not None else None,
             "quality_issues": [i.to_dict() for i in self._quality_issues],
             "anomalies": [a.to_dict() for a in self._anomalies],
             "cleaning_suggestions": [c.to_dict() for c in self._cleaning],
             "columns": columns,
             "notes": self._notes,
         }
+        if self._cleaning_diff:
+            result["cleaning_diff"] = [c.to_dict() for c in self._cleaning_diff]
         if self._ner:
             result["ner"] = {col: r.to_dict() for col, r in self._ner.items()}
         if self.target_column is not None:
@@ -470,14 +534,45 @@ class ProfileReport:
                 ],
             }
 
+        # auto insights — แนบ label ของหมวดหมู่ไว้ใช้ในเทมเพลต
+        insight_section = None
+        if self._insights is not None:
+            insight_section = {
+                "executive_summary_th": self._insights.executive_summary_th,
+                "total_insights": self._insights.total_insights,
+                "critical_count": self._insights.critical_count,
+                "warning_count": self._insights.warning_count,
+                "info_count": self._insights.info_count,
+                "insights": [
+                    {**i.to_dict(), "category_label": L(f"icat_{i.category}")}
+                    for i in self._insights.insights
+                ],
+            }
+
+        # cleaning diff — สรุปการทำความสะอาดที่ลงมือทำจริง (เมื่อ clean=True)
+        cleaning_diff = [c.to_dict() for c in self._cleaning_diff]
+        cleaning_diff_summary = None
+        if self._cleaning_diff:
+            total_changed = sum(c.rows_affected for c in self._cleaning_diff)
+            top = max(self._cleaning_diff, key=lambda c: c.rows_affected)
+            cleaning_diff_summary = {
+                "total_cells_changed": total_changed,
+                "most_impactful_op": top.operation,
+                "most_impactful_th": top.description_th,
+                "most_impactful_rows": top.rows_affected,
+            }
+
         context = {
             "lang": lang,
             "L": L,
             "version": __version__,
             "overview": self._overview,
             "type_distribution": type_distribution,
+            "insight_section": insight_section,
             "quality_issues": [i.to_dict() for i in self._quality_issues],
             "anomalies": anomalies,
+            "cleaning_diff": cleaning_diff,
+            "cleaning_diff_summary": cleaning_diff_summary,
             "cleaning_suggestions": [c.to_dict() for c in self._cleaning],
             "columns": columns,
             "notes": self._notes,
@@ -531,10 +626,12 @@ def profile(
     tokenizer_engine: str = "auto",
     make_charts: bool = True,
     target_column: str | None = None,
+    clean: bool = False,
 ) -> ProfileReport:
     """สร้าง ProfileReport และรันการวิเคราะห์ทันที — ฟังก์ชันอำนวยความสะดวกหลัก.
 
     ระบุ target_column เพื่อเพิ่มส่วน "การวิเคราะห์ตัวแปรเป้าหมาย" (ความสัมพันธ์ของทุกคอลัมน์กับเป้าหมาย)
+    ระบุ clean=True เพื่อทำความสะอาดข้อความก่อนวิเคราะห์ และแสดงส่วน "การทำความสะอาด" (ก่อน/หลัง) ในรายงาน
     """
     report = ProfileReport(
         df,
@@ -542,6 +639,7 @@ def profile(
         tokenizer_engine=tokenizer_engine,
         make_charts=make_charts,
         target_column=target_column,
+        clean=clean,
     )
     report.run()
     return report

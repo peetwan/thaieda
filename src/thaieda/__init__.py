@@ -3,12 +3,18 @@
 Exploratory data analysis that speaks Thai.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __all__ = [
     "profile",
     "ProfileReport",
     "extract_entities",
     "analyze_target",
+    "generate_insights",
+    "Insight",
+    "InsightSummary",
+    "read_data",
+    "detect_encoding",
+    "detect_format",
     "__version__",
 ]
 
@@ -31,4 +37,12 @@ def __getattr__(name: str):
         import thaieda.analysis as _analysis
 
         return getattr(_analysis, name)
+    if name in ("generate_insights", "Insight", "InsightSummary"):
+        import thaieda.insight as _insight
+
+        return getattr(_insight, name)
+    if name in ("read_data", "detect_encoding", "detect_format"):
+        import thaieda.io as _io
+
+        return getattr(_io, name)
     raise AttributeError(f"module 'thaieda' has no attribute {name!r}")
