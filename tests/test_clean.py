@@ -15,6 +15,7 @@ from thaieda.clean import (
     fix_repeated_chars,
     fix_tone_mark_stacking,
     normalize_encoding,
+    normalize_phone_numbers,
     normalize_thai_numerals,
     normalize_unicode,
     pythainlp_normalize,
@@ -310,3 +311,36 @@ def test_clean_thai_text_explicit_pythainlp_op_fails_loudly(monkeypatch):
     s = pd.Series(["x"])
     with pytest.raises(ImportError):
         clean_thai_text(s, operations=["pythainlp_normalize"])
+
+
+# ------------------------------------------------------------------ phone numbers
+def test_normalize_phone_numbers_thai_numerals():
+    """เบอร์โทรเลขไทย → อารบิก 10 หลัก"""
+    s = pd.Series(["๐๘๑๒๓๔๕๖๗๘", "๐๘๙๘๗๖๕๔๓๒"], name="phone")
+    cleaned, result = normalize_phone_numbers(s)
+    assert cleaned.iloc[0] == "0812345678"
+    assert cleaned.iloc[1] == "0898765432"
+    assert result.rows_affected == 2
+
+
+def test_normalize_phone_numbers_with_dashes():
+    """เบอร์ที่มี dash/space → 10 หลัก"""
+    s = pd.Series(["08-1234-5678", "08 9876 5432"], name="tel")
+    cleaned, result = normalize_phone_numbers(s)
+    assert cleaned.iloc[0] == "0812345678"
+    assert cleaned.iloc[1] == "0898765432"
+
+
+def test_normalize_phone_numbers_plus66():
+    """+66 → 0"""
+    s = pd.Series(["+66812345678"], name="mobile")
+    cleaned, result = normalize_phone_numbers(s)
+    assert cleaned.iloc[0] == "0812345678"
+
+
+def test_normalize_phone_numbers_not_phone_passthrough():
+    """ค่าที่ไม่ใช่เบอร์ → ไม่เปลี่ยน"""
+    s = pd.Series(["hello", "12345"], name="text")
+    cleaned, result = normalize_phone_numbers(s)
+    assert cleaned.iloc[0] == "hello"
+    assert result.rows_affected == 0

@@ -120,7 +120,8 @@ def _build_parser() -> argparse.ArgumentParser:
         default="all",
         help=(
             "การดำเนินการ คั่นด้วยจุลภาค (เริ่มต้น: all) — "
-            "เลือกได้: all, encoding, zwspace, whitespace, unicode, tonemarks, repeat, numerals"
+            "เลือกได้: all, encoding, zwspace, whitespace, unicode, "
+            "tonemarks, repeat, numerals, phone"
         ),
     )
     _add_io_args(p_clean)
@@ -282,6 +283,13 @@ def _run_run(args: argparse.Namespace) -> int:
     cleaned_path: str | None = None
     if do_clean:
         cleaned_path = args.cleaned_output or str(input_path.with_suffix(".cleaned.csv"))
+        # แปลงคอลัมน์เบอร์โทรเป็น string ก่อนเขียน CSV กัน leading zero หาย
+        from thaieda.detect import ColumnType, detect_all
+
+        col_types = detect_all(report.df)
+        for col, ctype in col_types.items():
+            if ctype == ColumnType.PHONE_NUMBER and col in report.df.columns:
+                report.df[col] = report.df[col].astype(str)
         report.df.to_csv(cleaned_path, index=False, encoding="utf-8")
 
     _print_run_summary(report, input_path, output_path, cleaned_path, args.json)
@@ -325,6 +333,7 @@ def _run_clean(args: argparse.Namespace) -> int:
     import pandas as pd
 
     from thaieda.clean import clean_thai_text
+    from thaieda.detect import ColumnType, detect_column_type, normalize_phone_number
 
     df, code = _read_input(args)
     if df is None:
@@ -337,7 +346,21 @@ def _run_clean(args: argparse.Namespace) -> int:
     total_affected = 0
     results_by_op: dict[str, int] = {}
     for col in df.columns:
-        # ทำความสะอาดเฉพาะคอลัมน์ข้อความ (object/StringDtype) — pandas 3.0 ใช้ StringDtype โดยปริยาย
+        col_type = detect_column_type(df[col])
+
+        # เบอร์โทร: แปลงเป็น string ก่อน (กัน leading zero หาย) แล้วทำความสะอาด
+        if col_type == ColumnType.PHONE_NUMBER:
+            original_vals = df[col].copy()
+            df[col] = df[col].apply(normalize_phone_number)
+            changed = int((df[col].astype(str) != original_vals.astype(str)).sum())
+            if changed > 0:
+                results_by_op["normalize_phone_numbers"] = (
+                    results_by_op.get("normalize_phone_numbers", 0) + changed
+                )
+                total_affected += changed
+            continue
+
+        # ข้าม numeric/datetime — เป็นข้อมูลเชิงสถิติ ไม่ใช่ข้อความ
         if pd.api.types.is_numeric_dtype(df[col]) or pd.api.types.is_datetime64_any_dtype(df[col]):
             continue
         try:
@@ -351,6 +374,7 @@ def _run_clean(args: argparse.Namespace) -> int:
                 results_by_op[r.operation] = results_by_op.get(r.operation, 0) + r.rows_affected
                 total_affected += r.rows_affected
 
+    # เก็บคอลัมน์เบอร์โทรเป็น string ตอนเขียน CSV (กัน leading zero หาย)
     df.to_csv(output_path, index=False, encoding="utf-8")
 
     print(f"✓ ทำความสะอาดไฟล์: {input_path}")
