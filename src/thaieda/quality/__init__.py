@@ -103,26 +103,56 @@ def _visible_repr(text: str) -> str:
 # (a) Buddhist Era detection
 # ----------------------------------------------------------------------------
 def check_buddhist_era(series: pd.Series, column: str) -> QualityIssue | None:
-    """ตรวจหาเลขปี พ.ศ. (2440–2599) ที่อาจปนกับ ค.ศ. ในคอลัมน์ตัวเลข/วันที่ — v0.8 vectorized."""
+    """ตรวจหาเลขปี พ.ศ. (2440–2599) ที่อาจปนกับ ค.ศ. ในคอลัมน์ตัวเลข/วันที่ — v0.8 vectorized.
+
+    v1.1 fix: กรองค่าที่ไม่ใช่รูปแบบวันที่ออก — กัน false positive จากตัวเลขทั่วไป
+    เช่น ticket number 21171, room count 2401 ที่ตรงช่วง พ.ศ. แต่ไม่ใช่ปี
+    """
     values = _non_null_str(series)
     if len(values) == 0:
         return None
 
+    # v1.1: กรองเฉพาะค่าที่มีรูปแบบวันที่ (มี - หรือ / คั่น และมี 4 หลัก)
+    # กัน false positive จากตัวเลขทั่วไป เช่น 21171, 7099
+    # แต่ถ้าค่าเป็นตัวเลขล้วน (int/float → string) ให้ตรวจเฉพาะช่วง 2400-2700
+    date_like_re = re.compile(r"\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b|\b\d{1,2}[-/]\d{1,2}[-/]\d{4}\b")
+    year_only_re = re.compile(r"^\d{4}$")  # ค่าที่เป็นเลข 4 หลักล้วน (เช่น 2567)
+
+    date_like_values = []
+    year_only_values = []
+    ce_year_values = []  # CE years (1900-2100) ที่ไม่ใช่ พ.ศ.
+    for v in values:
+        if date_like_re.search(v):
+            date_like_values.append(v)
+        elif year_only_re.match(v.strip()):
+            year_int = int(v.strip())
+            if 2400 <= year_int <= 2700:
+                year_only_values.append(v)
+            elif 1900 <= year_int <= 2100:
+                ce_year_values.append(v)
+
+    # ถ้ามี date-like values ให้ใช้เฉพาะ那些
+    # ถ้าไม่มี date-like แต่มี year-only ให้ใช้ year-only (รองรับคอลัมน์ปีแบบ int)
+    check_values = date_like_values if date_like_values else year_only_values
+    if len(check_values) == 0:
+        return None
+
+    # ตรวจ CE จากค่าทั้งหมด (ไม่ใช่แค่ check_values) เพื่อตัดสินใจ mixed
+    all_year_values = date_like_values + year_only_values
+    ce_seen = len(ce_year_values) > 0
+
     be_examples: list[str] = []
-    ce_seen = False
     year_re = re.compile(r"\b(\d{4})\b")
 
     # v0.8: vectorize — ใช้ .str.extractall แทนการวนลูป
     try:
-        # แปลงเป็น string Series แล้ว extractall
-        s = pd.Series(values)
+        # แปลงเป็น string Series แล้ว extractall (ใช้ check_values เท่านั้น)
+        s = pd.Series(check_values)
         extracted = s.str.extractall(year_re)
         if extracted.empty:
             return None
         years = pd.to_numeric(extracted[0], errors="coerce").dropna()
         be_match_mask = (years >= _BE_MIN) & (years <= _BE_MAX)
-        ce_match_mask = (years >= 1900) & (years <= 2100)
-        ce_seen = bool(ce_match_mask.any())
         if not be_match_mask.any():
             return None
         # นับ "rows ที่มี พ.ศ. อย่างน้อย 1 ค่า" ไม่ใช่ "จำนวน match" — กัน percentage >100%
@@ -132,7 +162,7 @@ def check_buddhist_era(series: pd.Series, column: str) -> QualityIssue | None:
         if be_count == 0:
             return None
         # หา examples — ดึง rows ที่มี พ.ศ.
-        for v in values:
+        for v in check_values:
             if any(str(int(y)) in v for y in be_year_vals[:5]) and len(be_examples) < 5:
                 be_examples.append(v)
     except Exception:  # noqa: BLE001 — fallback ถ้า extractall พัง
@@ -153,7 +183,7 @@ def check_buddhist_era(series: pd.Series, column: str) -> QualityIssue | None:
         if be_count == 0:
             return None
 
-    total = len(values)
+    total = len(all_year_values) + len(ce_year_values)
     # critical ถ้าปนกัน (ทั้ง พ.ศ. และ ค.ศ.), warning ถ้าเป็น พ.ศ. ล้วน
     mixed = ce_seen and be_count < total
     severity = "critical" if mixed else "warning"
