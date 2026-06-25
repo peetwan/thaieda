@@ -67,6 +67,76 @@ _BANGKOK_SHORT_RE = re.compile(
     r"(?P<name>กรุงเทพ(?:มหานคร|ฯ)?)",
 )
 
+# จังหวัดไทยที่พบบ่อย — ใช้ตรวจเมื่อไม่มี prefix "จ." หรือ "จังหวัด"
+# เรียงตามความยาว (ยาวก่อน) เพื่อกัน match สั้นกว่าก่อน เช่น "กรุงเทพ" ก่อน "กรุง"
+_THAI_PROVINCES = [
+    "กรุงเทพมหานคร",
+    "กรุงเทพฯ",
+    "กรุงเทพ",
+    "เชียงใหม่",
+    "เชียงราย",
+    "ขอนแก่น",
+    "ภูเก็ต",
+    "พัทยา",
+    "นนทบุรี",
+    "ปทุมธานี",
+    "สมุทรปราการ",
+    "สมุทรสาคร",
+    "สมุทรสงคราม",
+    "นครปฐม",
+    "ราชบุรี",
+    "กาญจนบุรี",
+    "เพชรบุรี",
+    "ประจวบคีรีขันธ์",
+    "ชลบุรี",
+    "ระยอง",
+    "จันทบุรี",
+    "ตราด",
+    "ฉะเชิงเทรา",
+    "นครราชสีมา",
+    "บุรีรัมย์",
+    "สุรินทร์",
+    "ศรีสะเกษ",
+    "อุบลราชธานี",
+    "อุดรธานี",
+    "หนองคาย",
+    "เลย",
+    "สกลนคร",
+    "นครพนม",
+    "มุกดาหาร",
+    "พิษณุโลก",
+    "สุโขทัย",
+    "พิจิตร",
+    "เพชรบูรณ์",
+    "นครสวรรค์",
+    "ลำปาง",
+    "ลำพูน",
+    "เชียงราย",
+    "พะเยา",
+    "น่าน",
+    "แพร่",
+    "ตาก",
+    "สุราษฎร์ธานี",
+    "นครศรีธรรมราช",
+    "ภูเก็ต",
+    "ระนอง",
+    "ชุมพร",
+    "สงขลา",
+    "พัทลุง",
+    "ตรัง",
+    "พังงา",
+    "กระบี่",
+    "สตูล",
+    "ยะลา",
+    "ปัตตานี",
+    "นราธิวาส",
+]
+
+# สร้าง regex สำหรับจังหวัดที่ไม่มี prefix — match คำยาวก่อน
+_PROVINCE_NO_PREFIX_RE = re.compile(
+    r"(?P<name>" + "|".join(re.escape(p) for p in _THAI_PROVINCES) + ")",
+)
+
 
 def parse_thai_address(text: str) -> dict[str, str]:
     """แยกวิเคราะห์ที่อยู่ไทยจากสตริง คืน dict ของแต่ละส่วน.
@@ -138,10 +208,15 @@ def parse_thai_address(text: str) -> dict[str, str]:
     if prov_match:
         result["province"] = prov_match.group("name")
     else:
-        # ลองหา "กรุงเทพฯ" หรือ "กรุงเทพมหานคร" โดยไม่มี prefix
-        bk_match = _BANGKOK_SHORT_RE.search(text_no_postal)
-        if bk_match:
-            result["province"] = bk_match.group("name")
+        # ลองหาจังหวัดจาก list โดยไม่มี prefix (เช่น "เชียงใหม่", "ภูเก็ต")
+        prov_noprefix = _PROVINCE_NO_PREFIX_RE.search(text_no_postal)
+        if prov_noprefix:
+            result["province"] = prov_noprefix.group("name")
+        else:
+            # ลองหา "กรุงเทพฯ" หรือ "กรุงเทพมหานคร" โดยไม่มี prefix
+            bk_match = _BANGKOK_SHORT_RE.search(text_no_postal)
+            if bk_match:
+                result["province"] = bk_match.group("name")
 
     return result
 
