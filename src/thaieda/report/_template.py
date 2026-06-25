@@ -243,6 +243,56 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
   {% endfor %}
   {% endif %}
 
+  <!-- ============ TIMESERIES ANALYSIS ============ -->
+  {% if timeseries_section %}
+  <h2>{{ L('timeseries') }} <span class="ng">({{ L('type_datetime') }}: {{ timeseries_section.time_column }})</span></h2>
+  {% for ts in timeseries_section.columns %}
+  <div class="col">
+    <div class="head">
+      <span class="nm">{{ ts.column }}</span>
+      <span class="badge">{{ L('ts_frequency') }}: {{ ts.result.frequency_th }}</span>
+      {% if ts.result.has_trend %}<span class="badge">{{ L('ts_trend') }}: {{ ts.result.trend_direction_th }}</span>{% endif %}
+      {% if ts.result.has_seasonality %}<span class="badge">{{ L('ts_seasonality') }}: {{ ts.result.seasonal_period_th }}</span>{% endif %}
+      <span class="badge">{{ L('ts_engine') }}: {{ ts.result.engine_used }}</span>
+    </div>
+    <table>
+      <tr>
+        <th>{{ L('ts_trend') }}</th><td>{{ ts.result.trend_direction_th if ts.result.has_trend else L('ts_none') }}</td>
+        <th>{{ L('ts_seasonality') }}</th><td>{{ ts.result.seasonal_period_th if ts.result.has_seasonality else L('ts_none') }}</td>
+      </tr>
+      <tr>
+        <th>{{ L('ts_gaps') }}</th><td>{{ ts.result.gap_count }}</td>
+        <th>{{ L('ts_anomalies') }}</th><td>{{ ts.result.anomaly_count }}</td>
+      </tr>
+      <tr>
+        <th>{{ L('ts_autocorr') }}</th><td>{{ ts.result.stats.autocorr_lag1 }}</td>
+        <th>{{ L('mean') }}</th><td>{{ ts.result.stats.mean }}</td>
+      </tr>
+    </table>
+    {% if ts.result.insights %}
+    <div class="examples">
+      {% for ins in ts.result.insights %}<span class="ex">• {{ ins }}</span>{% endfor %}
+    </div>
+    {% endif %}
+    {% if ts.charts.line %}
+    <div class="imgrow full">
+      <div><div class="imgcap">{{ L('ts_timeseries_plot') }}</div><img src="data:image/png;base64,{{ ts.charts.line }}" alt="timeseries line"></div>
+    </div>
+    {% endif %}
+    {% if ts.charts.decomposition %}
+    <div class="imgrow full">
+      <div><div class="imgcap">{{ L('ts_decomposition') }}</div><img src="data:image/png;base64,{{ ts.charts.decomposition }}" alt="STL decomposition"></div>
+    </div>
+    {% endif %}
+    {% if ts.charts.acf %}
+    <div class="imgrow full">
+      <div><div class="imgcap">{{ L('ts_acf_plot') }}</div><img src="data:image/png;base64,{{ ts.charts.acf }}" alt="ACF"></div>
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% endif %}
+
   <!-- ============ CLEANING APPLIED (DIFF) ============ -->
   {% if cleaning_diff %}
   <h2>{{ L('cleaning_diff') }} <span class="ng">({{ cleaning_diff|length }})</span></h2>

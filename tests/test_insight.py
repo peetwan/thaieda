@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from thaieda.analysis import TargetAssociation
@@ -10,6 +11,7 @@ from thaieda.clean import CleaningResult
 from thaieda.detect import ColumnType, detect_all
 from thaieda.insight import Insight, InsightSummary, generate_insights
 from thaieda.quality import QualityIssue, run_quality_checks
+from thaieda.timeseries import analyze_dataframe_timeseries
 
 
 def _quality_issue(check_name="buddhist_era", severity="critical", column="year", count=3):
@@ -177,6 +179,98 @@ def test_integration_with_real_checks():
     assert summary.total_insights >= 1
     # ต้องมี insight เกี่ยวกับ พ.ศ. (buddhist_era ถูกตรวจพบ)
     assert any("พุทธศักราช" in i.title_th for i in summary.insights)
+
+
+# ------------------------------------------------------------- distribution insights
+def test_skewness_insight():
+    rng = np.random.default_rng(0)
+    # การกระจายเบ้ขวาแรง (exponential)
+    df = pd.DataFrame({"amount": rng.exponential(2.0, 200)})
+    column_types = {"amount": ColumnType.NUMERIC}
+    summary = generate_insights(df, [], [], {}, column_types=column_types)
+    dist = [i for i in summary.insights if i.category == "distribution"]
+    assert any("เบ้" in i.title_th for i in dist)
+
+
+def test_no_skewness_for_symmetric():
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame({"x": rng.normal(0, 1, 200)})
+    column_types = {"x": ColumnType.NUMERIC}
+    summary = generate_insights(df, [], [], {}, column_types=column_types)
+    dist = [i for i in summary.insights if i.category == "distribution"]
+    assert not any("เบ้มาก" in i.title_th for i in dist)
+
+
+def test_bimodal_insight():
+    rng = np.random.default_rng(1)
+    # สองกลุ่มแยกชัดเจน
+    values = np.concatenate([rng.normal(0, 1, 150), rng.normal(20, 1, 150)])
+    df = pd.DataFrame({"v": values})
+    summary = generate_insights(df, [], [], {}, column_types={"v": ColumnType.NUMERIC})
+    dist = [i for i in summary.insights if i.category == "distribution"]
+    assert any("bimodal" in i.title_th for i in dist)
+
+
+# ------------------------------------------------------------- correlation insights
+def test_correlation_insight_high_pair():
+    rng = np.random.default_rng(2)
+    x = rng.normal(0, 1, 100)
+    df = pd.DataFrame({"a": x, "b": x * 2 + rng.normal(0, 0.01, 100), "c": rng.normal(0, 1, 100)})
+    summary = generate_insights(df, [], [], {})
+    structure = [i for i in summary.insights if i.title_th == "คู่คอลัมน์สหสัมพันธ์สูง"]
+    assert len(structure) >= 1
+    assert "a" in structure[0].description_th and "b" in structure[0].description_th
+
+
+# ------------------------------------------------------------- duplicate rows
+def test_duplicate_row_insight():
+    df = pd.DataFrame({"a": [1, 1, 1, 2], "b": ["x", "x", "x", "y"]})
+    summary = generate_insights(df, [], [], {})
+    dup = [i for i in summary.insights if i.title_th == "พบแถวซ้ำ"]
+    assert len(dup) == 1
+    assert "แถว" in dup[0].description_th
+
+
+def test_no_duplicate_insight_when_unique():
+    df = pd.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]})
+    summary = generate_insights(df, [], [], {})
+    assert not [i for i in summary.insights if i.title_th == "พบแถวซ้ำ"]
+
+
+# ------------------------------------------------------------- type mismatch
+def test_type_mismatch_insight():
+    # คอลัมน์หมวดหมู่ที่จริง ๆ เป็นตัวเลข 85% (ปน 'N/A' บ้าง)
+    vals = [str(i) for i in range(85)] + ["N/A"] * 15
+    df = pd.DataFrame({"code": vals})
+    column_types = {"code": ColumnType.CATEGORICAL}
+    summary = generate_insights(df, [], [], {}, column_types=column_types)
+    mismatch = [i for i in summary.insights if i.title_th == "คอลัมน์เก็บตัวเลขเป็นข้อความ"]
+    assert len(mismatch) == 1
+
+
+# ------------------------------------------------------------- timeseries insights
+def test_timeseries_insights_trend():
+    df = pd.DataFrame(
+        {
+            "date": pd.date_range("2024-01-01", periods=60, freq="D"),
+            "sales": [float(i) for i in range(60)],
+        }
+    )
+    ts = analyze_dataframe_timeseries(df, engine="basic")
+    summary = generate_insights(df, [], [], {}, timeseries_results=ts)
+    tsi = [i for i in summary.insights if i.category == "timeseries"]
+    assert any("แนวโน้ม" in i.title_th for i in tsi)
+    assert "อนุกรมเวลา" in summary.executive_summary_th
+
+
+def test_timeseries_insights_gap_warning():
+    dates = list(pd.date_range("2024-01-01", periods=20, freq="D"))
+    dates += list(pd.date_range("2024-03-01", periods=20, freq="D"))
+    df = pd.DataFrame({"date": dates, "v": [float(i) for i in range(40)]})
+    ts = analyze_dataframe_timeseries(df, engine="basic")
+    summary = generate_insights(df, [], [], {}, timeseries_results=ts)
+    tsi = [i for i in summary.insights if i.category == "timeseries"]
+    assert any("ช่องว่าง" in i.title_th for i in tsi)
 
 
 # ------------------------------------------------------------- to_dict

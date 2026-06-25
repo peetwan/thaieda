@@ -688,6 +688,147 @@ def auto_visualize(
     return charts
 
 
+# ----------------------------------------------------------------------------
+# กราฟ timeseries (เส้น/decomposition/ACF)
+# ----------------------------------------------------------------------------
+_SEASONAL = "#69db7c"  # สีเขียว สำหรับองค์ประกอบ seasonal
+_RESIDUAL = "#ffa94d"  # สีส้ม สำหรับ residual
+
+
+def create_timeseries_plot(
+    series: pd.Series, title: str = "", font_path: str | None = None
+) -> str:
+    """กราฟเส้น timeseries พร้อมเส้นแนวโน้ม (trend line) คืนค่าเป็น base64 PNG.
+
+    ถ้า index เป็น DatetimeIndex จะใช้เป็นแกน x (เรียงตามเวลา) ไม่งั้นใช้ตำแหน่ง
+    คืนสตริงว่างถ้าไม่มีค่าตัวเลข
+    """
+    setup_matplotlib_thai_font()
+    prop = _font_prop(font_path)
+
+    numeric = pd.to_numeric(series, errors="coerce")
+    if isinstance(series.index, pd.DatetimeIndex):
+        numeric = numeric.sort_index()
+    valid = numeric.dropna()
+    if valid.empty:
+        return ""
+
+    y = valid.to_numpy(dtype="float64")
+    x = valid.index if isinstance(valid.index, pd.DatetimeIndex) else np.arange(y.size)
+
+    fig, ax = plt.subplots(figsize=(9, 3.5), facecolor=_DARK_BG)
+    ax.set_facecolor(_DARK_BG)
+    ax.plot(x, y, color=_ACCENT, linewidth=1.2, alpha=0.9)
+
+    # เส้นแนวโน้มจาก linear fit (ตามตำแหน่ง 0..n-1)
+    if y.size >= 2 and float(np.std(y)) > 0:
+        xi = np.arange(y.size, dtype="float64")
+        slope, intercept = np.polyfit(xi, y, 1)
+        trend_line = slope * xi + intercept
+        ax.plot(x, trend_line, color=_CRITICAL, linewidth=1.4, linestyle="--", alpha=0.85)
+
+    if title:
+        ax.set_title(title, color=_DARK_FG, fontproperties=prop, fontsize=12)
+    ax.set_xlabel("time", color=_DARK_FG, fontproperties=prop)
+    ax.set_ylabel("value", color=_DARK_FG, fontproperties=prop)
+    if isinstance(x, pd.DatetimeIndex):
+        fig.autofmt_xdate()
+    _style_dark_axes(ax)
+    return _fig_to_base64(fig)
+
+
+def create_decomposition_plot(
+    components: dict[str, list[float]], title: str = "", font_path: str | None = None
+) -> str:
+    """กราฟ STL decomposition 4 แผง (observed/trend/seasonal/residual) คืนค่าเป็น base64 PNG.
+
+    components ต้องมีคีย์ 'trend', 'seasonal', 'residual' (observed = ผลรวมของทั้งสาม)
+    คืนสตริงว่างถ้าไม่มีองค์ประกอบใดเลย
+    """
+    setup_matplotlib_thai_font()
+    prop = _font_prop(font_path)
+
+    trend = np.asarray(components.get("trend", []), dtype="float64")
+    seasonal = np.asarray(components.get("seasonal", []), dtype="float64")
+    residual = np.asarray(components.get("residual", []), dtype="float64")
+    if trend.size == 0 and seasonal.size == 0 and residual.size == 0:
+        return ""
+
+    n = max(trend.size, seasonal.size, residual.size)
+
+    def _pad(arr: np.ndarray) -> np.ndarray:
+        if arr.size == n:
+            return arr
+        out = np.zeros(n, dtype="float64")
+        out[: arr.size] = arr
+        return out
+
+    trend, seasonal, residual = _pad(trend), _pad(seasonal), _pad(residual)
+    observed = trend + seasonal + residual
+    x = np.arange(n)
+
+    panels = [
+        ("observed", observed, _ACCENT),
+        ("trend", trend, _CRITICAL),
+        ("seasonal", seasonal, _SEASONAL),
+        ("residual", residual, _RESIDUAL),
+    ]
+    fig, axes = plt.subplots(4, 1, figsize=(9, 7), facecolor=_DARK_BG, sharex=True)
+    for ax, (name, data, color) in zip(axes, panels, strict=False):
+        ax.set_facecolor(_DARK_BG)
+        if name == "residual":
+            ax.scatter(x, data, s=6, color=color, alpha=0.6, edgecolors="none")
+            ax.axhline(0, color=_DARK_FG, linewidth=0.6, alpha=0.5)
+        else:
+            ax.plot(x, data, color=color, linewidth=1.1)
+        ax.set_ylabel(name, color=_DARK_FG, fontproperties=prop, fontsize=10)
+        _style_dark_axes(ax)
+    if title:
+        fig.suptitle(title, color=_DARK_FG, fontproperties=prop, fontsize=12)
+    axes[-1].set_xlabel("time", color=_DARK_FG, fontproperties=prop)
+    return _fig_to_base64(fig)
+
+
+def create_acf_plot(
+    series: pd.Series, lags: int = 40, title: str = "", font_path: str | None = None
+) -> str:
+    """กราฟ autocorrelation function (ACF) แบบ stem คืนค่าเป็น base64 PNG.
+
+    ใช้ numpy ล้วน (ไม่พึ่ง statsmodels) คืนสตริงว่างถ้าข้อมูลน้อยกว่า 2 จุด
+    """
+    setup_matplotlib_thai_font()
+    prop = _font_prop(font_path)
+
+    values = pd.to_numeric(series, errors="coerce").dropna().to_numpy(dtype="float64")
+    if values.size < 2:
+        return ""
+
+    max_lag = min(lags, values.size - 1)
+    x = values - values.mean()
+    denom = float(np.sum(x * x))
+    acf = [1.0]
+    for lag in range(1, max_lag + 1):
+        acf.append(0.0 if denom == 0 else float(np.sum(x[lag:] * x[:-lag]) / denom))
+
+    # แถบนัยสำคัญโดยประมาณ ±1.96/sqrt(n)
+    conf = 1.96 / np.sqrt(values.size)
+
+    fig, ax = plt.subplots(figsize=(9, 3.5), facecolor=_DARK_BG)
+    ax.set_facecolor(_DARK_BG)
+    positions = range(len(acf))
+    ax.vlines(list(positions), 0, acf, color=_ACCENT, linewidth=1.5)
+    ax.scatter(list(positions), acf, s=14, color=_ACCENT)
+    ax.axhline(0, color=_DARK_FG, linewidth=0.6, alpha=0.6)
+    ax.axhline(conf, color=_CRITICAL, linewidth=0.8, linestyle="--", alpha=0.7)
+    ax.axhline(-conf, color=_CRITICAL, linewidth=0.8, linestyle="--", alpha=0.7)
+    if title:
+        ax.set_title(title, color=_DARK_FG, fontproperties=prop, fontsize=12)
+    ax.set_xlabel("lag", color=_DARK_FG, fontproperties=prop)
+    ax.set_ylabel("ACF", color=_DARK_FG, fontproperties=prop)
+    _style_dark_axes(ax)
+    return _fig_to_base64(fig)
+
+
 def _top_tokens_from_series(series: pd.Series, tokenizer: Tokenizer, top_n: int = 20):
     """นับคำที่พบบ่อยจากคอลัมน์ข้อความ (ตัดคำด้วย tokenizer, ทิ้ง token ที่เป็นเครื่องหมายล้วน)."""
     from collections import Counter
@@ -813,6 +954,9 @@ __all__ = [
     "create_missing_heatmap",
     "create_scatter_matrix",
     "create_category_bar",
+    "create_timeseries_plot",
+    "create_decomposition_plot",
+    "create_acf_plot",
     "auto_visualize",
     "auto_select_charts",
 ]

@@ -22,6 +22,11 @@ from thaieda.ner import NERResult, extract_entities, ner_available
 from thaieda.quality import QualityIssue, run_quality_checks
 from thaieda.report._template import REPORT_TEMPLATE
 from thaieda.text import TextMetrics, text_metrics
+from thaieda.timeseries import (
+    TimeseriesResult,
+    analyze_timeseries,
+    detect_timeseries_columns,
+)
 
 # ประเภทที่ต้องวิเคราะห์ข้อความ (ต้องใช้ tokenizer)
 _TEXT_METRIC_TYPES = {ColumnType.THAI_TEXT, ColumnType.MIXED_TEXT}
@@ -49,6 +54,7 @@ class ProfileReport:
         make_charts: bool = True,
         target_column: str | None = None,
         clean: bool = False,
+        timeseries: bool = True,
     ) -> None:
         if not isinstance(df, pd.DataFrame):
             raise TypeError("ProfileReport expects a pandas DataFrame.")
@@ -62,6 +68,8 @@ class ProfileReport:
         self.target_column = target_column
         # clean=True: ทำความสะอาดข้อความก่อนวิเคราะห์ และเก็บ diff (ก่อน/หลัง) ไว้แสดงในรายงาน
         self.clean = clean
+        # timeseries=True: ตรวจหา datetime column แล้ววิเคราะห์คอลัมน์ตัวเลขเป็นอนุกรมเวลาอัตโนมัติ
+        self.timeseries = timeseries
 
         self._ran = False
         self._column_types: dict[str, ColumnType] = {}
@@ -73,6 +81,13 @@ class ProfileReport:
         self._text_metrics: dict[str, TextMetrics] = {}
         self._ner: dict[str, NERResult] = {}
         self._target_associations: list[TargetAssociation] = []
+        # ผลวิเคราะห์อนุกรมเวลา ต่อคอลัมน์ตัวเลข (เมื่อมี datetime column)
+        self._timeseries: dict[str, TimeseriesResult] = {}
+        # ซีรีส์ที่ index ด้วยเวลาแล้ว (เก็บไว้สร้างกราฟ timeseries) + ชื่อคอลัมน์เวลา
+        self._ts_indexed: dict[str, pd.Series] = {}
+        self._ts_time_col: str | None = None
+        # กราฟ timeseries ต่อคอลัมน์ (line/decomposition/acf)
+        self._timeseries_charts: dict[str, dict[str, str]] = {}
         self._insights: InsightSummary | None = None
         self._overview: dict[str, Any] = {}
         self._charts: dict[str, dict[str, str]] = {}
@@ -114,6 +129,9 @@ class ProfileReport:
         # การวิเคราะห์ตัวแปรเป้าหมาย (target analysis) — เมื่อผู้ใช้ระบุ target_column
         self._compute_target_analysis()
 
+        # การวิเคราะห์อนุกรมเวลา (timeseries) — เมื่อมี datetime column และเปิดใช้งาน
+        self._compute_timeseries()
+
         # คำแนะนำการทำความสะอาด (dry-run — ไม่แก้ข้อมูลจริง)
         self._cleaning = self._compute_cleaning_suggestions()
 
@@ -130,6 +148,7 @@ class ProfileReport:
             target_associations=self._target_associations,
             cleaning_results=self._cleaning_diff,
             column_types=self._column_types,
+            timeseries_results=self._timeseries,
         )
 
         # กราฟ
@@ -139,9 +158,88 @@ class ProfileReport:
                 self._build_charts(tokenizer)
             # กราฟระดับชุดข้อมูล (correlation/box/violin/missing/distribution) — ไม่ต้องใช้ tokenizer
             self._build_dataset_charts()
+            # กราฟอนุกรมเวลา (line/decomposition/acf) — เมื่อมีผลวิเคราะห์ timeseries
+            if self._timeseries:
+                self._build_timeseries_charts()
 
         self._ran = True
         return self
+
+    def _compute_timeseries(self) -> None:
+        """ตรวจหาแกนเวลาแล้ววิเคราะห์ทุกคอลัมน์ตัวเลขเป็นอนุกรมเวลา — แบบอัตโนมัติ.
+
+        เลือก datetime column แรกที่เหมาะเป็นแกนเวลา, index ข้อมูลด้วยเวลานั้น (เรียงตามเวลา)
+        แล้ววิเคราะห์ทุกคอลัมน์ตัวเลข เก็บทั้งผลวิเคราะห์และซีรีส์ที่ index แล้ว (ไว้สร้างกราฟ)
+        ไม่บังคับ: ถ้าไม่มี datetime column หรือผู้ใช้ปิด timeseries=False จะข้ามไป
+        """
+        if not self.timeseries:
+            return
+        try:
+            ts_cols = detect_timeseries_columns(self.df)
+        except Exception as exc:  # noqa: BLE001 — การตรวจ timeseries พังไม่ควรล้มทั้งรายงาน
+            self._notes.append(f"timeseries detection failed: {exc}")
+            return
+        if not ts_cols:
+            return
+
+        time_col = next(iter(ts_cols))
+        time_values = pd.to_datetime(self.df[time_col], errors="coerce")
+        valid = time_values.notna()
+        if int(valid.sum()) < 5:
+            return
+        indexed = self.df.loc[valid].copy()
+        indexed.index = pd.DatetimeIndex(time_values[valid])
+        indexed = indexed.sort_index()
+
+        numeric_cols = [
+            str(c)
+            for c in self.df.columns
+            if str(c) != str(time_col) and self._column_types.get(str(c)) == ColumnType.NUMERIC
+        ]
+        if not numeric_cols:
+            return
+        self._ts_time_col = str(time_col)
+        for col in numeric_cols[:20]:
+            try:
+                result = analyze_timeseries(indexed[col])
+            except Exception as exc:  # noqa: BLE001 — วิเคราะห์ timeseries พังไม่ควรล้มทั้งรายงาน
+                self._notes.append(f"timeseries analysis failed for '{col}': {exc}")
+                continue
+            if result.is_timeseries:
+                self._timeseries[col] = result
+                self._ts_indexed[col] = indexed[col]
+
+    def _build_timeseries_charts(self) -> None:
+        """สร้างกราฟ timeseries ต่อคอลัมน์ — เส้น (พร้อม trend), STL decomposition, ACF."""
+        from thaieda.viz import (
+            create_acf_plot,
+            create_decomposition_plot,
+            create_timeseries_plot,
+            get_thai_font_path,
+        )
+
+        font_path = get_thai_font_path()
+        for col, result in self._timeseries.items():
+            series = self._ts_indexed.get(col)
+            if series is None:
+                continue
+            charts: dict[str, str] = {}
+            try:
+                charts["line"] = create_timeseries_plot(series, title=col, font_path=font_path)
+            except Exception as exc:  # noqa: BLE001 — กราฟพังไม่ควรล้มทั้งรายงาน
+                self._notes.append(f"timeseries plot failed for '{col}': {exc}")
+            try:
+                components = {k: c.values for k, c in result.components.items()}
+                charts["decomposition"] = create_decomposition_plot(
+                    components, title=col, font_path=font_path
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._notes.append(f"decomposition plot failed for '{col}': {exc}")
+            try:
+                charts["acf"] = create_acf_plot(series, title=col, font_path=font_path)
+            except Exception as exc:  # noqa: BLE001
+                self._notes.append(f"ACF plot failed for '{col}': {exc}")
+            self._timeseries_charts[col] = {k: v for k, v in charts.items() if v}
 
     def _note_if_ml_skipped(self) -> None:
         """ถ้ามีคอลัมน์ตัวเลขใหญ่ (>100 แถว) แต่ไม่มี scikit-learn ให้บันทึก note ว่าข้ามวิธี ML."""
@@ -420,6 +518,12 @@ class ProfileReport:
         self._ensure_ran()
         return self._target_associations
 
+    @property
+    def timeseries_results(self) -> dict[str, TimeseriesResult]:
+        """ผลวิเคราะห์อนุกรมเวลาต่อคอลัมน์ตัวเลข (ว่างถ้าไม่มี datetime column)."""
+        self._ensure_ran()
+        return self._timeseries
+
     # --------------------------------------------------------------- export
     def to_dict(self) -> dict[str, Any]:
         """ส่งออกข้อมูลแบบมีโครงสร้าง (ไม่รวมรูป base64 เพื่อให้กระชับ)."""
@@ -450,6 +554,11 @@ class ProfileReport:
             result["cleaning_diff"] = [c.to_dict() for c in self._cleaning_diff]
         if self._ner:
             result["ner"] = {col: r.to_dict() for col, r in self._ner.items()}
+        if self._timeseries:
+            result["timeseries"] = {
+                "time_column": self._ts_time_col,
+                "columns": {col: r.to_dict() for col, r in self._timeseries.items()},
+            }
         if self.target_column is not None:
             result["target_analysis"] = {
                 "target_column": self.target_column,
@@ -523,6 +632,21 @@ class ProfileReport:
             {"column": col, "result": result.to_dict()} for col, result in self._ner.items()
         ]
 
+        # timeseries — สรุปผล + กราฟ (line/decomposition/acf) ต่อคอลัมน์
+        timeseries_section = None
+        if self._timeseries:
+            timeseries_section = {
+                "time_column": self._ts_time_col,
+                "columns": [
+                    {
+                        "column": col,
+                        "result": r.to_dict(),
+                        "charts": self._timeseries_charts.get(col, {}),
+                    }
+                    for col, r in self._timeseries.items()
+                ],
+            }
+
         # target analysis — แนบ label ของชนิดความสัมพันธ์
         target_section = None
         if self.target_column is not None:
@@ -582,6 +706,7 @@ class ProfileReport:
             "has_missing_charts": any(missing_charts.values()),
             "ner_sections": ner_sections,
             "target_section": target_section,
+            "timeseries_section": timeseries_section,
         }
         return template.render(**context)
 
@@ -627,11 +752,13 @@ def profile(
     make_charts: bool = True,
     target_column: str | None = None,
     clean: bool = False,
+    timeseries: bool = True,
 ) -> ProfileReport:
     """สร้าง ProfileReport และรันการวิเคราะห์ทันที — ฟังก์ชันอำนวยความสะดวกหลัก.
 
     ระบุ target_column เพื่อเพิ่มส่วน "การวิเคราะห์ตัวแปรเป้าหมาย" (ความสัมพันธ์ของทุกคอลัมน์กับเป้าหมาย)
     ระบุ clean=True เพื่อทำความสะอาดข้อความก่อนวิเคราะห์ และแสดงส่วน "การทำความสะอาด" (ก่อน/หลัง) ในรายงาน
+    ระบุ timeseries=False เพื่อข้ามการวิเคราะห์อนุกรมเวลา (เร็วขึ้นบนข้อมูลที่ไม่ใช่ timeseries)
     """
     report = ProfileReport(
         df,
@@ -640,6 +767,7 @@ def profile(
         make_charts=make_charts,
         target_column=target_column,
         clean=clean,
+        timeseries=timeseries,
     )
     report.run()
     return report

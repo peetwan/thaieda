@@ -14,13 +14,16 @@ from thaieda.detect import ColumnType
 from thaieda.viz import (
     auto_select_charts,
     auto_visualize,
+    create_acf_plot,
     create_boxplot,
     create_category_bar,
     create_correlation_heatmap,
+    create_decomposition_plot,
     create_distribution_histogram,
     create_missing_heatmap,
     create_missing_matrix,
     create_scatter_matrix,
+    create_timeseries_plot,
     create_violinplot,
 )
 
@@ -204,3 +207,43 @@ def test_auto_select_charts_no_numeric_no_scatter():
     # ตัวเลขคอลัมน์เดียว -> ไม่มี scatter matrix / correlation
     assert "scatter_matrix" not in charts
     assert "correlation_heatmap" not in charts
+
+
+# ------------------------------------------------------------- timeseries plots
+def _ts_series() -> pd.Series:
+    idx = pd.date_range("2024-01-01", periods=60, freq="D")
+    return pd.Series([float(i) + (i % 7) for i in range(60)], index=idx, name="sales")
+
+
+def test_create_timeseries_plot_returns_png():
+    _assert_png_base64(create_timeseries_plot(_ts_series(), title="sales"))
+
+
+def test_timeseries_plot_works_without_datetime_index():
+    s = pd.Series([1.0, 3.0, 2.0, 5.0, 4.0, 6.0])
+    _assert_png_base64(create_timeseries_plot(s))
+
+
+def test_timeseries_plot_empty_when_no_values():
+    assert create_timeseries_plot(pd.Series(["ก", "ข"])) == ""
+
+
+def test_create_decomposition_plot_returns_png():
+    components = {
+        "trend": [float(i) for i in range(30)],
+        "seasonal": [float(i % 7) for i in range(30)],
+        "residual": [0.1 * (i % 3) for i in range(30)],
+    }
+    _assert_png_base64(create_decomposition_plot(components, title="decomp"))
+
+
+def test_decomposition_plot_empty_when_no_components():
+    assert create_decomposition_plot({}) == ""
+
+
+def test_create_acf_plot_returns_png():
+    _assert_png_base64(create_acf_plot(_ts_series(), lags=20))
+
+
+def test_acf_plot_empty_when_too_few_points():
+    assert create_acf_plot(pd.Series([1.0])) == ""

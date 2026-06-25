@@ -69,6 +69,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p_profile.add_argument(
         "--clean", action="store_true", help="ทำความสะอาดข้อความก่อนวิเคราะห์ และแสดง diff ในรายงาน"
     )
+    p_profile.add_argument(
+        "--no-timeseries",
+        action="store_true",
+        help="ข้ามการวิเคราะห์อนุกรมเวลา (เร็วขึ้นบนข้อมูลที่ไม่ใช่ timeseries)",
+    )
     p_profile.add_argument("--json", default=None, help="ส่งออกข้อมูลเป็น JSON ไปยังพาธที่ระบุด้วย")
     p_profile.add_argument("--no-charts", action="store_true", help="ไม่สร้างกราฟ (เร็วขึ้น)")
     _add_io_args(p_profile)
@@ -92,6 +97,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--target", default=None, help="คอลัมน์เป้าหมายสำหรับการวิเคราะห์ความสัมพันธ์")
     p_run.add_argument(
         "--no-clean", action="store_true", help="ข้ามขั้นตอนทำความสะอาด (วิเคราะห์อย่างเดียว)"
+    )
+    p_run.add_argument(
+        "--no-timeseries",
+        action="store_true",
+        help="ข้ามการวิเคราะห์อนุกรมเวลา (เร็วขึ้นบนข้อมูลที่ไม่ใช่ timeseries)",
     )
     p_run.add_argument(
         "--lang", choices=["th", "en"], default="th", help="ภาษาของรายงาน (เริ่มต้น: th)"
@@ -187,6 +197,7 @@ def _run_profile(args: argparse.Namespace) -> int:
         make_charts=not args.no_charts,
         target_column=args.target,
         clean=args.clean,
+        timeseries=not args.no_timeseries,
     )
     report.run()
     report.to_html(output_path)
@@ -224,12 +235,32 @@ def _print_summary(report, input_path: Path, output_path: str, json_path: str | 
         print(f"  ทำความสะอาดแล้ว: {len(report.cleaning_diff)} การดำเนินการ (รวม {total:,} เซลล์)")
     else:
         print(f"  คำแนะนำการทำความสะอาด: {len(report.cleaning_suggestions)}")
+    _print_timeseries_highlights(report)
     _print_insight_highlights(report)
     for note in report.notes:
         print(f"  ⚠ {note}")
     print(f"✓ บันทึกรายงาน HTML: {output_path}")
     if json_path:
         print(f"✓ บันทึก JSON: {json_path}")
+
+
+def _print_timeseries_highlights(report) -> None:
+    """พิมพ์สรุปการวิเคราะห์อนุกรมเวลา (ถ้ามี datetime column)."""
+    ts = report.timeseries_results
+    if not ts:
+        return
+    print(f"  อนุกรมเวลา: วิเคราะห์ {len(ts)} คอลัมน์")
+    for col, r in list(ts.items())[:5]:
+        bits: list[str] = [r.frequency_th]
+        if r.has_trend:
+            bits.append(f"แนวโน้ม{r.trend_direction_th}")
+        if r.has_seasonality:
+            bits.append(f"seasonality รอบ {r.seasonal_period}")
+        if r.gap_count:
+            bits.append(f"ช่องว่าง {r.gap_count} ช่วง")
+        if r.anomalies:
+            bits.append(f"spike {len(r.anomalies)} จุด")
+        print(f"    • {col}: {', '.join(bits)}")
 
 
 def _print_insight_highlights(report) -> None:
@@ -272,6 +303,7 @@ def _run_run(args: argparse.Namespace) -> int:
         make_charts=not args.no_charts,
         target_column=args.target,
         clean=do_clean,
+        timeseries=not args.no_timeseries,
     )
     report.run()
     report.to_html(output_path)
@@ -316,6 +348,7 @@ def _print_run_summary(
     if report.cleaning_diff:
         total = sum(c.rows_affected for c in report.cleaning_diff)
         print(f"  ทำความสะอาดแล้ว: {len(report.cleaning_diff)} การดำเนินการ (รวม {total:,} เซลล์)")
+    _print_timeseries_highlights(report)
     _print_insight_highlights(report)
     for note in report.notes:
         print(f"  ⚠ {note}")
