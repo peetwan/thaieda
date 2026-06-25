@@ -976,14 +976,9 @@ def create_insight_outstanding_chart(
     # เรียง barh จากล่างขึ้น (มากสุดบน)
     labels = labels[::-1]
     values = values[::-1]
-    colors = [
-        _PATTERN_COLORS["outstanding"] if lbl == top_segment else "#3a3f47"
-        for lbl in labels
-    ]
+    colors = [_PATTERN_COLORS["outstanding"] if lbl == top_segment else "#3a3f47" for lbl in labels]
 
-    fig, ax = plt.subplots(
-        figsize=(7, max(3.0, 0.35 * len(labels) + 1)), facecolor=_DARK_BG
-    )
+    fig, ax = plt.subplots(figsize=(7, max(3.0, 0.35 * len(labels) + 1)), facecolor=_DARK_BG)
     ax.set_facecolor(_DARK_BG)
     positions = range(len(labels))
     ax.barh(list(positions), values, color=colors, alpha=0.85)
@@ -1043,8 +1038,11 @@ def create_insight_attribution_chart(
         t.set_fontweight("bold")
     # ข้อความกลางโดนัท
     ax.text(
-        0, 0, f"{share:.0f}%",
-        ha="center", va="center",
+        0,
+        0,
+        f"{share:.0f}%",
+        ha="center",
+        va="center",
         color=_PATTERN_COLORS["attribution"],
         fontproperties=prop,
         fontsize=20,
@@ -1095,9 +1093,7 @@ def create_insight_comparison_chart(
     data = [groups.get_group(g).to_numpy(dtype="float64") for g in group_list]
     labels = _wrap_labels([str(g) for g in group_list], limit=14)
 
-    fig, ax = plt.subplots(
-        figsize=(max(6.0, 1.2 * len(group_list) + 2), 4.5), facecolor=_DARK_BG
-    )
+    fig, ax = plt.subplots(figsize=(max(6.0, 1.2 * len(group_list) + 2), 4.5), facecolor=_DARK_BG)
     ax.set_facecolor(_DARK_BG)
     bp = ax.boxplot(
         data,
@@ -1159,8 +1155,13 @@ def create_insight_trend_chart(
     ax.plot(x, values, color=_PATTERN_COLORS["trend"], linewidth=2, alpha=0.9, zorder=2)
     ax.scatter(x, values, color=_PATTERN_COLORS["trend"], s=24, zorder=3)
     # เติมพื้นใต้เส้นเบา ๆ
-    ax.fill_between(x, values, min(values) - (max(values) - min(values)) * 0.1,
-                    color=_PATTERN_COLORS["trend"], alpha=0.08)
+    ax.fill_between(
+        x,
+        values,
+        min(values) - (max(values) - min(values)) * 0.1,
+        color=_PATTERN_COLORS["trend"],
+        alpha=0.08,
+    )
 
     # ลูกศรทิศทาง (ใช้ ASCII เพื่อหลีกเลี่ยง glyph ที่อาจไม่มีใน font ไทย)
     arrow_y = values[-1]
@@ -1180,8 +1181,13 @@ def create_insight_trend_chart(
     n = len(labels)
     step = max(1, n // 8)
     ax.set_xticks(x[::step])
-    ax.set_xticklabels(_wrap_labels([labels[i] for i in range(0, n, step)], limit=12),
-                        rotation=30, ha="right", color=_DARK_FG, fontproperties=prop)
+    ax.set_xticklabels(
+        _wrap_labels([labels[i] for i in range(0, n, step)], limit=12),
+        rotation=30,
+        ha="right",
+        color=_DARK_FG,
+        fontproperties=prop,
+    )
     if title:
         ax.set_title(f"{title} (τ={tau:.2f})", color=_DARK_FG, fontproperties=prop, fontsize=11)
     ax.set_ylabel("value", color=_DARK_FG, fontproperties=prop)
@@ -1218,7 +1224,9 @@ def create_insight_chart(
         if top_seg and not any(s[0] == top_seg for s in segments):
             segments = [[top_seg, top_val]] + segments
         return create_insight_outstanding_chart(
-            segments, top_seg, title=f"{breakdown} × {measure or 'count'}",
+            segments,
+            top_seg,
+            title=f"{breakdown} × {measure or 'count'}",
             font_path=font_path,
         )
 
@@ -1229,7 +1237,9 @@ def create_insight_chart(
         top_seg = evidence.get("top_segment", "")
         share = float(evidence.get("share", 0))
         return create_insight_attribution_chart(
-            segments, top_seg, share,
+            segments,
+            top_seg,
+            share,
             title=f"{breakdown} × {measure or 'count'}",
             font_path=font_path,
         )
@@ -1239,7 +1249,10 @@ def create_insight_chart(
             return ""
         top_seg = evidence.get("top_segment", "")
         return create_insight_comparison_chart(
-            df, breakdown, measure, top_seg,
+            df,
+            breakdown,
+            measure,
+            top_seg,
             title=f"{breakdown} × {measure}",
             font_path=font_path,
         )

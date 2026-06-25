@@ -571,8 +571,7 @@ def coerce_numeric_column(series: pd.Series) -> tuple[pd.Series, CleaningResult]
         rows_affected=affected,
         column=str(series.name or ""),
         description_th=(
-            f"แปลงคอลัมน์เป็นตัวเลข ({ok_count} ค่า) "
-            f"+ แทนที่ placeholder {placeholders_found} ค่าด้วย NaN"
+            f"แปลงคอลัมน์เป็นตัวเลข ({ok_count} ค่า) + แทนที่ placeholder {placeholders_found} ค่าด้วย NaN"
         ),
     )
 

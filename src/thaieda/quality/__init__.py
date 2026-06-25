@@ -126,9 +126,7 @@ def check_buddhist_era(series: pd.Series, column: str) -> QualityIssue | None:
             return None
         # นับ "rows ที่มี พ.ศ. อย่างน้อย 1 ค่า" ไม่ใช่ "จำนวน match" — กัน percentage >100%
         be_year_vals = years[be_match_mask].unique()
-        be_rows_mask = s.apply(
-            lambda v: any(str(int(y)) in v for y in be_year_vals)
-        )
+        be_rows_mask = s.apply(lambda v: any(str(int(y)) in v for y in be_year_vals))
         be_count = int(be_rows_mask.sum())
         if be_count == 0:
             return None
@@ -527,10 +525,9 @@ def run_quality_checks(df: pd.DataFrame, column_types: dict[str, ColumnType]) ->
                 issues.append(issue)
 
         # v0.8: placeholder/dash แทน NaN
-        if (
-            (ctype in _TEXT_TYPES or series.dtype == object)
-            and (issue := check_placeholder_values(series, col_name)) is not None
-        ):
+        if (ctype in _TEXT_TYPES or series.dtype == object) and (
+            issue := check_placeholder_values(series, col_name)
+        ) is not None:
             issues.append(issue)
 
         # v0.8: constant column (zero variance) — flag เพื่อให้ user รู้ว่าไม่มีประโยชน์
@@ -591,8 +588,7 @@ def check_placeholder_values(series: pd.Series, column: str) -> QualityIssue | N
         examples=examples,
         suggestion="Replace placeholder values with NaN before analysis",
         suggestion_th=(
-            "แทนที่ค่า placeholder ด้วย NaN ก่อนวิเคราะห์ "
-            "(ใช้ coerce_numeric_column หรือ replace)"
+            "แทนที่ค่า placeholder ด้วย NaN ก่อนวิเคราะห์ (ใช้ coerce_numeric_column หรือ replace)"
         ),
     )
 

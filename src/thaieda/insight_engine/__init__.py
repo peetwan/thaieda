@@ -1155,9 +1155,12 @@ def _recompute_full(
         if c["pattern"] == "correlation":
             rec = _detect_strong_correlations(df, measures)
             match = next(
-                (r for r in rec
-                 if r["evidence"]["col_a"] == c["evidence"]["col_a"]
-                 and r["evidence"]["col_b"] == c["evidence"]["col_b"]),
+                (
+                    r
+                    for r in rec
+                    if r["evidence"]["col_a"] == c["evidence"]["col_a"]
+                    and r["evidence"]["col_b"] == c["evidence"]["col_b"]
+                ),
                 None,
             )
             if match is not None:
