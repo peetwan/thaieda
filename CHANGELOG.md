@@ -5,6 +5,69 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-06-25
+
+Headline feature: **privacy-preserving LLM analysis** — feed your EDA results to
+any LLM (OpenAI / Anthropic / Ollama) with selectable privacy modes so you
+control exactly what data leaves your machine.
+
+### Added — LLM Analysis Module
+
+Four **privacy modes** for `analyze_with_llm()` — ranked from safest to riskiest:
+
+| Mode | What leaves the machine | Privacy guarantee | Use case |
+|------|-------------------------|-------------------|----------|
+| `insight_only` (default) | Only summary statistics + insight cards sent | Raw data never leaves the machine | Regulated/PDPA data, default for cautious users |
+| `anonymized` | PII replaced with reversible tokens before sending | Names/phones/ID cards replaced with `[NAME_1]`, `[PHONE_1]` | Need LLM to see structure/patterns without raw PII |
+| `dp_noise` | Stats with Laplace mechanism noise (ε configurable) | DP noise prevents re-identification from small stats | Small datasets where stats alone may leak identity |
+| `full` | All raw data sent (user accepts risk) | None — user accepts tradeoff for max accuracy | Public/non-sensitive data; dev/demo workflows |
+
+### New Files (v0.9)
+
+- `src/thaieda/llm/__init__.py` — public API: `analyze_with_llm(df, privacy, provider, model, language)`
+- `src/thaieda/llm/_prepare.py` — `prepare_for_llm()` — prepares data per privacy mode (4 modes)
+- `src/thaieda/llm/_anonymize.py` — `anonymize_dataframe()` — PII detection (phone, ID card, NER)
+- `src/thaieda/llm/_prompt.py` — `build_prompt()` — Thai/English prompt builder
+- `src/thaieda/llm/_provider.py` — `call_llm()` — lazy import OpenAI/Anthropic/Ollama
+- `tests/test_llm.py` — 59 tests covering all modes + protocol contracts
+
+### Added — Three LLM Providers (all optional / lazy)
+
+| Provider | Package | Default model | API key env var |
+|----------|---------|---------------|-----------------|
+| `openai` (default) | `pip install openai` | `gpt-4o-mini` | `OPENAI_API_KEY` |
+| `anthropic` | `pip install anthropic` | `claude-3-5-sonnet-20241022` | `ANTHROPIC_API_KEY` |
+| `ollama` | `pip install ollama` *(or built-in HTTP fallback)* | `llama3.1` | `OLLAMA_HOST` (default `http://localhost:11434`) |
+
+**All LLM dependencies are optional and lazy-imported** — the library imports
+fine without `openai`/`anthropic`/`ollama` installed. The provider raises a
+helpful `ImportError`/`RuntimeError` only when actually called.
+
+### Privacy Guarantees Per Mode
+
+- **`insight_only`** — data DataFrame is never sent; only `summary` and insight
+  cards computed locally. The LLM sees aggregated stats, not rows. **Nothing
+  user-identifiable leaves the machine** beyond aggregate statistics.
+- **`anonymized`** — phone numbers (all Thai formats: `081-234-5678`,
+  `0812345678`, `+668****5678`), ID cards (`X-XXXX-XXXXX-XX-X`), and named
+  entities (PERSON/LOCATION/ORGANIZATION via NER) are replaced with consistent
+  tokens. The `token_map` is returned so users can reverse-lookup tokens to
+  originals locally. Numeric columns are untouched.
+- **`dp_noise`** — Laplace mechanism noise added to numeric stats (mean, min,
+  max, count) and categorical counts. Configurable `epsilon` (smaller = more
+  noise = more privacy). `epsilon=0` raises `ValueError`.
+- **`full`** — raw DataFrame copied and sent in prompt. No privacy guarantee.
+
+### Tests
+
+- 23 new tests in `test_llm.py` covering real-world Thai government dataset,
+  token reversibility, prompt branding, full pipeline mock, dp_noise with fixed
+  seed, and ollama dispatch.
+- Total LLM tests: 59 (36 original + 23 new), all passing.
+- Ruff clean.
+
+---
+
 ## [0.8.0] - 2026-06-25
 
 Headline feature: **clean data + actionable insights** — 12 improvements addressing
