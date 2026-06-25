@@ -192,3 +192,31 @@ Sweetviz สร้าง HTML report ครอบคลุม distributions, mis
 PyThaiNLP `pythainlp.util.normalize()` เป็นฟังก์ชันรวม normalization ภาษาไทย — เรียก `remove_zw()` (ลบ zero-width spaces), `remove_dup_spaces()` (ลบช่องว่างซ้ำ) ภายในฟังก์ชันเดียว มี `tis620_to_utf8()` สำหรับ convert encoding เก่า และ `eng_to_thai()` แก้ keyboard layout พิมพ์ผิด (Kedmanee) รวมถึง `count_thai_chars()` นับ consonants/vowels/tone marks แยก
 - **เหมาะกับ ThaiEDA:** ควร integrate `normalize()` เข้ากับ `clean/` module สำหรับทำ text cleaning ก่อน profiling, และ `tis620_to_utf8()` สำหรับ fix encoding เก่า — เป็น optional dep ที่มีอยู่แล้ว เพิ่ม wrapper ให้ใช้ง่ายใน ThaiEDA context
 - Source: https://pythainlp.org/dev-docs/api/util.html
+
+---
+
+## 2026-06-26 — Research Update
+
+### AERCA — Granger Causal Discovery สำหรับ Root Cause ของ Anomaly (ICLR 2025)
+
+AERCA เป็น encoder-decoder architecture ที่เรียนรู้ Granger causality ระหว่าง multivariate time series พร้อม model distribution ของ exogenous variables ทำให้ไม่เพียงแต่บอกว่าเกิด anomaly ที่ตัวแปรใด แต่ระบุ root cause time series และ root cause time steps ได้ด้วย — ผลลัพธ์ state-of-the-art ทั้ง Granger causal discovery และ root cause identification บนหลาย dataset แนวคิดหลักคือสร้าง structural causal model ก่อนแล้ว highlight ช่วงเวลาที่ intervention เกิด
+- **เหมาะกับ ThaiEDA:** ยังเกินขอบเขต EDA แบบ one-shot ในขณะนี้ ❌ แต่แนวคิด causal discovery เก็บไว้เป็น roadmap ระยะไกลสำหรับ `timeseries/` module — หากเพิ่ม baseline comparison ในอนาคต การบอก "column ไหนเป็นต้นเหตุ" จะมีค่ามาก
+- Source: https://proceedings.iclr.cc/paper_files/paper/2025/file/6fde96479648d71e4fd9724374bf76eb-Paper-Conference.pdf
+
+### Large-Scale Benchmark ของ Data Cleaning Tools (MDPI Data 2025)
+
+งานวิจัยจาก MDPI Data (vol. 10, 2025) เปรียบเทียบ 5 เครื่องมือ data cleaning บน dataset สกปรกขนาดใหญ่ 3 โดเมน (healthcare, finance, industrial telemetry): OpenRefine, Dedupe, Great Expectations, TidyData/PyJanitor และ baseline Pandas pipeline วัด performance + scalability พบว่าแต่ละเครื่องมือมีจุดแข็งต่างกันตาม structure ของ algorithm — Dedupe เก่ง entity resolution, Great Expectations เก่ง validation-driven quarantine ส่วน PyJanitor เป็น lightweight chaining API บน Pandas
+- **เหมาะกับ ThaiEDA:** ควรอ้างอิงเป็น justification สำหรับการเลือก lightweight approach (Pandas + vectorized) แทน dependency หนัก ❌ ไม่ adopt เครื่องมือใดตรง ๆ แต่เอาแนวคิด "expectation + quarantine DF" จาก Great Expectations มาใช้ใน `quality/` — แยก bad rows ไว้ review แทนลบทิ้งเงียบ ๆ
+- Source: https://www.mdpi.com/2306-5729/10/5/68
+
+### Drift Monitoring ยุค LLM — Embedding Drift + Eval-Score Logging (2026)
+
+แนวทางล่าสุดปี 2026 สำหรับ production ML/LLM คือ instrumentation ทุก trace ด้วย embedding + eval-score logging แล้ว alert เมื่อ input drift และ eval drop เกิดพร้อมกัน (joint condition) แยก data drift (P(X)) จาก model drift (P(Y|X)) ชัดเจน — PSI, KS test, embedding cosine เป็น metrics หลัก สำหรับ LLM จะวัด prompt/embedding drift บน trace และ online faithfulness/groundedness
+- **เหมาะกับ ThaiEDA:** ยังนอกขอบเขต EDA one-shot ❌ แต่ถ้าอนาคตเพิ่ม baseline-comparison mode (เปรียบเทียบ 2 dataset) ควรใช้ PSI/KS test แทน correlation แบบเดิม — เป็น upgrade ของ dataset comparison ที่เคยเห็นใน Sweetviz
+- Source: https://futureagi.com/blog/model-vs-data-drift-how-to-identify-and-handle-it
+
+### AI-Powered Anomaly-Guided Data Cleaning (2026)
+
+แนวโน้มปี 2026 คือ AI data cleaning ฝังใน data stack ที่ใช้ anomaly detection ชี้นำการทำความสะอาด — ระบบตรวจจับ pattern ผิดปกติ (format, range, semantic) แล้วแนะนำ fix อัตโนมัติพร้อม explain ว่าทำไม ลด manual rule-based cleansing ที่ตามไม่ทันปริมาณข้อมูล จุดสำคัญคือ automation + governance รวมกัน ไม่ใช่แค่ลบข้อมูล
+- **เหมาะกับ ThaiEDA:** นี่คือทิศทางที่ ThaiEDA ควรไป — เชื่อม `anomaly/` module กับ `clean/` module ให้ผล anomaly detection ชี้นำว่าควร clean อะไรก่อน ✅ เช่น พบ mojibake → แนะนำ `convert_encoding()`, พบ Buddhist era → แนะนำ `convert_buddhist_era()` แล้วรายงานเป็น actionable note ใน `report/`
+- Source: https://www.ovaledge.com/blog/ai-data-cleaning
