@@ -10,7 +10,9 @@ import pytest
 
 from thaieda.anomaly import (
     AnomalyIssue,
+    AnomalySummary,
     detect_anomalies,
+    detect_anomalies_all,
     detect_categorical_anomalies,
     detect_column_anomalies,
     detect_isolation_forest,
@@ -314,3 +316,76 @@ def test_thai_mojibake_integrated_in_text_anomalies():
     issues = detect_text_anomalies(s, tokenizer=None)
     names = {i.check_name for i in issues}
     assert "thai_mojibake" in names
+
+
+# ------------------------------------------------ unified single-column API
+def test_detect_anomalies_series_auto_numeric():
+    s = pd.Series([10, 11, 12, 10, 11, 9, 10, 12, 11, 1000], name="rating")
+    summary = detect_anomalies(s)  # method="auto"
+    assert isinstance(summary, AnomalySummary)
+    assert summary.column == "rating"
+    assert summary.method.startswith("auto")
+    assert summary.total_anomalies >= 1
+    assert summary.anomaly_rate > 0
+    assert summary.issues
+
+
+def test_detect_anomalies_series_explicit_method():
+    # inlier เกาะกลุ่มแน่น + outlier ปานกลาง เพื่อให้ z-score เกิน 3σ (ไม่โดน std ของตัวเองกลบ)
+    s = pd.Series([10] * 20 + [11] * 20 + [13])
+    summary = detect_anomalies(s, method="zscore")
+    assert isinstance(summary, AnomalySummary)
+    assert summary.method == "zscore"
+    assert all(i.check_name == "numeric_outliers_zscore" for i in summary.issues)
+    assert summary.total_anomalies == 1
+
+
+def test_detect_anomalies_series_returns_none_when_clean():
+    s = pd.Series([10, 11, 12, 10, 11, 9, 10, 12, 11, 10])
+    assert detect_anomalies(s, method="iqr") is None
+
+
+def test_detect_anomalies_series_invalid_method_raises():
+    s = pd.Series([1, 2, 3, 4, 5, 6, 7, 8])
+    with pytest.raises(ValueError):
+        detect_anomalies(s, method="bogus")
+
+
+def test_detect_anomalies_series_categorical():
+    s = pd.Series(["A"] * 100 + ["B"] * 100 + ["typo_x"], name="cat")
+    summary = detect_anomalies(s)
+    assert summary is not None
+    assert summary.method == "auto:categorical"
+    assert summary.total_anomalies >= 1
+
+
+def test_detect_anomalies_summary_to_dict():
+    s = pd.Series([1, 1, 1, 1, 1, 1, 1, 1, 1, 999])
+    summary = detect_anomalies(s, method="mad")
+    assert summary is not None
+    d = summary.to_dict()
+    for key in ("column", "method", "total_anomalies", "anomaly_rate", "issues"):
+        assert key in d
+    assert isinstance(d["issues"], list)
+
+
+def test_detect_anomalies_all_returns_dict():
+    df = pd.DataFrame(
+        {
+            "rating": [5, 3, 4, 5, 4, 3, 5, 4, 3, 100],
+            "clean": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        }
+    )
+    result = detect_anomalies_all(df)
+    assert set(result) == {"rating", "clean"}
+    assert isinstance(result["rating"], AnomalySummary)
+    # คอลัมน์ที่ไม่มี outlier -> None
+    assert result["clean"] is None
+
+
+def test_detect_anomalies_dataframe_still_returns_list():
+    # ความเข้ากันได้ย้อนหลัง: ส่ง DataFrame ต้องได้ list[AnomalyIssue] เหมือนเดิม
+    df = pd.DataFrame({"rating": [5, 3, 4, 5, 4, 3, 5, 4, 3, 100], "const": ["x"] * 10})
+    issues = detect_anomalies(df)
+    assert isinstance(issues, list)
+    assert all(isinstance(i, AnomalyIssue) for i in issues)

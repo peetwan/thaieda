@@ -157,6 +157,57 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
     <p class="empty">✓ {{ L('no_anomalies') }}</p>
   {% endif %}
 
+  <!-- ============ TARGET ANALYSIS ============ -->
+  {% if target_section %}
+  <h2>{{ L('target_analysis') }} <span class="ng">({{ L('target_column') }}: {{ target_section.target_column }})</span></h2>
+  {% if target_section.associations %}
+    <table>
+      <tr>
+        <th>{{ L('column') }}</th>
+        <th>{{ L('association') }}</th>
+        <th>{{ L('score') }}</th>
+        <th>{{ L('p_value') }}</th>
+        <th>{{ L('suggestion') }}</th>
+      </tr>
+      {% for a in target_section.associations %}
+      <tr>
+        <td><b>{{ a.column }}</b></td>
+        <td><span class="badge">{{ a.type_label }}</span></td>
+        <td>{{ a.score if a.score is not none else '—' }}</td>
+        <td>{{ a.p_value if a.p_value is not none else '—' }}</td>
+        <td class="ng">{{ a.description_th }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  {% else %}
+    <p class="empty">{{ L('no_target') }}</p>
+  {% endif %}
+  {% endif %}
+
+  <!-- ============ NAMED ENTITIES (NER) ============ -->
+  {% if ner_sections %}
+  <h2>{{ L('named_entities') }}</h2>
+  {% for sec in ner_sections %}
+    <div class="col">
+      <div class="head">
+        <span class="nm">{{ sec.column }}</span>
+        <span class="badge">{{ L('total_entities') }}: {{ "{:,}".format(sec.result.total_entities) }}</span>
+        <span class="badge">{{ L('ner_engine') }}: {{ sec.result.engine_used }}</span>
+      </div>
+      <table>
+        <tr><th>{{ L('entity_type') }}</th><th>{{ L('count') }}</th><th>{{ L('top_entities') }}</th></tr>
+        {% for etype, cnt in sec.result.entity_counts.items() %}
+        <tr>
+          <td><b>{{ etype }}</b></td>
+          <td>{{ "{:,}".format(cnt) }}</td>
+          <td>{% for ent, c in sec.result.top_entities.get(etype, [])[:10] %}<span class="mono">{{ ent }} ({{ c }})</span> {% endfor %}</td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div>
+  {% endfor %}
+  {% endif %}
+
   <!-- ============ CLEANING SUGGESTIONS ============ -->
   <h2>{{ L('cleaning_suggestions') }} <span class="ng">({{ cleaning_suggestions|length }})</span></h2>
   {% if cleaning_suggestions %}
@@ -188,6 +239,11 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
   {% if dist_charts.correlation_heatmap %}
   <div class="imgrow full">
     <div><div class="imgcap">{{ L('correlation_heatmap') }}</div><img src="data:image/png;base64,{{ dist_charts.correlation_heatmap }}" alt="correlation heatmap"></div>
+  </div>
+  {% endif %}
+  {% if dist_charts.scatter_matrix %}
+  <div class="imgrow full">
+    <div><div class="imgcap">{{ L('scatter_matrix') }}</div><img src="data:image/png;base64,{{ dist_charts.scatter_matrix }}" alt="scatter matrix"></div>
   </div>
   {% endif %}
   <div class="imgrow">
@@ -269,6 +325,11 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
       {% if col.dist_chart %}
       <div class="imgrow full">
         <div><div class="imgcap">{{ L('distribution') }}</div><img src="data:image/png;base64,{{ col.dist_chart }}" alt="value distribution"></div>
+      </div>
+      {% endif %}
+      {% if col.valuecounts_chart %}
+      <div class="imgrow full">
+        <div><div class="imgcap">{{ L('value_counts') }}</div><img src="data:image/png;base64,{{ col.valuecounts_chart }}" alt="value counts"></div>
       </div>
       {% endif %}
       {% if col.top_values %}

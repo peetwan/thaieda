@@ -12,12 +12,15 @@ import pandas as pd
 
 from thaieda.detect import ColumnType
 from thaieda.viz import (
+    auto_select_charts,
     auto_visualize,
     create_boxplot,
+    create_category_bar,
     create_correlation_heatmap,
     create_distribution_histogram,
     create_missing_heatmap,
     create_missing_matrix,
+    create_scatter_matrix,
     create_violinplot,
 )
 
@@ -149,3 +152,55 @@ def test_auto_visualize_empty_when_no_charts_possible():
     charts = auto_visualize(df, {"text": ColumnType.CATEGORICAL})
     # ไม่มีตัวเลข ไม่มีค่าว่าง ไม่มีคอลัมน์ข้อความที่เข้าเกณฑ์ -> dict ว่าง
     assert charts == {}
+
+
+# ------------------------------------------------------------- scatter matrix
+def test_create_scatter_matrix_returns_png():
+    _assert_png_base64(create_scatter_matrix(_sample_df()))
+
+
+def test_scatter_matrix_empty_when_too_few_numeric():
+    df = pd.DataFrame({"only": [1.0, 2.0, 3.0], "text": ["ก", "ข", "ค"]})
+    assert create_scatter_matrix(df) == ""
+
+
+# ------------------------------------------------------------- category bar
+def test_create_category_bar_returns_png():
+    s = pd.Series(["แดง", "เขียว", "แดง", "น้ำเงิน", "แดง", "เขียว"])
+    _assert_png_base64(create_category_bar(s, title="color"))
+
+
+def test_category_bar_empty_when_no_values():
+    assert create_category_bar(pd.Series([None, None], dtype="object")) == ""
+
+
+# ------------------------------------------------------------- auto_select_charts
+def test_auto_select_charts_picks_by_type():
+    charts = auto_select_charts(_sample_df())
+    # ตัวเลข >1 คอลัมน์ -> heatmap + scatter matrix; การแจกแจง -> box/violin/hist
+    for key in ("correlation_heatmap", "scatter_matrix", "boxplot", "violinplot"):
+        assert key in charts
+        _assert_png_base64(charts[key])
+    assert "distribution::price" in charts
+    # ค่าว่าง 2 คอลัมน์ -> missing matrix + heatmap
+    assert "missing_matrix" in charts
+    assert "missing_heatmap" in charts
+    # คอลัมน์ข้อความถูกตรวจหาเองและสร้างฮิสโทแกรมความยาว
+    assert "length_hist::review" in charts
+    for img in charts.values():
+        _assert_png_base64(img)
+
+
+def test_auto_select_charts_categorical_value_counts():
+    df = pd.DataFrame({"grade": ["A", "B", "A", "C", "B", "A", "C", "B"]})
+    charts = auto_select_charts(df, text_columns=[])
+    assert "valuecounts::grade" in charts
+    _assert_png_base64(charts["valuecounts::grade"])
+
+
+def test_auto_select_charts_no_numeric_no_scatter():
+    df = pd.DataFrame({"only": [1.0, 2.0, 3.0, 4.0]})
+    charts = auto_select_charts(df, text_columns=[])
+    # ตัวเลขคอลัมน์เดียว -> ไม่มี scatter matrix / correlation
+    assert "scatter_matrix" not in charts
+    assert "correlation_heatmap" not in charts
