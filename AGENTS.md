@@ -3,14 +3,17 @@
 ## Project
 ThaiEDA คือ open-source AutoEDA library สำหรับข้อมูลภาษาไทย
 - Repo: https://github.com/peetwan/thaieda
+- PyPI: https://pypi.org/project/thaieda/
 - License: Apache-2.0
 - Python 3.10+, pandas + matplotlib + Jinja2 + pythainlp (optional)
-- Current version: v0.8 (commit 3351e9c)
-- Tests: 356 passed, 1 skipped, ruff clean
+- Current version: v1.0.0 (commit bc8c8d4)
+- Tests: 424 passed, 24 skipped, ruff clean
+- Install: `pip install thaieda` or `pip install "thaieda[all]"`
 
 ## Structure
 ```
 src/thaieda/
+  __init__.py     run(df) / EDA(df) one-liner API + EDAResult dataclass (v1.0)
   detect/         column type detection + Thai month name detection (v0.8)
   tokenize/       tokenizer adapter (pythainlp/nlpo3/attacut)
   text/           text metrics
@@ -26,10 +29,33 @@ src/thaieda/
   viz/            visualization + Thai font + insight charts (v0.7)
   report/         HTML report (Jinja2) + DatasetReport (v0.5)
   i18n/           TH/EN labels
-  llm/            placeholder (v0.9+)
-tests/            pytest (356 tests)
+  llm/            privacy-preserving LLM analysis — 4 modes (insight_only, anonymized, dp_noise, full),
+                  3 providers (OpenAI/Anthropic/Ollama), lazy import (v0.9)
+tests/            pytest (424 tests, 24 skipped)
 research/         research notes (cron-generated, NOT source code)
 ```
+
+## One-Liner API (v1.0)
+- `run(df)` / `EDA(df)` — one-line EDA: detect → clean → quality → insights → viz → report → optional LLM
+- Returns `EDAResult` dataclass with `.to_html()`, `.to_dict()`, `.to_json()`, `.llm_response`, `.insights`, `.notes`
+
+## v1.0 additions
+- `__init__.py`: `run(df)` / `EDA(df)` one-liner API + `EDAResult` dataclass (to_html, to_dict, to_json, llm_response, notes)
+- `pyproject.toml`: `[all]` meta-extra for single-command install of all optional deps
+- Published to PyPI: https://pypi.org/project/thaieda/1.0.0/
+- 32 new tests in `test_oneliner.py`
+- Fixed: `test_comparison_significant` scipy dependency
+- Fixed: ruff E501 line-length violation
+
+## v0.9 additions
+- `llm/`: privacy-preserving LLM analysis — 4 modes (insight_only, anonymized, dp_noise, full),
+  3 providers (OpenAI/Anthropic/Ollama), lazy import
+- `llm/__init__.py`: `analyze_with_llm(df, privacy, provider, model, language)` public API
+- `llm/_prepare.py`: `prepare_for_llm()` — prepares data per privacy mode
+- `llm/_anonymize.py`: `anonymize_dataframe()` — PII detection (phone, ID card, NER)
+- `llm/_prompt.py`: `build_prompt()` — Thai/English prompt builder
+- `llm/_provider.py`: `call_llm()` — lazy import OpenAI/Anthropic/Ollama
+- 59 tests in `test_llm.py`
 
 ## v0.8 additions
 - clean/: coerce_numeric_column, convert_buddhist_era, normalize_dates, remove_duplicate_rows, handle_missing_values

@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-06-25
+
+**First stable release — one-liner API + PyPI publish.**
+
+Published to PyPI: https://pypi.org/project/thaieda/1.0.0/
+
+### Added — One-Liner API
+
+- **`thaieda.run(df)`** / **`thaieda.EDA(df)`** — one-line EDA: detect → clean → quality →
+  insights → viz → report → optional LLM. Returns an `EDAResult` dataclass.
+- **`EDAResult` dataclass** — structured result with:
+  - `.to_html(path)` — write a self-contained HTML report
+  - `.to_dict()` — full result as a Python dict
+  - `.to_json()` — full result as a JSON string
+  - `.llm_response` — LLM analysis output (if enabled)
+  - `.insights` — cross-column insight cards
+  - `.notes` — pipeline notes and warnings
+
+### Added — PyPI Publish
+
+- **`pip install thaieda`** — now available on PyPI (basic install)
+- **`pip install "thaieda[all]"`** — meta-extra that installs all optional dependencies
+  (Thai tokenizer + NER + ML + timeseries + Excel + stats + LLM deps) in one command
+
+### Added — Tests
+
+- 32 new tests in `test_oneliner.py` covering the one-liner API (`run` / `EDA`),
+  `EDAResult` methods, and end-to-end pipeline behavior.
+
+### Fixed
+
+- **`test_comparison_significant`** — fixed scipy dependency issue in statistical
+  comparison test.
+- **Ruff `E501` line-length violation** — line-length violation resolved, ruff clean.
+
+### Tests
+
+- Total: **424 passed, 24 skipped, 0 failures**, ruff clean.
+
+---
+
 ## [0.9.0] - 2026-06-25
 
 Headline feature: **privacy-preserving LLM analysis** — feed your EDA results to

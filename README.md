@@ -2,17 +2,34 @@
 
 **AutoEDA for Thai-language data — exploratory data analysis that understands Thai.**
 
+[![PyPI](https://img.shields.io/pypi/v/thaieda.svg)](https://pypi.org/project/thaieda/)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-yellow.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Tests: 392 passed](https://img.shields.io/badge/tests-392%20passed-brightgreen.svg)]()
+[![Tests: 424 passed](https://img.shields.io/badge/tests-424%20passed-brightgreen.svg)]()
 [![Code Style: ruff](https://img.shields.io/badge/code%20style-ruff-261230.svg)](https://docs.astral.sh/ruff/)
+
+---
+
+## One-Liner EDA (v1.0)
+
+```python
+import thaieda
+
+result = thaieda.run(df)          # detect → clean → quality → insights → viz → report
+result.to_html("report.html")     # self-contained HTML report
+print(result.insights)            # cross-column insight cards
+print(result.llm_response)        # optional LLM analysis (if enabled)
+```
+
+**Install from PyPI:** `pip install thaieda`
 
 ---
 
 ## Quick Start
 
 ```bash
-pip install "thaieda[thai]"
+pip install thaieda            # basic install
+pip install "thaieda[all]"     # everything (Thai tokenizer + NER + ML + timeseries + Excel + stats + LLM deps)
 ```
 
 ```python
@@ -36,6 +53,7 @@ print(answer)
 - **Thai-specific** — catches Buddhist Era dates, Thai numerals, zero-width spaces, mojibake, and Thai month names that generic tools miss.
 - **Privacy-first** — LLM analysis with 4 privacy modes; the default sends zero raw data off your machine.
 - **Auto insights** — a cross-column insight engine surfaces non-obvious findings, ranked by statistical interestingness (BH-corrected).
+- **One-liner API** — `thaieda.run(df)` does detect → clean → quality → insights → viz → report → optional LLM in one call.
 - **No lock-in** — generates a self-contained HTML report; works as a library or CLI; all LLM providers are optional and lazy-imported.
 
 ---
@@ -44,6 +62,7 @@ print(answer)
 
 | Version | Feature | Description |
 |---------|---------|-------------|
+| **v1.0** | One-liner API + PyPI publish | `thaieda.run(df)` / `thaieda.EDA(df)`, `pip install thaieda[all]`, EDAResult dataclass |
 | **v0.9** | Privacy-preserving LLM analysis | 4 privacy modes + 3 LLM providers (OpenAI / Anthropic / Ollama) |
 | **v0.8** | Data cleaning + actionable insights | Thai numeral→numeric, BE→CE, date standardization, correlation/outlier patterns, Excel support |
 | **v0.7** | Insight visualization | Auto-generated charts for each cross-column finding (bar, donut, box plot, trend line) |
@@ -70,6 +89,29 @@ Control exactly what data leaves your machine when calling `analyze_with_llm()`:
 ---
 
 ## Examples
+
+### One-Liner EDA (v1.0)
+
+```python
+import thaieda
+import pandas as pd
+
+df = pd.read_csv("data.csv")
+
+# One call: detect → clean → quality → insights → viz → report
+result = thaieda.run(df)
+
+# EDAResult dataclass — access everything
+result.to_html("report.html")          # self-contained HTML report
+result.to_dict()                       # full result as dict
+result.to_json()                        # full result as JSON
+print(result.insights)                 # cross-column insight cards
+print(result.llm_response)             # LLM analysis (if enabled)
+print(result.notes)                     # pipeline notes/warnings
+
+# Alias — same thing
+result = thaieda.EDA(df)
+```
 
 ### Basic EDA
 
@@ -124,6 +166,7 @@ answer = analyze_with_llm(df, privacy="full", provider="ollama", language="en")
 
 ```
 src/thaieda/
+  __init__.py     # run(df) / EDA(df) one-liner API + EDAResult (v1.0)
   io/             # Auto-read CSV/JSON/JSONL/Excel + encoding detection
   detect/         # Column type detection + Thai month name detection
   tokenize/       # Tokenizer adapter: pythainlp / nlpo3 / attacut
@@ -147,20 +190,23 @@ src/thaieda/
 
 ## Installation
 
+**Install from PyPI:** `pip install thaieda`
+
 ```bash
 # Core library (no Thai tokenizer)
 pip install thaieda
 
-# Recommended — with Thai tokenizer
-pip install "thaieda[thai]"
+# Everything — single command (v1.0)
+pip install "thaieda[all]"
 
-# Optional extras (all lazy-imported)
-pip install "thaieda[ner]"          # pythainlp NER
-pip install "thaieda[ml]"           # Isolation Forest / LOF anomaly detection
-pip install "thaieda[timeseries]"   # STL decomposition (statsmodels)
-pip install "thaieda[excel]"        # Excel support (openpyxl)
-pip install "thaieda[stats]"        # p-values (scipy)
-pip install "thaieda[detect]"       # auto encoding detection (chardet)
+# Individual extras (all lazy-imported)
+pip install "thaieda[thai]"          # Thai tokenizer (pythainlp)
+pip install "thaieda[ner]"           # pythainlp NER
+pip install "thaieda[ml]"            # Isolation Forest / LOF anomaly detection
+pip install "thaieda[timeseries]"     # STL decomposition (statsmodels)
+pip install "thaieda[excel]"         # Excel support (openpyxl)
+pip install "thaieda[stats]"         # p-values (scipy)
+pip install "thaieda[detect]"        # auto encoding detection (chardet)
 
 # LLM providers (v0.9 — all optional)
 pip install openai                 # OpenAI GPT
@@ -177,6 +223,9 @@ pip install ollama                 # Ollama local server (or use built-in HTTP f
 ```bash
 # Run all tests
 pytest tests/ -v
+
+# Run only one-liner API tests (v1.0)
+pytest tests/test_oneliner.py -v
 
 # Run only LLM module tests (v0.9)
 pytest tests/test_llm.py -v
