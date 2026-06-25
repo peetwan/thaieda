@@ -1,6 +1,6 @@
 # ThaiEDA
 
-**AutoEDA for Thai-language data — exploratory data analysis that understands Thai.**
+**Exploratory data analysis that actually understands Thai.**
 
 [![PyPI](https://img.shields.io/pypi/v/thaieda.svg)](https://pypi.org/project/thaieda/)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
@@ -10,87 +10,86 @@
 
 ---
 
-## One-Liner EDA (v1.0)
+## What is ThaiEDA?
 
-```python
-import thaieda
+ThaiEDA is a Python library that automates exploratory data analysis for Thai-language datasets. You give it a DataFrame, it gives you back a full report — column types, quality issues, anomalies, cross-column insights, charts, and an HTML report. All in one line.
 
-result = thaieda.run(df)          # detect → clean → quality → insights → viz → report
-result.to_html("report.html")     # self-contained HTML report
-print(result.insights)            # cross-column insight cards
-print(result.llm_response)        # optional LLM analysis (if enabled)
-```
-
-**Install from PyPI:** `pip install thaieda`
+It handles the things generic EDA tools miss: Buddhist Era dates, Thai numerals, zero-width spaces, mojibake encoding, Thai month names, and PII like phone numbers and national ID cards.
 
 ---
 
 ## Quick Start
 
 ```bash
-pip install thaieda            # basic install
-pip install "thaieda[all]"     # everything (Thai tokenizer + NER + ML + timeseries + Excel + stats + LLM deps)
+pip install thaieda
 ```
 
 ```python
+import thaieda
 import pandas as pd
-from thaieda import profile
-from thaieda.llm import analyze_with_llm
 
 df = pd.read_csv("data.csv")
-report = profile(df, clean=True)
-report.to_html("report.html")
+result = thaieda.run(df)          # that's it — full EDA in one line
+result.to_html("report.html")     # self-contained HTML report
+```
 
-# Ask an LLM about the data — privacy-safe by default
-answer = analyze_with_llm(df, privacy="insight_only", provider="ollama")
-print(answer)
+Want everything (Thai tokenizer, NER, ML, Excel, stats, LLM)?
+
+```bash
+pip install "thaieda[all]"
 ```
 
 ---
 
 ## Why ThaiEDA?
 
-- **Thai-specific** — catches Buddhist Era dates, Thai numerals, zero-width spaces, mojibake, and Thai month names that generic tools miss.
-- **Privacy-first** — LLM analysis with 4 privacy modes; the default sends zero raw data off your machine.
-- **Auto insights** — a cross-column insight engine surfaces non-obvious findings, ranked by statistical interestingness (BH-corrected).
-- **One-liner API** — `thaieda.run(df)` does detect → clean → quality → insights → viz → report → optional LLM in one call.
-- **No lock-in** — generates a self-contained HTML report; works as a library or CLI; all LLM providers are optional and lazy-imported.
+**Generic tools don't understand Thai data.** Pandas Profiling, ydata-profiling, and Sweetviz are great — until you feed them Thai data. They miss Buddhist Era years (พ.ศ.), Thai numerals (๑๒๓), zero-width spaces that break tokenization, and mojibake from TIS-620 encoding. ThaiEDA catches all of these.
+
+**Privacy-first LLM analysis.** Want to ask an LLM about your data but can't send raw rows to a cloud API? ThaiEDA has 4 privacy modes — the default sends zero raw data off your machine. Just stats and insights. Perfect for government, finance, and medical data under PDPA.
+
+**Insights, not just summaries.** Most EDA tools show you `df.describe()` with nicer formatting. ThaiEDA has a cross-column insight engine that finds non-obvious patterns — "column A strongly predicts column B", "this group is 3× higher than average", "this column has outliers at row 47" — ranked by statistical interestingness with Benjamini-Hochberg correction.
+
+**One line to get everything.** `thaieda.run(df)` chains the full pipeline: type detection → data cleaning → quality checks → anomaly detection → insight discovery → visualization → HTML report. No config needed.
 
 ---
 
-## Features by Version
+## How It Works
 
-| Version | Feature | Description |
-|---------|---------|-------------|
-| **v1.0** | One-liner API + PyPI publish | `thaieda.run(df)` / `thaieda.EDA(df)`, `pip install thaieda[all]`, EDAResult dataclass |
-| **v0.9** | Privacy-preserving LLM analysis | 4 privacy modes + 3 LLM providers (OpenAI / Anthropic / Ollama) |
-| **v0.8** | Data cleaning + actionable insights | Thai numeral→numeric, BE→CE, date standardization, correlation/outlier patterns, Excel support |
-| **v0.7** | Insight visualization | Auto-generated charts for each cross-column finding (bar, donut, box plot, trend line) |
-| **v0.6** | Cross-column insight engine | 6 patterns: outstanding / attribution / comparison / trend / correlation / outlier (BH-corrected) |
-| **v0.5** | Multi-file schema discovery | PK/FK matching, ER diagram, relationship validation, orphan detection |
-| **v0.4** | Timeseries analysis | Trend/seasonality/STL/ACF/gaps + distribution & correlation insights |
-| **v0.3** | Single-command pipeline | JSON input, auto encoding detection, auto insights, cleaning diff |
-| **v0.2** | Thai NER + target analysis | pythainlp normalize, auto chart selection, unified anomaly API |
-| **v0.1** | Thai text profiling | Column type detection, quality checks, HTML report, CLI |
-
----
-
-## Privacy Modes (v0.9)
-
-Control exactly what data leaves your machine when calling `analyze_with_llm()`:
-
-| Mode | What Leaves Machine | Privacy Guarantee | Use Case |
-|------|---------------------|-------------------|----------|
-| `insight_only` (default) | Summary statistics + insight cards only | Raw data never leaves | Regulated / PDPA data, cautious users |
-| `anonymized` | Data with PII replaced by tokens (`[PHONE_1]`, `[NAME_1]`) | Names/phones/ID cards masked; `token_map` returned for local reversal | LLM needs to see structure without raw PII |
-| `dp_noise` | Statistics with Laplace noise (configurable ε) | DP noise prevents re-identification from small stats | Small datasets where stats alone may leak identity |
-| `full` | All raw data sent | None — user accepts tradeoff | Public data, dev/demo workflows |
+```
+DataFrame
+    │
+    ▼
+┌─────────────────────────────────────────┐
+│  thaieda.run(df)                        │
+│                                         │
+│  1. detect    → column types             │
+│  2. clean     → fix encoding/numerals/BE │
+│  3. quality   → nulls, placeholders, BE │
+│  4. anomaly   → statistical + text      │
+│  5. insights  → 6 cross-column patterns │
+│  6. viz       → auto charts (Thai font) │
+│  7. report    → self-contained HTML     │
+│                                         │
+│  + optional: LLM analysis (4 modes)     │
+└─────────────────────────────────────────┘
+    │
+    ▼
+EDAResult
+  .to_html()      → report.html
+  .to_dict()      → Python dict
+  .to_json()      → JSON string
+  .insights       → insight cards
+  .cleaned_df     → cleaned DataFrame
+  .quality_issues → list of issues
+  .anomalies      → anomaly findings
+  .llm_response   → LLM analysis (if enabled)
+```
 
 ---
 
 ## Examples
 
-### One-Liner EDA (v1.0)
+### One-Line EDA
 
 ```python
 import thaieda
@@ -98,141 +97,141 @@ import pandas as pd
 
 df = pd.read_csv("data.csv")
 
-# One call: detect → clean → quality → insights → viz → report
+# Full pipeline: detect → clean → quality → insights → viz → report
 result = thaieda.run(df)
 
-# EDAResult dataclass — access everything
-result.to_html("report.html")          # self-contained HTML report
-result.to_dict()                       # full result as dict
-result.to_json()                        # full result as JSON
-print(result.insights)                 # cross-column insight cards
-print(result.llm_response)             # LLM analysis (if enabled)
-print(result.notes)                     # pipeline notes/warnings
+# Access results
+result.to_html("report.html")
+print(result.insights)           # cross-column insight cards
+print(result.quality_issues)     # data quality findings
+print(result.notes)              # pipeline notes/warnings
 
-# Alias — same thing
+# Alias works too
 result = thaieda.EDA(df)
 ```
 
-### Basic EDA
+### With LLM Analysis (Privacy-Safe)
 
 ```python
-import pandas as pd
-from thaieda import profile, read_data
+import thaieda
 
-# Auto-reads CSV/JSON/JSONL/Excel with auto encoding detection
-df = read_data("data.xlsx")
+# Default: zero raw data leaves your machine
+result = thaieda.run(df, llm=True, privacy="insight_only", provider="ollama")
+print(result.llm_response)
 
-# Profile + clean + auto insights in one call
-report = profile(df, clean=True)
-report.to_html("report.html")
-
-# Get Thai-language executive summary
-print(report.insights.executive_summary_th)
+# Or use OpenAI/Anthropic — still safe with insight_only
+result = thaieda.run(df, llm=True, privacy="insight_only", provider="openai")
 ```
 
-### Insight Discovery
+### Privacy Modes
 
-```python
-from thaieda import discover_insights
-from thaieda.detect import detect_all
+Control exactly what data leaves your machine:
 
-result = discover_insights(df, detect_all(df), top_n=8)
-for card in result.cards:
-    print(f"[{card.pattern}] score={card.score:.2f}  {card.description_th}")
-    print(f"  → {card.recommendation_th}")
-```
-
-### LLM Analysis — All 4 Privacy Modes
+| Mode | What Leaves | Guarantee | When to Use |
+|------|------------|-----------|-------------|
+| `insight_only` (default) | Stats + insights only | Raw data never leaves | Government, medical, PDPA data |
+| `anonymized` | Data with PII → tokens | Names/phones/ID cards masked | Need structure without raw PII |
+| `dp_noise` | Stats + Laplace noise | Prevents re-identification | Small datasets where stats leak |
+| `full` | Everything | None — you accept the risk | Public data, demos |
 
 ```python
 from thaieda.llm import analyze_with_llm
 
-# Mode 1: safest — only stats leave, no raw data (default)
+# Each mode as a standalone call
 answer = analyze_with_llm(df, privacy="insight_only", provider="ollama")
-
-# Mode 2: anonymized — PII replaced with tokens before sending
-answer = analyze_with_llm(df, privacy="anonymized", provider="openai", model="gpt-4o-mini")
-
-# Mode 3: differential privacy — Laplace noise on stats
+answer = analyze_with_llm(df, privacy="anonymized", provider="openai")
 answer = analyze_with_llm(df, privacy="dp_noise", provider="anthropic", epsilon=0.5)
+```
 
-# Mode 4: full raw data (user accepts risk)
-answer = analyze_with_llm(df, privacy="full", provider="ollama", language="en")
+### Manual Pipeline (Full Control)
+
+```python
+from thaieda import profile, discover_insights
+from thaieda.detect import detect_all
+
+# Step-by-step if you want control
+report = profile(df, clean=True)
+report.to_html("report.html")
+
+result = discover_insights(df, detect_all(df), top_n=8)
+for card in result.cards:
+    print(f"[{card.pattern}] {card.description_th}")
+    print(f"  → {card.recommendation_th}")
 ```
 
 ---
 
-## Architecture
+## What ThaiEDA Catches
 
-```
-src/thaieda/
-  __init__.py     # run(df) / EDA(df) one-liner API + EDAResult (v1.0)
-  io/             # Auto-read CSV/JSON/JSONL/Excel + encoding detection
-  detect/         # Column type detection + Thai month name detection
-  tokenize/       # Tokenizer adapter: pythainlp / nlpo3 / attacut
-  text/           # Text metrics: length, frequency, n-grams, TF-IDF
-  quality/        # Thai quality checks + placeholder/constant detection
-  anomaly/        # Anomaly detection: statistical + ML + text + unified API
-  clean/          # Data cleaning: encoding, zwspace, numerals, BE→CE, dates, duplicates, missing
-  ner/            # Thai NER: person/place/organization extraction
-  analysis/       # Target variable analysis: Pearson/ANOVA/Chi-square
-  insight/        # Auto insight summary in Thai (interpreter)
-  insight_engine/ # Cross-column insight discovery: 6 patterns + BH correction
-  timeseries/     # Timeseries analysis: trend/seasonality/STL/ACF/gaps
-  schema/         # Multi-file schema discovery: PK/FK detection + relationship matching
-  viz/            # Visualization + auto chart + Thai font + insight charts
-  report/         # HTML report generation (Jinja2) + DatasetReport
-  i18n/           # Bilingual labels (Thai/English)
-  llm/            # Privacy-preserving LLM analysis (4 modes, 3 providers) — v0.9
-```
+| Problem | Example | What Happens |
+|---------|---------|-------------|
+| Buddhist Era dates | `15/03/2567` | Auto-detects พ.ศ. → converts to CE |
+| Thai numerals | `๑๒๓` in numeric column | Converts to `123` |
+| Zero-width spaces | `สม\u200bชาย` | Strips invisible chars |
+| Mojibake encoding | `Ã ¬Â¸Â¡Â¹` | Auto-detects TIS-620 → UTF-8 |
+| Thai month names | `มกราคม` | Parses to ISO date |
+| Phone numbers | `081-234-5678` | Detects + normalizes |
+| National ID cards | `1-1234-56789-01-2` | Detects via regex |
+| Placeholder values | `-`, `N/A`, `ไม่มี` | Flags as missing |
+| Constant columns | All same value | Flags as useless |
 
 ---
 
 ## Installation
 
-**Install from PyPI:** `pip install thaieda`
-
 ```bash
-# Core library (no Thai tokenizer)
+# Basic — works immediately
 pip install thaieda
 
-# Everything — single command (v1.0)
+# Everything in one command
 pip install "thaieda[all]"
 
-# Individual extras (all lazy-imported)
-pip install "thaieda[thai]"          # Thai tokenizer (pythainlp)
-pip install "thaieda[ner]"           # pythainlp NER
-pip install "thaieda[ml]"            # Isolation Forest / LOF anomaly detection
-pip install "thaieda[timeseries]"     # STL decomposition (statsmodels)
-pip install "thaieda[excel]"         # Excel support (openpyxl)
-pip install "thaieda[stats]"         # p-values (scipy)
-pip install "thaieda[detect]"        # auto encoding detection (chardet)
+# Or pick what you need
+pip install "thaieda[thai]"        # Thai tokenizer
+pip install "thaieda[ner]"         # Thai NER
+pip install "thaieda[ml]"          # ML anomaly detection
+pip install "thaieda[timeseries]"  # STL decomposition
+pip install "thaieda[excel]"       # Excel support
+pip install "thaieda[stats]"       # p-values (scipy)
 
-# LLM providers (v0.9 — all optional)
+# LLM providers (all optional, lazy-imported)
 pip install openai                 # OpenAI GPT
 pip install anthropic              # Anthropic Claude
-pip install ollama                 # Ollama local server (or use built-in HTTP fallback)
+pip install ollama                 # Ollama local LLM
 ```
 
 **Requirements:** Python 3.10+, pandas, numpy, matplotlib, Jinja2
 
 ---
 
+## Modules
+
+| Module | What It Does |
+|--------|-------------|
+| `run()` / `EDA()` | One-liner API — full pipeline in one call |
+| `io/` | Auto-read CSV/JSON/JSONL/Excel + encoding detection |
+| `detect/` | Column type detection + Thai month names |
+| `clean/` | Encoding fix, numerals, BE→CE, dates, duplicates, missing |
+| `quality/` | Thai quality checks + placeholder/constant detection |
+| `anomaly/` | Statistical + ML + text anomaly detection |
+| `ner/` | Thai NER: person/place/organization |
+| `insight_engine/` | 6 cross-column insight patterns (BH-corrected) |
+| `viz/` | Auto charts with Thai font support |
+| `report/` | Self-contained HTML report (Jinja2) |
+| `llm/` | Privacy-preserving LLM analysis (4 modes, 3 providers) |
+| `schema/` | Multi-file PK/FK discovery + relationship matching |
+| `timeseries/` | Trend/seasonality/STL/ACF/gap detection |
+
+---
+
 ## Testing
 
 ```bash
-# Run all tests
-pytest tests/ -v
-
-# Run only one-liner API tests (v1.0)
-pytest tests/test_oneliner.py -v
-
-# Run only LLM module tests (v0.9)
-pytest tests/test_llm.py -v
-
-# Lint
-ruff check src/ tests/
-ruff format src/ tests/
+pytest tests/ -v              # all tests (424 passed)
+pytest tests/test_oneliner.py # one-liner API tests
+pytest tests/test_llm.py      # LLM + privacy mode tests
+ruff check src/ tests/        # lint
+ruff format src/ tests/       # format
 ```
 
 ---
