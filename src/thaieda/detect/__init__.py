@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from enum import Enum
+from typing import Any
 
 import pandas as pd
 
@@ -121,6 +122,358 @@ def is_thai_text(series: pd.Series, threshold: float = 0.15) -> bool:
     sample = non_null.head(1000)
     thai_cells = sum(1 for v in sample if _thai_content_ratio(str(v)) > 0.30)
     return (thai_cells / len(sample)) > threshold
+
+
+_LANGUAGE_SAMPLE_ROWS = 500
+_ZERO_WIDTH_RE = re.compile(r"[\u200b\u200c\u200d\ufeff\u2060]")
+_THAI_BLOCK_RE = re.compile(r"[\u0e00-\u0e7f]+")
+_LATIN_WORD_RE = re.compile(r"[A-Za-z]+")
+_CODE_LIKE_RE = re.compile(r"^[A-Za-z0-9_.:/#\-]+$")
+_COMMON_THAI_WORDS = frozenset({"ครับ", "ค่ะ", "ไทย", "อร่อย", "ดี", "ไม่", "มี", "และ"})
+
+_WORD_TOKENIZER: Any | None = None
+_WORD_TOKENIZER_LOADED = False
+
+
+def _is_thai_text_char(ch: str) -> bool:
+    """True ถ้าเป็นตัวอักษร/สระ/วรรณยุกต์ไทย ไม่รวมเลขไทยและ punctuation ล้วน."""
+    cp = ord(ch)
+    return (
+        0x0E01 <= cp <= 0x0E2E  # consonants
+        or 0x0E30 <= cp <= 0x0E4D  # vowels + tone marks + leading vowels
+        or cp in {0x0E45, 0x0E46}  # ๅ, ๆ
+    )
+
+
+def _is_thai_vowel_or_tone(ch: str) -> bool:
+    """True ถ้าอยู่ในช่วง U+0E30-U+0E4D ตาม Thai vowel/tone marks."""
+    return 0x0E30 <= ord(ch) <= 0x0E4D
+
+
+def _get_thai_word_tokenizer() -> Any | None:
+    """Lazy import pythainlp tokenizer; ถ้าไม่มี/โหลดไม่ได้ให้ fallback เป็น regex."""
+    global _WORD_TOKENIZER, _WORD_TOKENIZER_LOADED
+    if not _WORD_TOKENIZER_LOADED:
+        try:
+            from pythainlp.tokenize import word_tokenize
+        except Exception:
+            _WORD_TOKENIZER = None
+        else:
+            _WORD_TOKENIZER = word_tokenize
+        _WORD_TOKENIZER_LOADED = True
+    return _WORD_TOKENIZER
+
+
+def _thai_word_tokens(text: str) -> list[str]:
+    """ตัดคำไทยแบบ optional: ใช้ pythainlp ถ้าพร้อม ไม่พร้อมใช้ Unicode block fallback."""
+    tokenizer = _get_thai_word_tokenizer()
+    if tokenizer is not None:
+        try:
+            tokens = tokenizer(text, keep_whitespace=False)
+        except Exception:
+            tokens = []
+        else:
+            thai_tokens = [t for t in tokens if any(_is_thai_text_char(ch) for ch in t)]
+            if thai_tokens:
+                return thai_tokens
+    return _THAI_BLOCK_RE.findall(text)
+
+
+def _empty_language_stats() -> dict[str, Any]:
+    """โครง stats กลางสำหรับรวม evidence ระดับ cell/column/dataset."""
+    return {
+        "sample_size": 0,
+        "non_empty": 0,
+        "thai_chars": 0,
+        "latin_chars": 0,
+        "thai_digits": 0,
+        "digits": 0,
+        "char_count": 0,
+        "thai_vowel_tone_chars": 0,
+        "thai_punctuation_chars": 0,
+        "zero_width_chars": 0,
+        "thai_word_tokens": 0,
+        "english_word_tokens": 0,
+        "common_thai_word_hits": 0,
+        "thai_cells": 0,
+        "english_cells": 0,
+        "mixed_cells": 0,
+        "text_cells": 0,
+        "code_like_cells": 0,
+        "examples": [],
+    }
+
+
+def _merge_language_stats(total: dict[str, Any], part: dict[str, Any]) -> None:
+    """รวม stats แบบ in-place โดยเว้น examples ไว้จำกัดจำนวน."""
+    for key, value in part.items():
+        if key == "examples":
+            continue
+        if isinstance(value, int):
+            total[key] = int(total.get(key, 0)) + value
+    examples = total.setdefault("examples", [])
+    for example in part.get("examples", []):
+        if len(examples) >= 3:
+            break
+        examples.append(example)
+
+
+def _analyze_language_text(value: str) -> dict[str, Any]:
+    """วิเคราะห์หนึ่ง cell ด้วย Unicode block + token/common-word heuristics."""
+    stats = _empty_language_stats()
+    text = str(value)
+    stats["sample_size"] = 1
+    stats["zero_width_chars"] = len(_ZERO_WIDTH_RE.findall(text))
+    cleaned = _ZERO_WIDTH_RE.sub("", text).strip()
+    if not cleaned:
+        return stats
+
+    stats["non_empty"] = 1
+    stats["char_count"] = len(cleaned)
+    for ch in cleaned:
+        cp = ord(ch)
+        if _THAI_DIGIT_RANGE[0] <= cp <= _THAI_DIGIT_RANGE[1]:
+            stats["thai_digits"] += 1
+        elif _is_thai_text_char(ch):
+            stats["thai_chars"] += 1
+            if _is_thai_vowel_or_tone(ch):
+                stats["thai_vowel_tone_chars"] += 1
+        elif _THAI_RANGE[0] <= cp <= _THAI_RANGE[1]:
+            stats["thai_punctuation_chars"] += 1
+        elif ("a" <= ch <= "z") or ("A" <= ch <= "Z"):
+            stats["latin_chars"] += 1
+        elif "0" <= ch <= "9":
+            stats["digits"] += 1
+
+    has_thai = stats["thai_chars"] > 0
+    has_english = stats["latin_chars"] > 0
+    stats["common_thai_word_hits"] = sum(cleaned.count(w) for w in _COMMON_THAI_WORDS)
+    stats["thai_word_tokens"] = len(_thai_word_tokens(cleaned)) if has_thai else 0
+    stats["english_word_tokens"] = len(_LATIN_WORD_RE.findall(cleaned))
+
+    if has_thai:
+        stats["thai_cells"] = 1
+    if has_english:
+        stats["english_cells"] = 1
+    if has_thai and has_english:
+        stats["mixed_cells"] = 1
+    if has_thai or has_english:
+        stats["text_cells"] = 1
+        stats["examples"] = [cleaned[:40]]
+
+    if _CODE_LIKE_RE.fullmatch(cleaned) and any(ch.isdigit() for ch in cleaned):
+        stats["code_like_cells"] = 1
+    return stats
+
+
+def _ratio(numerator: int | float, denominator: int | float) -> float:
+    """Safe division for language heuristics."""
+    return float(numerator) / float(denominator) if denominator else 0.0
+
+
+def _classify_language_stats(stats: dict[str, Any]) -> tuple[str, float, dict[str, float]]:
+    """จำแนกภาษาและ confidence จาก stats ที่รวมแล้ว."""
+    non_empty = int(stats.get("non_empty", 0))
+    thai_chars = int(stats.get("thai_chars", 0))
+    latin_chars = int(stats.get("latin_chars", 0))
+    text_chars = thai_chars + latin_chars
+    thai_tokens = int(stats.get("thai_word_tokens", 0))
+    english_tokens = int(stats.get("english_word_tokens", 0))
+    word_tokens = thai_tokens + english_tokens
+
+    ratios = {
+        "thai_ratio": _ratio(thai_chars, text_chars),
+        "english_ratio": _ratio(latin_chars, text_chars),
+        "thai_cell_ratio": _ratio(int(stats.get("thai_cells", 0)), non_empty),
+        "english_cell_ratio": _ratio(int(stats.get("english_cells", 0)), non_empty),
+        "mixed_cell_ratio": _ratio(int(stats.get("mixed_cells", 0)), non_empty),
+        "thai_word_ratio": _ratio(thai_tokens, word_tokens),
+        "english_word_ratio": _ratio(english_tokens, word_tokens),
+        "code_like_ratio": _ratio(int(stats.get("code_like_cells", 0)), non_empty),
+    }
+
+    if text_chars == 0 and word_tokens == 0:
+        # เลขไทย/สัญลักษณ์ไทยใน object column เป็นสัญญาณว่าควรเปิด Thai-specific checks
+        if int(stats.get("thai_digits", 0)) > 0 or int(stats.get("thai_punctuation_chars", 0)) > 0:
+            return "thai", 0.65, ratios
+        return "numeric", 1.0, ratios
+
+    # รหัสเช่น ORD001/SKU-123 ไม่ใช่ภาษาอังกฤษเชิงเนื้อหา แม้มี A-Z ปนตัวเลข
+    if thai_chars == 0 and ratios["code_like_ratio"] >= 0.80:
+        return "numeric", 0.9, ratios
+
+    common_bonus = min(0.18, int(stats.get("common_thai_word_hits", 0)) * 0.04)
+    mark_bonus = 0.08 if int(stats.get("thai_vowel_tone_chars", 0)) > 0 else 0.0
+    thai_strength = min(
+        1.0,
+        max(ratios["thai_ratio"], ratios["thai_cell_ratio"], ratios["thai_word_ratio"])
+        + common_bonus
+        + mark_bonus,
+    )
+    english_strength = max(
+        ratios["english_ratio"], ratios["english_cell_ratio"], ratios["english_word_ratio"]
+    )
+
+    has_thai = thai_chars > 0 or int(stats.get("common_thai_word_hits", 0)) > 0
+    has_english = latin_chars > 0 or english_tokens > 0
+    if has_thai and has_english:
+        balance = 1.0 - abs(ratios["thai_ratio"] - ratios["english_ratio"])
+        coverage = max(
+            ratios["mixed_cell_ratio"],
+            min(ratios["thai_cell_ratio"], ratios["english_cell_ratio"]),
+            min(ratios["thai_word_ratio"], ratios["english_word_ratio"]),
+        )
+        confidence = 0.45 + 0.30 * balance + 0.20 * coverage + common_bonus + mark_bonus
+        return "mixed", round(min(1.0, confidence), 3), ratios
+
+    if has_thai:
+        confidence = 0.45 + 0.45 * thai_strength + 0.10 * ratios["thai_cell_ratio"]
+        return "thai", round(min(1.0, confidence), 3), ratios
+
+    confidence = 0.45 + 0.45 * english_strength + 0.10 * ratios["english_cell_ratio"]
+    return "english", round(min(1.0, confidence), 3), ratios
+
+
+def _summarize_language_column(series: pd.Series, sample_rows: int) -> dict[str, Any]:
+    """สรุปภาษาในคอลัมน์เดียวจาก sample แรก เพื่อ performance บนไฟล์ใหญ่."""
+    stats = _empty_language_stats()
+    values = series.dropna().astype(str).head(sample_rows)
+    for value in values:
+        _merge_language_stats(stats, _analyze_language_text(value))
+
+    language, confidence, ratios = _classify_language_stats(stats)
+    return {
+        "language": language,
+        "confidence": confidence,
+        "sample_size": int(stats["sample_size"]),
+        "non_empty": int(stats["non_empty"]),
+        "thai_ratio": round(ratios["thai_ratio"], 4),
+        "english_ratio": round(ratios["english_ratio"], 4),
+        "thai_cell_ratio": round(ratios["thai_cell_ratio"], 4),
+        "english_cell_ratio": round(ratios["english_cell_ratio"], 4),
+        "mixed_cell_ratio": round(ratios["mixed_cell_ratio"], 4),
+        "thai_word_ratio": round(ratios["thai_word_ratio"], 4),
+        "common_thai_word_hits": int(stats["common_thai_word_hits"]),
+        "thai_vowel_tone_chars": int(stats["thai_vowel_tone_chars"]),
+        "zero_width_chars": int(stats["zero_width_chars"]),
+        "char_count": int(stats["char_count"]),
+        "examples": list(stats["examples"]),
+        "_stats": stats,
+    }
+
+
+def _dataset_language_from_columns(column_details: dict[str, dict[str, Any]]) -> tuple[str, float]:
+    """ตัดสินภาษาทั้ง dataset จากผลรายคอลัมน์ แทนการนับ char รวมอย่างเดียว."""
+    text_details = [d for d in column_details.values() if d.get("language") != "numeric"]
+    if not text_details:
+        return "numeric", 1.0
+
+    thai_cols = [d for d in text_details if d.get("language") == "thai"]
+    english_cols = [d for d in text_details if d.get("language") == "english"]
+    mixed_cols = [d for d in text_details if d.get("language") == "mixed"]
+    avg_conf = sum(float(d.get("confidence", 0.0)) for d in text_details) / len(text_details)
+
+    if mixed_cols:
+        return "mixed", round(max(0.65, avg_conf), 3)
+    if thai_cols and english_cols:
+        # ถ้ามีคอลัมน์ไทยชัดเจนและคอลัมน์อังกฤษเป็น minority สั้น ๆ (ชื่อ, code, label)
+        # ให้จัด dataset เป็นไทย เพื่อไม่ปิด Thai-specific checks จาก metadata อังกฤษ
+        english_cell_count = sum(int(d.get("non_empty", 0)) for d in english_cols)
+        thai_cell_count = sum(int(d.get("non_empty", 0)) for d in thai_cols)
+        english_chars = sum(int(d.get("char_count", 0)) for d in english_cols)
+        if thai_cell_count >= english_cell_count and english_chars <= 24:
+            return "thai", round(max(0.65, avg_conf), 3)
+        return "mixed", round(max(0.65, avg_conf), 3)
+    if thai_cols:
+        return "thai", round(avg_conf, 3)
+    return "english", round(avg_conf, 3)
+
+
+def _detect_language(df: pd.DataFrame) -> dict[str, Any]:
+    """ตรวจภาษาแบบ column-aware ด้วย Unicode block, token, common-word และ sample heuristics.
+
+    คืนค่า backward-compatible keys เดิม (`language`, `columns`, `thai_ratio`, `evidence`)
+    และเพิ่ม `confidence`, `english_ratio`, `column_details`, `sample_rows` สำหรับ v2.
+    ใช้ตัวอย่างแรกไม่เกิน 500 แถว/คอลัมน์เพื่อให้เร็วบน DataFrame ใหญ่ และ lazy-import
+    pythainlp เฉพาะตอนต้องตัดคำไทยเท่านั้น
+    """
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError("_detect_language expects a pandas DataFrame.")
+
+    sample_rows = min(_LANGUAGE_SAMPLE_ROWS, len(df)) if len(df) else _LANGUAGE_SAMPLE_ROWS
+    column_languages: dict[str, str] = {}
+    column_details: dict[str, dict[str, Any]] = {}
+    evidence: list[str] = []
+    dataset_stats = _empty_language_stats()
+
+    for col in df.columns:
+        col_name = str(col)
+        series = df[col]
+        if (
+            pd.api.types.is_numeric_dtype(series)
+            or pd.api.types.is_datetime64_any_dtype(series)
+            or pd.api.types.is_bool_dtype(series)
+        ):
+            detail = {
+                "language": "numeric",
+                "confidence": 1.0,
+                "sample_size": int(min(sample_rows, int(series.notna().sum()))),
+                "non_empty": int(series.notna().head(sample_rows).sum()),
+                "thai_ratio": 0.0,
+                "english_ratio": 0.0,
+                "thai_cell_ratio": 0.0,
+                "english_cell_ratio": 0.0,
+                "mixed_cell_ratio": 0.0,
+                "thai_word_ratio": 0.0,
+                "common_thai_word_hits": 0,
+                "thai_vowel_tone_chars": 0,
+                "zero_width_chars": 0,
+                "char_count": 0,
+                "examples": [],
+            }
+            column_languages[col_name] = "numeric"
+            column_details[col_name] = detail
+            continue
+
+        detail = _summarize_language_column(series, sample_rows)
+        stats = detail.pop("_stats")
+        _merge_language_stats(dataset_stats, stats)
+        language = str(detail["language"])
+        column_languages[col_name] = language
+        column_details[col_name] = detail
+
+        if detail["non_empty"]:
+            extras: list[str] = []
+            if detail["common_thai_word_hits"]:
+                extras.append(f"common words {detail['common_thai_word_hits']}")
+            if detail["thai_vowel_tone_chars"]:
+                extras.append(f"vowel/tone {detail['thai_vowel_tone_chars']}")
+            if detail["zero_width_chars"]:
+                extras.append(f"ZWSP {detail['zero_width_chars']}")
+            extra_txt = f", {', '.join(extras)}" if extras else ""
+            evidence.append(
+                f"{col_name}: {language} (conf {detail['confidence']:.0%}, "
+                f"ไทย {detail['thai_ratio']:.1%}, อังกฤษ {detail['english_ratio']:.1%}, "
+                f"sample {detail['non_empty']}{extra_txt})"
+            )
+
+    language, confidence = _dataset_language_from_columns(column_details)
+    _dataset_lang, _dataset_conf, ratios = _classify_language_stats(dataset_stats)
+    thai_ratio = ratios["thai_ratio"]
+    english_ratio = ratios["english_ratio"]
+    if language == "numeric":
+        confidence = _dataset_conf
+
+    return {
+        "language": language,
+        "confidence": round(float(confidence), 3),
+        "columns": column_languages,
+        "column_details": column_details,
+        "thai_ratio": round(thai_ratio, 4),
+        "english_ratio": round(english_ratio, 4),
+        "sample_rows": sample_rows,
+        "evidence": evidence[:8],
+    }
 
 
 def _name_hints_id(series: pd.Series) -> bool:
@@ -351,6 +704,7 @@ __all__ = [
     "ColumnType",
     "script_ratio",
     "is_thai_text",
+    "_detect_language",
     "detect_column_type",
     "detect_all",
     "normalize_phone_number",

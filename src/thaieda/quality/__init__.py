@@ -9,10 +9,11 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass, field
+from typing import Any
 
 import pandas as pd
 
-from thaieda.detect import ColumnType, script_ratio
+from thaieda.detect import ColumnType, _detect_language, script_ratio
 from thaieda.quality._thai_id import validate_thai_id, validate_thai_id_column
 
 # ----------------------------------------------------------------------------
@@ -521,9 +522,17 @@ _TEXT_TYPES = {
 _YEAR_TYPES = {ColumnType.NUMERIC, ColumnType.DATETIME, ColumnType.ID}
 
 
-def run_quality_checks(df: pd.DataFrame, column_types: dict[str, ColumnType]) -> list[QualityIssue]:
+def run_quality_checks(
+    df: pd.DataFrame,
+    column_types: dict[str, ColumnType],
+    language_info: dict[str, Any] | None = None,
+) -> list[QualityIssue]:
     """รันการตรวจคุณภาพทั้งหมด คืนรายการ QualityIssue เรียงตามความรุนแรง (วิกฤตก่อน)."""
     issues: list[QualityIssue] = []
+    language_info = language_info or _detect_language(df)
+    detected_language = str(language_info.get("language", "numeric"))
+    language_columns = language_info.get("columns", {})
+    run_thai_specific = detected_language in {"thai", "mixed"}
 
     for col in df.columns:
         col_name = str(col)
@@ -533,16 +542,24 @@ def run_quality_checks(df: pd.DataFrame, column_types: dict[str, ColumnType]) ->
         if ctype == ColumnType.EMPTY:
             continue
 
+        column_language = str(language_columns.get(col_name, "numeric"))
+        column_has_thai = column_language in {"thai", "mixed"}
+        should_run_thai = run_thai_specific or column_has_thai
+
         # Buddhist Era — คอลัมน์เลข/วันที่ และข้อความ (date strings)
-        if (ctype in _YEAR_TYPES or ctype in _TEXT_TYPES) and (
-            issue := check_buddhist_era(series, col_name)
-        ) is not None:
+        if (
+            should_run_thai
+            and (ctype in _YEAR_TYPES or ctype in _TEXT_TYPES)
+            and (issue := check_buddhist_era(series, col_name)) is not None
+        ):
             issues.append(issue)
 
         # เลขไทย — ทุกคอลัมน์ที่เป็น string-ish (ข้อความ + อาจเป็นเลขไทยใน object)
-        if (ctype in _TEXT_TYPES or series.dtype == object) and (
-            issue := check_thai_numerals(series, col_name)
-        ) is not None:
+        if (
+            should_run_thai
+            and (ctype in _TEXT_TYPES or series.dtype == object)
+            and (issue := check_thai_numerals(series, col_name)) is not None
+        ):
             issues.append(issue)
 
         # เช็คที่เกี่ยวกับข้อความล้วน ๆ

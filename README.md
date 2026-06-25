@@ -5,16 +5,17 @@
 [![PyPI](https://img.shields.io/pypi/v/thaieda.svg)](https://pypi.org/project/thaieda/)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-yellow.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Tests: 612 passed](https://img.shields.io/badge/tests-612%20passed-brightgreen.svg)]()
+[![Tests: 631 passed](https://img.shields.io/badge/tests-631%20passed-brightgreen.svg)]()
 [![Code Style: ruff](https://img.shields.io/badge/code%20style-ruff-261230.svg)](https://docs.astral.sh/ruff/)
+[![Language aware](https://img.shields.io/badge/language-Thai%20%2B%20English%20aware-blueviolet.svg)]()
 
 ---
 
 ## What is ThaiEDA?
 
-ThaiEDA is a Python library that automates exploratory data analysis for Thai-language datasets. You give it a DataFrame, it gives you back a full report — column types, quality issues, anomalies, cross-column insights, charts, and an HTML report. All in one line.
+ThaiEDA is a Python library that automates exploratory data analysis for Thai and mixed Thai/English datasets. You give it a DataFrame, it gives you back a full report — smart pre-analysis, language detection, column types, quality issues, anomalies, cross-column insights, charts, and an executive-style HTML report. All in one line.
 
-It handles the things generic EDA tools miss: Buddhist Era dates, Thai numerals, zero-width spaces, mojibake encoding, Thai month names, national ID card validation, Thai address parsing, and PII like phone numbers.
+It handles the things generic EDA tools miss: Buddhist Era dates, Thai numerals, zero-width spaces, Thai vowel/tone marks, mixed Thai/English cells, mojibake encoding, Thai month names, national ID card validation, Thai address parsing, and PII like phone numbers.
 
 ---
 
@@ -60,14 +61,15 @@ DataFrame
 ┌──────────────────────────────────────────────┐
 │  thaieda.run(df)                             │
 │                                              │
-│  1. detect     → column types + Thai months  │
-│  2. clean      → smart cleaning (auto-decide)│
-│  3. quality    → score 0-100 + ID validation │
-│  4. anomaly    → statistical + ML + text     │
-│  5. insights   → 6 cross-column patterns     │
-│  6. viz        → interactive + static charts │
-│  7. report     → self-contained HTML         │
-│                                              │
+│  0. pre-analyze → data type + language       │
+│  1. detect      → column types + Thai months │
+│  2. clean       → smart cleaning (auto-decide)│
+│  3. quality     → language-aware checks      │
+│  4. anomaly     → statistical + ML + text    │
+│  5. insights    → 6 cross-column patterns    │
+│  6. viz         → interactive + static charts│
+│  7. report      → executive HTML narrative   │
+
 │  + optional: LLM analysis (4 privacy modes)  │
 │  + optional: compare(df1, df2) side-by-side  │
 └──────────────────────────────────────────────┘
@@ -91,6 +93,14 @@ run_folder("data/")  → FolderResult
   .summary()            → text summary
   ._repr_html_()        → Jupyter rich display
 ```
+
+---
+
+## Version Highlights
+
+- **v1.1 — Folder reports:** `run_folder()` analyzes CSV/Excel/JSON/JSONL/TSV folders, `FolderResult.to_master_html()` builds one master HTML with sidebar navigation, and the internal `_Breakdown` result is frozen so report summaries are stable and hash-safe.
+- **v1.2 — Report redesign:** HTML reports now read like an executive briefing: executive summary, key findings, business translation, priority actions, plain-language explanations, and a narrative flow from “what happened” to “what to do next”.
+- **v1.3 — Smart pre-analysis:** `_detect_language()` detects Thai/English/mixed/numeric data with confidence and per-column detail; `_detect_data_type()` classifies transaction/registry/survey/timeseries/mixed datasets before EDA; quality checks become language-aware so English-only data skips Thai-specific warnings automatically.
 
 ---
 
@@ -192,6 +202,53 @@ print(addr)
 #  'district': 'บางบัว', 'province': 'กรุงเทพฯ', 'postal_code': '10230'}
 ```
 
+### Language Detection
+
+```python
+import pandas as pd
+from thaieda.detect import _detect_language
+
+df = pd.DataFrame({
+    "product": ["กาแฟ", "ชาไทย", "ขนม"],
+    "review": ["อร่อยมาก 5/5 stars", "ดีครับ", "ไม่ดี"],
+    "sku": ["SKU001", "SKU002", "SKU003"],
+})
+
+info = _detect_language(df)
+print(info["language"], info["confidence"])
+print(info["columns"])
+# thai/mixed/english/numeric + per-column language map
+```
+
+**Language Detection v2 features:**
+- Unicode Thai block analysis (U+0E00–U+0E7F) including vowels/tone marks (U+0E30–U+0E4D)
+- Zero-width-space aware (`\u200b`, BOM, word joiner)
+- Mixed-cell detection เช่น `"อร่อยมาก 5/5 stars"`
+- Common Thai word hints: `ครับ`, `ค่ะ`, `ไทย`, `อร่อย`, `ดี`, `ไม่`, `มี`, `และ`
+- Lazy `pythainlp` tokenizer when installed; regex fallback when unavailable
+- Per-column `column_details` + dataset-level `confidence` (0.0–1.0)
+- Sample-based scan (first 500 rows/column) for large DataFrames
+
+### Smart Pre-Analysis
+
+ThaiEDA profiles the dataset *before* running the full report, so the narrative and quality checks match the data:
+
+```python
+from thaieda.report import _detect_data_type
+
+pre = _detect_data_type(df)
+print(pre["label"], pre["language"]["language"])
+print(pre["focus"])
+```
+
+Smart pre-analysis detects:
+- **Transaction data** — orders, payments, revenue, invoices
+- **Registry/master data** — customers, products, stores, entity attributes
+- **Survey/review data** — ratings, comments, feedback text
+- **Timeseries data** — datetime index/columns + numeric measures
+- **Mixed data** — conservative fallback when signals overlap
+- **Language impact** — Thai/mixed data enables Thai-specific checks; English-only data skips พ.ศ./เลขไทย checks automatically
+
 ### Data Quality Score
 
 ```python
@@ -233,7 +290,11 @@ Control exactly what data leaves your machine when using LLM analysis:
 |---------|---------|-------------|
 | Buddhist Era dates | `15/03/2567` | Auto-detects พ.ศ. → converts to CE |
 | Thai numerals | `๑๒๓` in numeric column | Converts to `123` |
-| Zero-width spaces | `สม\u200bชาย` | Strips invisible chars |
+| Zero-width spaces | `สม\u200bชาย` | Strips invisible chars and reports language evidence |
+| Thai vowel/tone marks | `อร่อยค่ะ` | Counts U+0E30–U+0E4D for better Thai detection |
+| Mixed Thai/English cells | `อร่อยมาก 5/5 stars` | Detects as mixed language instead of English/numeric |
+| Thai text in English-heavy tables | Thai product column + English IDs | Column-level language detection preserves Thai checks |
+| Common Thai words | `ครับ`, `ค่ะ`, `ไม่ดี` | Boosts confidence for short Thai text |
 | Mojibake encoding | `Ã ¬Â¸Â¡Â¹` | Auto-detects TIS-620 → UTF-8 |
 | Thai month names | `มกราคม` | Parses to ISO date |
 | Phone numbers | `081-234-5678` | Detects + normalizes |
@@ -241,6 +302,8 @@ Control exactly what data leaves your machine when using LLM analysis:
 | Thai addresses | `123 ม.4 ต.บางบัว อ.บางบัว จ.กรุงเทพฯ` | Parses to structured fields |
 | Placeholder values | `-`, `N/A`, `ไม่มี` | Flags as missing |
 | Constant columns | All same value | Flags as useless |
+| Smart data type | Orders/reviews/timeseries | Pre-classifies transaction/registry/survey/timeseries/mixed |
+| Language-aware checks | English-only DataFrame | Skips Thai-specific พ.ศ./เลขไทย warnings automatically |
 | Thai holidays | Spike on Dec 5 | Attributes to Father's Day |
 
 ---
@@ -291,14 +354,14 @@ pip install ollama       # Ollama local LLM (หรือใช้ HTTP fallback
 | `run_folder()` | Analyze every CSV/Excel/JSON in a folder + master HTML |
 | `compare()` | Side-by-side dataset comparison with drift detection |
 | `io/` | Auto-read CSV/JSON/JSONL/Excel + encoding detection |
-| `detect/` | Column type detection + Thai month names + address parsing |
+| `detect/` | Column type detection + Thai month names + address parsing + language detection v2 |
 | `clean/` | Smart cleaning: auto-decide what to fix (encoding, numerals, BE, zwspace) |
-| `quality/` | Quality checks + score 0-100 + Thai ID card validation |
+| `quality/` | Language-aware quality checks + score 0-100 + Thai ID card validation |
 | `anomaly/` | Statistical + ML + text anomaly detection |
 | `ner/` | Thai NER: person/place/organization |
 | `insight_engine/` | 6 cross-column insight patterns (BH-corrected) |
 | `viz/` | Static + interactive charts with colorblind-safe palette |
-| `report/` | Self-contained HTML report (Jinja2) |
+| `report/` | Executive HTML report + smart pre-analysis (`_detect_data_type`) |
 | `llm/` | Privacy-preserving LLM analysis (4 modes, 3 providers) |
 | `timeseries/` | Trend/seasonality/STL/ACF + Thai holiday awareness |
 | `schema/` | Multi-file PK/FK discovery + relationship matching |
@@ -308,7 +371,8 @@ pip install ollama       # Ollama local LLM (หรือใช้ HTTP fallback
 ## Testing
 
 ```bash
-pytest tests/ -v                    # all tests (612 passed)
+pytest tests/ -v                    # all tests (631 passed)
+pytest tests/test_language_detection.py  # language detection + language-aware quality
 pytest tests/test_thai_id.py        # ID card validation
 pytest tests/test_thai_address.py   # address parsing
 pytest tests/test_compare.py        # dataset comparison

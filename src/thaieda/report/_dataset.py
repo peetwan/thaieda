@@ -28,6 +28,49 @@ def _confidence_class(confidence: float) -> str:
     return "critical"
 
 
+def _build_dataset_summary(ds: DatasetProfile) -> dict[str, Any]:
+    """สรุป schema แบบอ่านง่าย: ดีพอไหม และควรตรวจอะไรต่อ."""
+    table_count = len(ds.tables)
+    relationship_count = len(ds.relationships)
+    orphan_count = len(ds.orphan_findings)
+    low_confidence = sum(1 for r in ds.relationships if r.confidence < 0.7)
+    total_rows = sum(t.row_count for t in ds.tables)
+
+    if orphan_count:
+        status = "warning"
+        verdict = "พบข้อมูลที่อาจเชื่อมตารางไม่ครบ ควรตรวจ key ก่อนวิเคราะห์ข้ามตาราง"
+    elif relationship_count == 0 and table_count > 1:
+        status = "critical"
+        verdict = "ยังไม่พบความสัมพันธ์ระหว่างตาราง ทำให้วิเคราะห์ภาพรวมทั้งชุดข้อมูลได้ยาก"
+    elif low_confidence:
+        status = "warning"
+        verdict = "พบความสัมพันธ์บางจุดที่ยังไม่มั่นใจ ควรยืนยัน key กับเจ้าของข้อมูล"
+    else:
+        status = "good"
+        verdict = "โครงสร้างชุดข้อมูลดูเชื่อมกันได้ดี พร้อมใช้สำรวจต่อ"
+
+    actions: list[str] = []
+    if orphan_count:
+        actions.append("ตรวจรายการข้อมูลกำพร้า แล้วแก้ key ที่ไม่มีตารางแม่รองรับ")
+    if low_confidence:
+        actions.append("ยืนยันความสัมพันธ์ที่ confidence ต่ำกับ data owner")
+    if relationship_count == 0 and table_count > 1:
+        actions.append("ระบุ primary key / foreign key ด้วยชื่อคอลัมน์หรือ dictionary เพิ่มเติม")
+    if not actions:
+        actions.append("เริ่มวิเคราะห์ business metric โดย join ตารางตามความสัมพันธ์ที่ตรวจพบ")
+
+    return {
+        "status": status,
+        "verdict": verdict,
+        "highlights": [
+            f"มี {table_count} ตาราง รวม {total_rows:,} แถว",
+            f"พบความสัมพันธ์ {relationship_count} จุด",
+            f"พบข้อมูลกำพร้า {orphan_count} จุด",
+        ],
+        "actions": actions[:4],
+    }
+
+
 class DatasetReport:
     """รายงาน HTML รวมหลายตาราง + ความสัมพันธ์ระหว่างตาราง."""
 
@@ -80,6 +123,7 @@ class DatasetReport:
             "orphan_count": len(ds.orphan_findings),
             "total_rows": total_rows,
         }
+        summary = _build_dataset_summary(ds)
 
         # ตารางแต่ละตาราง — แนบ type distribution + key candidates ที่อ่านง่าย
         tables_ctx: list[dict[str, Any]] = []
@@ -131,6 +175,7 @@ class DatasetReport:
             "L": L,
             "version": __version__,
             "overview": overview,
+            "summary": summary,
             "mermaid": ds.to_mermaid(),
             "tables": tables_ctx,
             "relationships": rels_ctx,

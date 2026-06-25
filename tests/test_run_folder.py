@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-import thaieda
 from thaieda import FolderResult, run_folder
 
 
@@ -21,9 +20,7 @@ def tmp_csv_folder(tmp_path):
     df1.to_csv(tmp_path / "numeric.csv", index=False)
 
     # CSV 2: ข้อมูลข้อความไทย
-    df2 = pd.DataFrame(
-        {"review": ["อร่อยมาก", "ดี", "เยี่ยม", "ปกติ", "แย่"], "rating": [5, 4, 5, 3, 1]}
-    )
+    df2 = pd.DataFrame({"review": ["อร่อยมาก", "ดี", "เยี่ยม", "ปกติ", "แย่"], "rating": [5, 4, 5, 3, 1]})
     df2.to_csv(tmp_path / "thai_text.csv", index=False)
 
     # CSV 3: ข้อมูลผสม
@@ -118,16 +115,14 @@ class TestRunFolderHTML:
 
     def test_save_html_creates_files(self, tmp_csv_folder):
         """save_html=True สร้าง HTML ให้ทุกไฟล์ที่สำเร็จ."""
-        result = run_folder(
-            tmp_csv_folder, save_html=True, make_charts=False
-        )
+        run_folder(tmp_csv_folder, save_html=True, make_charts=False)
         html_files = list(tmp_csv_folder.glob("*-report.html"))
         assert len(html_files) == 3
 
     def test_save_html_to_custom_dir(self, tmp_csv_folder, tmp_path):
         """output_dir ใช้โฟลเดอร์ปลายทางเองได้."""
         out = tmp_path / "reports"
-        result = run_folder(
+        run_folder(
             tmp_csv_folder,
             save_html=True,
             output_dir=str(out),
@@ -138,9 +133,7 @@ class TestRunFolderHTML:
 
     def test_save_html_false_no_files(self, tmp_csv_folder):
         """save_html=False ไม่สร้าง HTML."""
-        result = run_folder(
-            tmp_csv_folder, save_html=False, make_charts=False
-        )
+        run_folder(tmp_csv_folder, save_html=False, make_charts=False)
         html_files = list(tmp_csv_folder.glob("*-report.html"))
         assert len(html_files) == 0
 
@@ -183,16 +176,12 @@ class TestRunFolderKwargs:
 
     def test_lang_en(self, tmp_csv_folder):
         """lang='en' ส่งไปยัง run() ได้."""
-        result = run_folder(
-            tmp_csv_folder, save_html=False, make_charts=False, lang="en"
-        )
+        result = run_folder(tmp_csv_folder, save_html=False, make_charts=False, lang="en")
         assert result.success == 3
 
     def test_clean_false(self, tmp_csv_folder):
         """clean=False ส่งไปยัง run() ได้."""
-        result = run_folder(
-            tmp_csv_folder, save_html=False, make_charts=False, clean=False
-        )
+        result = run_folder(tmp_csv_folder, save_html=False, make_charts=False, clean=False)
         assert result.success == 3
 
     def test_invalid_kwarg_ignored(self, tmp_csv_folder):
@@ -223,9 +212,7 @@ class TestRunFolderRecursive:
         sub.mkdir()
         pd.DataFrame({"b": [3, 4]}).to_csv(sub / "sub.csv", index=False)
 
-        result = run_folder(
-            tmp_path, save_html=False, make_charts=False, recursive=True
-        )
+        result = run_folder(tmp_path, save_html=False, make_charts=False, recursive=True)
         assert result.total_files == 2
 
     def test_non_recursive_ignores_subfolder(self, tmp_path):
@@ -237,9 +224,7 @@ class TestRunFolderRecursive:
         sub.mkdir()
         pd.DataFrame({"b": [3, 4]}).to_csv(sub / "sub.csv", index=False)
 
-        result = run_folder(
-            tmp_path, save_html=False, make_charts=False, recursive=False
-        )
+        result = run_folder(tmp_path, save_html=False, make_charts=False, recursive=False)
         assert result.total_files == 1
 
 
@@ -252,7 +237,7 @@ class TestRunFolderProgress:
     def test_progress_called(self, tmp_csv_folder):
         """progress callback ถูกเรียก."""
         messages: list[str] = []
-        result = run_folder(
+        run_folder(
             tmp_csv_folder,
             save_html=False,
             make_charts=False,

@@ -80,6 +80,15 @@ DATASET_TEMPLATE = r"""<!DOCTYPE html>
   .conf-bar > span.warning { background: var(--warning); }
   .conf-bar > span.critical { background: var(--critical); }
   .card-num { color: #f783ac; }
+  .hero { background: var(--panel); border: 1px solid var(--border); border-left: 5px solid var(--ok);
+          border-radius: 12px; padding: 18px 20px; margin: 16px 0; }
+  .hero.warning { border-left-color: var(--warning); }
+  .hero.critical { border-left-color: var(--critical); }
+  .hero .lbl { color: var(--accent); font-weight: 800; font-size: 13px; text-transform: uppercase; }
+  .hero .verdict { font-size: 21px; font-weight: 800; margin: 6px 0 8px; }
+  .hero ul { margin: 8px 0 0 20px; padding: 0; }
+  .actions { display: grid; gap: 8px; margin: 12px 0; }
+  .action { background: var(--panel2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
   @media (max-width: 720px) {
     .wrap { padding: 20px 14px 60px; }
     .cards { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
@@ -105,6 +114,13 @@ DATASET_TEMPLATE = r"""<!DOCTYPE html>
 
   <!-- ============ OVERVIEW ============ -->
   <h2 id="overview">{{ L('schema_overview') }}</h2>
+  <div class="hero {{ summary.status }}">
+    <div class="lbl">{{ L('executive_summary') }}</div>
+    <div class="verdict">{{ summary.verdict }}</div>
+    <ul>{% for h in summary.highlights %}<li>{{ h }}</li>{% endfor %}</ul>
+    <h3>{{ L('recommended_actions') }}</h3>
+    <div class="actions">{% for a in summary.actions %}<div class="action">{{ loop.index }}. {{ a }}</div>{% endfor %}</div>
+  </div>
   <div class="cards">
     <div class="card"><div class="k">{{ L('table_count') }}</div><div class="v">{{ overview.table_count }}</div></div>
     <div class="card"><div class="k">{{ L('relationship_count') }}</div><div class="v">{{ overview.relationship_count }}</div></div>

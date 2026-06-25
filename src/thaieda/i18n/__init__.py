@@ -9,11 +9,65 @@ from __future__ import annotations
 _DEFAULT_LANGUAGE = "th"
 _current_language = _DEFAULT_LANGUAGE
 
+# พจนานุกรมแปลศัพท์เทคนิคให้เป็นภาษาคนอ่านสำหรับรายงาน
+TECHNICAL_TO_PLAIN: dict[str, str] = {
+    "modified_z_score": "ค่าที่หลุดจากช่วงปกติ",
+    "modified z-score": "ค่าที่หลุดจากช่วงปกติ",
+    "MAD": "ช่วงกลางของข้อมูล",
+    "MeanAD": "ค่าเฉลี่ยของระยะห่างจากค่ากลาง",
+    "IQR": "ช่วงกลาง 50% ของข้อมูล",
+    "z_score": "คะแนนห่างจากค่าเฉลี่ย",
+    "z-score": "คะแนนห่างจากค่าเฉลี่ย",
+    "skewness": "การเบ้",
+    "skew": "การเบ้",
+    "kurtosis": "ความโดดเด่น",
+    "Isolation Forest": "การตรวจจับแบบ ML",
+    "Local Outlier Factor": "การตรวจจับค่าที่ต่างจากเพื่อนบ้าน",
+    "LOF": "การตรวจจับค่าที่ต่างจากเพื่อนบ้าน",
+    "Benjamini-Hochberg": "การคุม false positive",
+    "false positive": "การแจ้งเตือนเกินจริง",
+    "p-value": "ค่าความน่าเชื่อถือทางสถิติ",
+    "Pearson": "ความสัมพันธ์เชิงเส้น",
+    "ANOVA": "การเปรียบเทียบค่าเฉลี่ยหลายกลุ่ม",
+    "Chi-square": "การทดสอบความสัมพันธ์ของหมวดหมู่",
+    "Autocorrelation": "ความสัมพันธ์กับค่าก่อนหน้า",
+    "ACF": "ความสัมพันธ์กับค่าก่อนหน้า",
+    "STL Decomposition": "การแยกแนวโน้ม/ฤดูกาล",
+    "outlier": "ค่าผิดปกติ",
+    "outliers": "ค่าผิดปกติ",
+    "nullity correlation": "รูปแบบค่าว่างที่เกิดร่วมกัน",
+    "zero variance": "ไม่มีความแปรปรวน",
+}
+
+
 # พจนานุกรม label ทั้งหมดที่รายงานต้องใช้
 LABELS: dict[str, dict[str, str]] = {
     # --- หัวข้อหลัก ---
     "report_title": {"en": "ThaiEDA Profile Report", "th": "รายงานวิเคราะห์ข้อมูล ThaiEDA"},
     "overview": {"en": "Overview", "th": "ภาพรวม"},
+    "what_is_this_data": {"en": "1. What is this data?", "th": "1. ข้อมูลนี้คืออะไร"},
+    "detected_data_type": {"en": "Detected data type", "th": "ประเภทข้อมูลที่ตรวจพบ"},
+    "eda_focus": {"en": "Recommended EDA focus", "th": "ควรดูอะไรเป็นพิเศษ"},
+    "most_important": {"en": "2. Most Important", "th": "2. สำคัญที่สุด"},
+    "what_to_do_first": {"en": "3. What to do first", "th": "3. ควรทำอะไรก่อน"},
+    "details": {"en": "4. Details", "th": "4. รายละเอียด"},
+    "next_steps": {"en": "5. What to do next", "th": "5. ควรทำอะไรต่อ"},
+    "business_impact": {"en": "Business impact", "th": "ผลกระทบทางธุรกิจ"},
+    "technical_detail": {"en": "Technical detail", "th": "รายละเอียดเทคนิค"},
+    "impact": {"en": "Impact", "th": "ผลกระทบ"},
+    "detected_language": {"en": "Detected language", "th": "ภาษาข้อมูลที่ตรวจพบ"},
+    "language_thai": {"en": "Thai", "th": "ไทย"},
+    "language_english": {"en": "English", "th": "อังกฤษ"},
+    "language_mixed": {"en": "Mixed (Thai + English)", "th": "ผสม (ไทย + อังกฤษ)"},
+    "language_numeric": {
+        "en": "No text (numeric/date only)",
+        "th": "ไม่มีข้อความ (ตัวเลข/วันที่ล้วน)",
+    },
+    "language_impact": {"en": "Impact on analysis", "th": "ผลกระทบต่อการวิเคราะห์"},
+    "thai_specific_recommendations": {
+        "en": "Thai-specific recommendations",
+        "th": "คำแนะนำเฉพาะข้อมูลไทย",
+    },
     # --- auto insights (สรุปข้อค้นพบสำคัญ) ---
     "auto_insights": {"en": "Key Insights", "th": "ข้อค้นพบสำคัญ"},
     "executive_summary": {"en": "Executive Summary", "th": "บทสรุปผู้บริหาร"},
@@ -237,6 +291,43 @@ LABELS: dict[str, dict[str, str]] = {
         "en": "Matching relationships...",
         "th": "จับคู่ความสัมพันธ์...",
     },
+    # --- v1.1: enhanced report — insights-driven, actionable ---
+    "data_health": {"en": "Data Health", "th": "สุขภาพข้อมูล"},
+    "priority_actions": {"en": "Priority Actions", "th": "สิ่งที่ควรทำก่อน"},
+    "recommended_actions": {
+        "en": "Recommended Actions",
+        "th": "ควรทำอะไรต่อ",
+    },
+    "so_what": {"en": "So What?", "th": "แล้วไงต่อ?"},
+    "at_a_glance": {"en": "At a Glance", "th": "สรุปประเด็น"},
+    "quick_wins": {"en": "Quick Wins", "th": "แก้เร็วได้"},
+    "needs_attention": {
+        "en": "Needs Attention",
+        "th": "ต้องดูแล",
+    },
+    "good_shape": {"en": "Good Shape", "th": "ไม่มีปัญหา"},
+    "how_to_read": {
+        "en": "How to read this report",
+        "th": "วิธีอ่านรายงานนี้",
+    },
+    "how_to_read_desc": {
+        "en": ("Start with Executive Summary, then Priority Actions, then column details."),
+        "th": "เริ่มจากบทสรุปด้านบน แล้วดูสิ่งที่ควรทำก่อน แล้วค่อยเจาะรายละเอียดแต่ละคอลัมน์",
+    },
+    "show_details": {"en": "Show details", "th": "ดูเพิ่มเติม"},
+    "hide_details": {"en": "Hide details", "th": "ซ่อน"},
+    "no_priority_actions": {
+        "en": "No urgent actions needed.",
+        "th": "ไม่มีสิ่งเร่งด่วนที่ต้องทำ",
+    },
+    "top_columns_to_watch": {
+        "en": "Columns to Watch",
+        "th": "คอลัมน์ที่ควรระวัง",
+    },
+    "chart_insight": {
+        "en": "What this chart tells us",
+        "th": "กราฟนี้บอกอะไรเรา",
+    },
 }
 
 
@@ -265,4 +356,4 @@ def get_language() -> str:
     return _current_language
 
 
-__all__ = ["LABELS", "label", "set_language", "get_language"]
+__all__ = ["LABELS", "TECHNICAL_TO_PLAIN", "label", "set_language", "get_language"]

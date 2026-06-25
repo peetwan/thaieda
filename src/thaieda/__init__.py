@@ -19,8 +19,11 @@ usage แบบ one-liner::
 Alias: ``thaieda.EDA(df)`` เทียบเท่า ``thaieda.run(df)``
 """
 
+# ruff: noqa: E501 — ไฟล์นี้มี master HTML template แบบฝังตัว จึงมีบรรทัดยาวโดยธรรมชาติ
+
 from __future__ import annotations
 
+import re as _re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -263,18 +266,32 @@ EDA = run
 
 # ----------------------------------------------------------------------------
 # FolderResult — ผลลัพธ์จาก run_folder()
-# ----------------------------------------------------------------------------
+def _extract_styles_and_body(html: str) -> tuple[str, str]:
+    """ดึง <style> จาก <head> และเนื้อหาจาก <body> — คืน (styles, body).
 
-import re as _re
+    จำเป็นต้องดึง style มาด้วยเพราะแต่ละ report มี CSS ของตัวเอง
+    ถ้าฝังแค่ body จะไม่มี CSS → หน้าขาว.
 
+    แก้ไข CSS: ลบ max-width ของ .wrap เพื่อให้เต็มใน master HTML.
+    แก้ไข body: เพิ่ม inline style ให้ .wrap เต็มจอ.
+    """
+    styles = _re.findall(r"<style[^>]*>(.*?)</style>", html, _re.DOTALL | _re.IGNORECASE)
+    styles_css = "\n".join(styles)
+    # ลบ max-width ของ .wrap เพื่อให้เต็มใน master
+    styles_css = _re.sub(r"(\.wrap\s*\{[^}]*?)max-width:\s*1100px;\s*", r"\1", styles_css)
+    # ลบ margin: 0 auto ของ .wrap (centering ไม่จำเป็นใน master)
+    styles_css = _re.sub(r"(\.wrap\s*\{[^}]*?)margin:\s*0\s+auto;\s*", r"\1", styles_css)
 
-def _extract_body(html: str) -> str:
-    """ดึงเฉพาะเนื้อหาใน <body> จาก HTML report เต็ม."""
-    match = _re.search(r"<body[^>]*>(.*)</body>", html, _re.DOTALL | _re.IGNORECASE)
-    if match:
-        return match.group(1).strip()
-    # fallback: ถ้าไม่มี <body> คืนทั้งหมด
-    return html
+    body_match = _re.search(r"<body[^>]*>(.*)</body>", html, _re.DOTALL | _re.IGNORECASE)
+    body = body_match.group(1).strip() if body_match else html
+
+    # เพิ่ม inline style ให้ .wrap เต็มจอ (inline style มี priority สูงสุด)
+    body = body.replace(
+        'class="wrap"',
+        'class="wrap" style="max-width:100% !important; margin:0 !important; width:100% !important;"',
+    )
+
+    return styles_css, body
 
 
 _MASTER_HTML_TEMPLATE = """\
@@ -285,8 +302,11 @@ _MASTER_HTML_TEMPLATE = """\
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ThaiEDA Master Report — {folder}</title>
 <style>
+{report_css}
+</style>
+<style>
   * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-  body {{ font-family: 'Sarabun', 'Segoe UI', sans-serif; background: #f5f5f5; }}
+  body {{ font-family: 'Sarabun', 'Segoe UI', sans-serif; background: #15171c; }}
   .layout {{ display: flex; min-height: 100vh; }}
   /* Sidebar */
   .sidebar {{
@@ -302,27 +322,34 @@ _MASTER_HTML_TEMPLATE = """\
   .sidebar .stats {{ margin-top: 20px; padding-top: 15px; border-top: 1px solid #333; font-size: 13px; color: #aaa; }}
   /* Main content */
   .main {{ margin-left: 250px; padding: 30px; flex: 1; }}
-  .overview {{ background: #fff; border-radius: 10px; padding: 25px; margin-bottom: 25px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }}
-  .overview h2 {{ margin-bottom: 15px; color: #1a1a2e; }}
+  .overview {{ background: #1d2027; border-radius: 10px; padding: 25px; margin-bottom: 25px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); border: 1px solid #2e333c; }}
+  .overview h2 {{ margin-bottom: 15px; color: #e6e6e6; }}
   .overview table {{ width: 100%; border-collapse: collapse; }}
-  .overview th, .overview td {{ padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; font-size: 14px; }}
-  .overview th {{ background: #f8f8f8; font-weight: 600; }}
-  .overview a {{ color: #e94560; text-decoration: none; }}
+  .overview th, .overview td {{ padding: 10px 12px; text-align: left; border-bottom: 1px solid #2e333c; font-size: 14px; color: #e6e6e6; }}
+  .overview th {{ background: #23272f; font-weight: 600; color: #4dabf7; }}
+  .overview a {{ color: #4dabf7; text-decoration: none; }}
   .overview a:hover {{ text-decoration: underline; }}
   /* File sections */
   .file-section {{
-    background: #fff; border-radius: 10px; padding: 30px;
-    margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    background: #1d2027; border-radius: 10px; padding: 30px;
+    margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); border: 1px solid #2e333c;
   }}
   .file-section h2 {{
-    font-size: 24px; color: #1a1a2e; margin-bottom: 8px;
-    border-bottom: 3px solid #e94560; padding-bottom: 8px;
+    font-size: 24px; color: #e6e6e6; margin-bottom: 8px;
+    border-bottom: 3px solid #4dabf7; padding-bottom: 8px;
   }}
-  .file-section .meta {{ color: #666; font-size: 14px; margin-bottom: 20px; }}
+  .file-section .meta {{ color: #9aa0aa; font-size: 14px; margin-bottom: 20px; }}
   .file-section .error {{ color: #e94560; font-size: 16px; padding: 20px; }}
-  /* Embed individual report styles */
-  .file-section table {{ border-collapse: collapse; }}
-  .file-section th, .file-section td {{ padding: 8px; }}
+  /* Override report CSS ที่จำกัดความกว้าง — ให้เต็มใน master */
+  .file-content {{ background: #15171c; border-radius: 10px; overflow: hidden; }}
+  .file-content .wrap {{ max-width: 100% !important; margin: 0 !important; padding: 20px 24px !important; width: 100% !important; }}
+  .file-content .nav {{ display: none !important; }}
+  .file-content header {{ display: none !important; }}
+  .file-content .sticky-nav {{ display: none !important; }}
+  .file-content > header {{ display: none !important; }}
+  .file-content img {{ max-width: 100%; height: auto; }}
+  .file-content table {{ border-collapse: collapse; }}
+  .file-content th, .file-content td {{ padding: 8px; }}
 </style>
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
 </head>
@@ -428,6 +455,7 @@ class FolderResult:
         sections: list[str] = []
         nav_items: list[str] = []
         summary_rows: list[str] = []
+        report_css: str = ""  # เก็บ CSS ของ report (ดึงครั้งเดียว เพราะเหมือนกันทุกไฟล์)
 
         for i, fr in enumerate(self.results):
             anchor = f"file-{i}"
@@ -448,19 +476,21 @@ class FolderResult:
                 )
 
                 # Nav item
-                nav_items.append(
-                    f"<li><a href='#{anchor}'>{fr.filename}</a></li>"
-                )
+                nav_items.append(f"<li><a href='#{anchor}'>{fr.filename}</a></li>")
 
-                # Section: extract body content from individual report
+                # Section: extract styles + body content from individual report
                 full_html = fr.result.report.to_html()
-                # ดึงเฉพาะ body content (ตัด <html>, <head>, ฯลฯ)
-                body = _extract_body(full_html)
+                styles, body = _extract_styles_and_body(full_html)
+                # เก็บ CSS ครั้งแรก (ทุกไฟล์ใช้ CSS เดียวกัน)
+                if not report_css:
+                    report_css = styles
                 sections.append(
                     f"<section id='{anchor}' class='file-section'>"
                     f"<h2>{fr.filename}</h2>"
                     f"<p class='meta'>{rows:,} rows × {cols} cols · {n_insights} insights · {n_quality} quality issues</p>"
+                    f"<div class='file-content'>"
                     f"{body}"
+                    f"</div>"
                     f"</section>"
                 )
             else:
@@ -483,6 +513,7 @@ class FolderResult:
             nav="\n".join(nav_items),
             summary_table="\n".join(summary_rows),
             sections="\n".join(sections),
+            report_css=report_css,
         )
 
         if path:
@@ -521,9 +552,7 @@ class FolderResult:
                 info = f"{ov.get('rows', 0):,} rows × {ov.get('columns', 0)} cols"
             elif fr.error:
                 info = fr.error
-            rows_html.append(
-                f"<tr><td>{status}</td><td>{fr.filename}</td><td>{info}</td></tr>"
-            )
+            rows_html.append(f"<tr><td>{status}</td><td>{fr.filename}</td><td>{info}</td></tr>")
         return (
             f"<h3>ThaiEDA Folder Report — {self.folder}</h3>"
             f"<p>{self.success}/{self.total_files} files analyzed</p>"
@@ -608,8 +637,7 @@ def run_folder(
 
     if not files:
         raise ValueError(
-            f"ไม่พบไฟล์ที่รองรับ ({', '.join(sorted(_SUPPORTED_EXTENSIONS))}) "
-            f"ในโฟลเดอร์: {folder_path}"
+            f"ไม่พบไฟล์ที่รองรับ ({', '.join(sorted(_SUPPORTED_EXTENSIONS))}) ในโฟลเดอร์: {folder_path}"
         )
 
     files.sort(key=lambda x: x.name)
