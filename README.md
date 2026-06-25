@@ -28,6 +28,7 @@ ThaiEDA คือ library สำหรับทำ Exploratory Data Analysis (ED
 
 - 🔍 **Buddhist Era detection** — ตรวจจับปี พ.ศ. ผสม ค.ศ. ในคอลัมน์ date/number (เช่น `2567` vs `2024`)
 - 🔢 **Thai numeral detection** — ตรวจจับเลขไทย (๐๑๒๓) ผสมเลขอารบิกในคอลัมน์เดียวกัน
+- 📞 **Phone number detection** — ตรวจจับและทำความสะอาดเบอร์โทรไทย (เลขไทย→อารบิก, ลบ dash, +66→0, เก็บ leading zero)
 - 👻 **Zero-width space detection** — ตรวจจับอักขระ U+200B ที่ทำให้ `groupby`, `join`, และ string equality พังเงียบ ๆ
 - 📝 **Script composition** — วิเคราะห์อัตราส่วน Thai/Latin/digit/emoji ต่อคอลัมน์
 - ⚠️ **Normalization issues** — ระบุปัญหา combining character, tone mark ซ้ำ, สระซ้ำ
@@ -50,6 +51,7 @@ ThaiEDA คือ library สำหรับทำ Exploratory Data Analysis (ED
 ### Data Cleaning
 
 - 🔧 **Thai-specific cleaning** — ลบ zero-width space, แปลงเลขไทย→อารบิก, แก้ mojibake (ftfy)
+- 📞 **Phone number normalization** — แปลงเบอร์โทรไทยเป็นมาตรฐาน 10 หลัก (เลขไทย→อารบิก, ลบ dash/space, +66→0, เก็บ leading zero ไม่ให้หาย)
 - ⌨️ **Keyboard layout fix** — แก้การพิมพ์ผิดแป้นไทย/อังกฤษ (เช่น `l;ylfu` → `สวัสดี`)
 - ✨ **PyThaiNLP normalize** — จัดระเบียบข้อความไทยรวมในขั้นตอนเดียว
 

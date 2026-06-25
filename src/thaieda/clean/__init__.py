@@ -390,6 +390,29 @@ def fix_keyboard_layout(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
     )
 
 
+def normalize_phone_numbers(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
+    """ทำความสะอาดเบอร์โทรศัพท์ไทยในคอลัมน์ — แปลงเลขไทย, ลบ dash/space, +66 → 0.
+
+    เบอร์โทรเป็นข้อมูลที่ sensitive ต่อการเปลี่ยน type: ถ้าเขียนเป็น int แล้วอ่านใหม่
+    leading zero จะหายไป (0812345678 → 812345678) ฟังก์ชันนี้เก็บเป็น string
+    และทำความสะอาดรูปแบบให้เป็นมาตรฐาน 10 หลักขึ้นต้น 0
+    """
+    from thaieda.detect import _THAI_PHONE_RE, _clean_phone_str
+
+    def _phone_fixer(text: str) -> str:
+        cleaned = _clean_phone_str(text)
+        if _THAI_PHONE_RE.match(cleaned):
+            return cleaned
+        return text
+
+    return _apply_str_transform(
+        series,
+        _phone_fixer,
+        operation="normalize_phone_numbers",
+        description_th="ทำความสะอาดเบอร์โทรศัพท์ (แปลงเลขไทย, ลบ dash/space, +66 → 0)",
+    )
+
+
 # ----------------------------------------------------------------------------
 # ตัวประกอบหลายการดำเนินการ
 # ----------------------------------------------------------------------------
@@ -402,6 +425,7 @@ _OPERATIONS: dict[str, Callable[[pd.Series], tuple[pd.Series, CleaningResult]]] 
     "tonemarks": fix_tone_mark_stacking,
     "repeat": fix_repeated_chars,
     "numerals": normalize_thai_numerals,
+    "phone": normalize_phone_numbers,
     "pythainlp_normalize": pythainlp_normalize,
     "keyboard_layout": fix_keyboard_layout,
 }
@@ -419,6 +443,7 @@ DEFAULT_OPERATIONS: tuple[str, ...] = (
     "tonemarks",
     "repeat",
     "numerals",
+    "phone",
     "pythainlp_normalize",
     "keyboard_layout",
 )
@@ -487,6 +512,7 @@ __all__ = [
     "normalize_unicode",
     "fix_repeated_chars",
     "fix_tone_mark_stacking",
+    "normalize_phone_numbers",
     "pythainlp_normalize",
     "fix_keyboard_layout",
     "clean_thai_text",

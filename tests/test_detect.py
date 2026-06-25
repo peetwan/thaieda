@@ -5,7 +5,14 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from thaieda.detect import ColumnType, detect_column_type, is_thai_text, script_ratio
+from thaieda.detect import (
+    ColumnType,
+    detect_column_type,
+    is_phone_number,
+    is_thai_text,
+    normalize_phone_number,
+    script_ratio,
+)
 
 
 # ---------------------------------------------------------------- script_ratio
@@ -138,3 +145,65 @@ def test_is_thai_text_threshold_behavior():
 def test_is_thai_text_empty_series():
     s = pd.Series([], dtype="object")
     assert is_thai_text(s) is False
+
+
+# ------------------------------------------------------------------ phone number
+def test_detect_phone_column_by_name():
+    """คอลัมน์ชื่อ phone ที่เป็นเบอร์ไทย → PHONE_NUMBER"""
+    s = pd.Series(["0812345678", "0898765432", "0213456789"], name="phone")
+    assert detect_column_type(s) == ColumnType.PHONE_NUMBER
+
+
+def test_detect_phone_column_thai_numerals():
+    """เบอร์ที่พิมพ์ด้วยเลขไทย → PHONE_NUMBER"""
+    s = pd.Series(["๐๘๑๒๓๔๕๖๗๘", "๐๘๙๘๗๖๕๔๓๒", "๐๒๑๓๔๕๖๗๘๙"], name="tel")
+    assert detect_column_type(s) == ColumnType.PHONE_NUMBER
+
+
+def test_detect_phone_column_with_dashes():
+    """เบอร์ที่มี dash → PHONE_NUMBER"""
+    s = pd.Series(["08-1234-5678", "08-9876-5432", "02-1345-6789"], name="mobile")
+    assert detect_column_type(s) == ColumnType.PHONE_NUMBER
+
+
+def test_detect_phone_column_plus66():
+    """เบอร์ +66 → PHONE_NUMBER"""
+    s = pd.Series(["+66812345678", "+66896543219", "+66213456789"], name="contact")
+    assert detect_column_type(s) == ColumnType.PHONE_NUMBER
+
+
+def test_detect_phone_not_numeric():
+    """เบอร์โทรไม่ควรถูกจัดเป็น NUMERIC"""
+    s = pd.Series(["0812345678", "0898765432", "0213456789", "0551234567"], name="phone")
+    result = detect_column_type(s)
+    assert result == ColumnType.PHONE_NUMBER
+    assert result != ColumnType.NUMERIC
+
+
+def test_normalize_phone_number_basic():
+    """แปลงเบอร์ไทยเป็นมาตรฐาน 10 หลัก"""
+    assert normalize_phone_number("08-1234-5678") == "0812345678"
+    assert normalize_phone_number("08 1234 5678") == "0812345678"
+    assert normalize_phone_number("+66812345678") == "0812345678"
+
+
+def test_normalize_phone_number_thai_numerals():
+    """เบอร์เลขไทย → อารบิก"""
+    assert normalize_phone_number("๐๘๑๒๓๔๕๖๗๘") == "0812345678"
+
+
+def test_normalize_phone_number_not_phone():
+    """ค่าที่ไม่ใช่เบอร์ → คืนค่าเดิม"""
+    assert normalize_phone_number("hello") == "hello"
+    assert normalize_phone_number("12345") == "12345"  # สั้นเกิน
+
+
+def test_is_phone_number_true():
+    assert is_phone_number("0812345678") is True
+    assert is_phone_number("+66812345678") is True
+    assert is_phone_number("๐๘๑๒๓๔๕๖๗๘") is True
+
+
+def test_is_phone_number_false():
+    assert is_phone_number("12345") is False
+    assert is_phone_number("hello") is False

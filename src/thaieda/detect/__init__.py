@@ -37,6 +37,7 @@ class ColumnType(str, Enum):
     MIXED_TEXT = "mixed_text"
     DATETIME = "datetime"
     ID = "id"
+    PHONE_NUMBER = "phone_number"
     EMPTY = "empty"
 
     def __str__(self) -> str:  # ให้แสดงเป็นค่าตรง ๆ เวลา print/format
@@ -161,6 +162,74 @@ def _looks_like_string_id(series: pd.Series, non_null: pd.Series, str_sample: li
     )
 
 
+# ----------------------------------------------------------------------------
+# ตรวจจับเบอร์โทรศัพท์ไทย
+# ----------------------------------------------------------------------------
+# รูปแบบเบอร์ไทย: 0812345678, 08-1234-5678, 081-234-5678, +668****5678
+# ลักษณะเด่น: 10 หลัก (หลังตัด prefix/symbol), ขึ้นต้นด้วย 0 หรือ +66
+_PHONE_NAME_HINTS = ("phone", "tel", "mobile", "เบอร์", "โทร", "contact")
+
+# pattern เบอร์ไทย (หลัง strip สัญลักษณ์แล้ว): 10 หลัก ขึ้นต้น 0 หรือ +66 + 9 หลัก
+_THAI_PHONE_RE = re.compile(r"^(?:\+66|0)\d{9}$")
+
+# เลขไทย → อารบิก (สำหรับแปลงเบอร์ที่พิมพ์ด้วยเลขไทย)
+_THAI_DIGIT_MAP = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
+
+
+def _clean_phone_str(value: str) -> str:
+    """ลบสัญลักษณ์ออกจากเบอร์โทร — แปลงเลขไทย, ลบ dash/space/parenthesis, +66 → 0."""
+    s = value.strip()
+    s = s.translate(_THAI_DIGIT_MAP)  # เลขไทย → อารบิก
+    s = re.sub(r"[-\s()\.]", "", s)
+    if s.startswith("+66"):
+        s = "0" + s[3:]
+    return s
+
+
+def _looks_like_phone_column(series: pd.Series, str_sample: list[str]) -> bool:
+    """เดาว่าคอลัมน์เป็นเบอร์โทรศัพท์ไทยหรือไม่.
+
+    เงื่อนไข: ชื่อบอกใบ้ (phone/tel/mobile/เบอร์/โทร) + ≥50% ตรงรูปแบบ
+    หรือไม่มีชื่อบอกใบ้แต่ ≥70% ตรงรูปแบบเบอร์ไทย
+    """
+    if not str_sample:
+        return False
+    name = str(series.name).lower() if series.name is not None else ""
+    name_hints = any(h in name for h in _PHONE_NAME_HINTS)
+
+    matches = sum(1 for s in str_sample if _THAI_PHONE_RE.match(_clean_phone_str(s)))
+    ratio = matches / len(str_sample)
+    if name_hints and ratio >= 0.50:
+        return True
+    return ratio >= 0.70
+
+
+def normalize_phone_number(value: object) -> str:
+    """ทำความสะอาดเบอร์โทรศัพท์ไทย — ละลักษณะเป็น 10 หลักขึ้นต้น 0.
+
+    แปลงเลขไทยเป็นอารบิก, ลบ dash/space/parenthesis, เปลี่ยน +66 → 0.
+    คืนค่าเดิม (เป็น str) ถ้าไม่ใช่เบอร์ไทย
+    """
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return str(value) if value is not None else ""
+    cleaned = _clean_phone_str(str(value))
+    if _THAI_PHONE_RE.match(cleaned):
+        return cleaned
+    return str(value)
+
+
+def is_phone_number(value: object) -> bool:
+    """ตรวจว่าค่าเป็นเบอร์โทรศัพท์ไทยหรือไม่ (หลังทำความสะอาด)."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return False
+    return bool(_THAI_PHONE_RE.match(_clean_phone_str(str(value))))
+
+
+def clean_phone_string(value: str) -> str:
+    """ลบสัญลักษณ์จากเบอร์โทร — alias ของ _clean_phone_str สำหรับ public API."""
+    return _clean_phone_str(str(value))
+
+
 def detect_column_type(series: pd.Series) -> ColumnType:
     """จำแนกประเภทของ pandas Series หนึ่งคอลัมน์.
 
@@ -187,6 +256,11 @@ def detect_column_type(series: pd.Series) -> ColumnType:
     # --- สุ่มตัวอย่างไม่เกิน 1000 ค่า เพื่อตรวจ object column ---
     sample = non_null.head(1000)
     str_sample = [str(v) for v in sample]
+
+    # ตรวจเบอร์โทรศัพท์ — ต้องเช็คก่อน numeric เพราะเบอร์โทรเป็นเลขล้วน
+    # แต่ไม่ควรถือเป็น numeric สำหรับสถิติ (เบอร์ไม่มีความหมายทางสถิติ)
+    if _looks_like_phone_column(series, str_sample):
+        return ColumnType.PHONE_NUMBER
 
     # ลองตีความเป็นตัวเลข (object ที่จริง ๆ เป็นเลข)
     coerced_num = pd.to_numeric(pd.Series(str_sample), errors="coerce")
@@ -264,4 +338,7 @@ __all__ = [
     "is_thai_text",
     "detect_column_type",
     "detect_all",
+    "normalize_phone_number",
+    "is_phone_number",
+    "clean_phone_string",
 ]
