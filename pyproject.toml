@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "thaieda"
-version = "1.0.0"
+version = "1.0.1"
 description = "AutoEDA สำหรับข้อมูลภาษาไทย — Exploratory data analysis that speaks Thai"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -37,12 +37,24 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Information Analysis",
 ]
 
-# Core dependencies — ติดตั้งได้ทุกที่ ไม่ต้องมี Thai tokenizer
+# Core dependencies — pip install thaieda ติดตั้งทุกอย่างเลย
 dependencies = [
     "pandas>=2.0",
     "numpy>=1.24",
     "matplotlib>=3.7",
     "jinja2>=3.1",
+    "pythainlp>=5.0",
+    "nlpo3>=1.2",
+    "attacut>=1.0",
+    "wordcloud>=1.9",
+    "ftfy>=6.0",
+    "scikit-learn>=1.3",
+    "scipy>=1.11",
+    "statsmodels>=0.14",
+    "python-crfsuite>=0.9",
+    "rapidfuzz>=3.0",
+    "chardet>=5.0",
+    "openpyxl>=3.1",
 ]
 
 [project.optional-dependencies]

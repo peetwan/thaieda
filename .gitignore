@@ -57,4 +57,4 @@ reports_output/
 data-example/
 
 # Git worktrees ภายใน (สำหรับงาน agent)
-_worktrees/
+_worktrees/.env
