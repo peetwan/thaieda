@@ -47,6 +47,7 @@ thaieda run data.csv -o report.html
 
 | Version | Highlights |
 |---------|-----------|
+| **v0.6** | Cross-column insight engine — discovers outstanding / attribution / comparison / trend findings (group-by + statistical scoring, BH-corrected) |
 | **v0.5** | Multi-file schema discovery, ER diagram, relationship validation, orphan detection |
 | **v0.4** | Timeseries analysis (trend/seasonality/STL/ACF/gaps), distribution & correlation insights |
 | **v0.3** | Single-command pipeline, JSON input, auto encoding detection, auto insights, cleaning diff |
@@ -175,6 +176,15 @@ pip install "thaieda[thai,ner,viz,ml,stats,timeseries,detect]"
 - **Distribution insights** — skewness, kurtosis, bimodal detection for numeric columns
 - **Correlation & duplicates** — highly correlated column pairs, duplicate rows, numbers stored as text
 
+### Cross-Column Insights (v0.6)
+
+- **Discovers, not just interprets** — combines columns (group-by + aggregate + statistical scoring) to surface non-obvious findings, ranked by an interestingness pipeline
+- **4 patterns** — *outstanding* (one segment dominates), *attribution* (one segment is a large share of a total), *comparison* (a segment differs significantly from the rest, ANOVA/Kruskal + JSD), *trend* (monotonic movement over time, Mann-Kendall)
+- **Statistically honest** — Benjamini-Hochberg correction across all candidate tests (FDR control for hundreds of comparisons); degrades gracefully without scipy (effect-size-only + a note)
+- **Domain-agnostic** — zero column-name logic, no overfitting; driven entirely by `ColumnType` + cardinality + value ranges. Works on retail, HR, finance, sensor data, anything
+- **Scales to 1M+ rows** — two-phase sampling (score on a ~100k sample, recompute exact numbers on the full data for the top-N only)
+- **Thai-aware** — category keys normalized before group-by; every finding is written in Thai with evidence (top segments, share %, lift %, p-value, τ)
+
 ### Multi-File Schema Discovery (v0.5)
 
 - **Auto relationship detection** — scan a directory of CSV/JSON files and discover how tables connect via primary/foreign keys
@@ -229,6 +239,10 @@ thaieda run data.csv -o report.html --no-clean
 # Skip timeseries analysis (faster on non-timeseries data)
 thaieda run data.csv -o report.html --no-timeseries
 
+# Cross-column insights are on by default; tune or disable them
+thaieda profile data.csv -o report.html --insights-top 12
+thaieda profile data.csv -o report.html --no-insights
+
 # Sample N rows before analysis (for large files)
 thaieda run data.csv -o report.html --sample 5000
 
@@ -277,6 +291,30 @@ for col, r in results.items():
 r = analyze_timeseries(series, engine="auto")  # "auto" | "statsmodels" | "basic"
 ```
 
+### Cross-Column Insights
+
+```python
+from thaieda import discover_insights, profile
+from thaieda.detect import detect_all
+
+# Standalone — discover insights from any DataFrame
+result = discover_insights(df, detect_all(df), top_n=8)
+for card in result.cards:
+    p = card.perspective
+    print(f"[{card.pattern}] score={card.score:.2f}  {p.breakdown} × {p.measure} ({p.agg})")
+    print(f"  {card.description_th}")
+    print(f"  → {card.recommendation_th}")
+    print(f"  evidence: {card.evidence}")
+
+# Or via the full report (on by default; top 3 feed the executive summary)
+report = profile(df)                          # insights_engine=True, insights_top=8
+report.to_html("report.html")                 # includes a "Cross-Column Insights" section
+print(report.insight_engine.total, "cross-column insights")
+
+# Disable it for speed
+report = profile(df, insights_engine=False)
+```
+
 ### Multi-File Schema Discovery
 
 ```python
@@ -319,13 +357,14 @@ thaieda/
   clean/       # Data cleaning: encoding, zwspace, keyboard layout, normalize
   ner/         # Thai NER: person/place/organization extraction (v0.2)
   analysis/    # Target variable analysis: Pearson/ANOVA/Chi-square (v0.2)
-  insight/     # Auto insight summary in Thai (v0.3) + distribution/correlation (v0.4)
+  insight/        # Auto insight summary in Thai (v0.3) + distribution/correlation (v0.4)
+  insight_engine/ # Cross-column insight discovery: group-by + 4 patterns + scoring (v0.6)
   timeseries/  # Timeseries analysis: trend/seasonality/STL/ACF/gaps (v0.4)
   schema/      # Multi-file schema discovery: PK/FK detection + relationship matching (v0.5)
   viz/         # Visualization + auto chart + Thai font (+ timeseries plots v0.4)
   report/      # HTML report generation (Jinja2) + DatasetReport (v0.5)
   i18n/        # Bilingual labels (Thai/English)
-  llm/         # LLM Q&A (v0.6+)
+  llm/         # LLM Q&A
 ```
 
 **Design principles:**
@@ -345,8 +384,9 @@ thaieda/
 | **v0.3** | Single-command pipeline, JSON input, auto encoding, auto insights, cleaning diff | ✅ Done |
 | **v0.4** | Timeseries analysis, distribution & correlation insights | ✅ Done |
 | **v0.5** | Multi-file schema discovery, ER diagram, relationship validation, orphan detection | ✅ Done |
-| **v0.6** | LLM Q&A (litellm + Ollama local), Thai explanations | 📋 Planned |
-| **v0.7** | Interactive dashboard (Streamlit/FastAPI), Thai UI | 📋 Planned |
+| **v0.6** | Cross-column insight engine (outstanding / attribution / comparison / trend, BH-corrected) | ✅ Done |
+| **v0.7** | LLM Q&A (litellm + Ollama local), Thai explanations | 📋 Planned |
+| **v0.8** | Interactive dashboard (Streamlit/FastAPI), Thai UI | 📋 Planned |
 
 ---
 

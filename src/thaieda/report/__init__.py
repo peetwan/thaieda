@@ -18,7 +18,8 @@ from thaieda.anomaly import AnomalyIssue, detect_anomalies
 from thaieda.clean import CleaningResult, clean_thai_text
 from thaieda.detect import ColumnType, detect_all
 from thaieda.i18n import label
-from thaieda.insight import InsightSummary, generate_insights
+from thaieda.insight import Insight, InsightSummary, generate_insights
+from thaieda.insight_engine import InsightEngineResult, discover_insights
 from thaieda.ner import NERResult, extract_entities, ner_available
 from thaieda.quality import QualityIssue, run_quality_checks
 from thaieda.report._template import REPORT_TEMPLATE
@@ -60,6 +61,8 @@ class ProfileReport:
         target_column: str | None = None,
         clean: bool = False,
         timeseries: bool = True,
+        insights_engine: bool = True,
+        insights_top: int = 8,
         progress: Callable[[str], None] | None = None,
     ) -> None:
         if not isinstance(df, pd.DataFrame):
@@ -76,6 +79,9 @@ class ProfileReport:
         self.clean = clean
         # timeseries=True: ตรวจหา datetime column แล้ววิเคราะห์คอลัมน์ตัวเลขเป็นอนุกรมเวลาอัตโนมัติ
         self.timeseries = timeseries
+        # insights_engine=True: ค้นหาข้อค้นพบจากการผสมคอลัมน์ (group-by + aggregate + scoring)
+        self.insights_engine = insights_engine
+        self.insights_top = insights_top
         # progress: callback(ข้อความ) เรียกระหว่างแต่ละขั้นตอน — ใช้แสดงความคืบหน้าบนไฟล์ใหญ่
         self._progress_cb = progress
 
@@ -97,6 +103,8 @@ class ProfileReport:
         # กราฟ timeseries ต่อคอลัมน์ (line/decomposition/acf)
         self._timeseries_charts: dict[str, dict[str, str]] = {}
         self._insights: InsightSummary | None = None
+        # ผลจาก cross-column insight engine (v0.6) — None ถ้าปิดใช้งานหรือยังไม่ได้รัน
+        self._insight_engine: InsightEngineResult | None = None
         self._overview: dict[str, Any] = {}
         self._charts: dict[str, dict[str, str]] = {}
         # กราฟระดับชุดข้อมูล (correlation/scatter/box/violin/missing) จาก auto_select_charts
@@ -146,6 +154,11 @@ class ProfileReport:
         # การวิเคราะห์ตัวแปรเป้าหมาย (target analysis) — เมื่อผู้ใช้ระบุ target_column
         self._compute_target_analysis()
 
+        # ค้นหาข้อค้นพบจากการผสมคอลัมน์ (cross-column insight engine, v0.6)
+        if self.insights_engine:
+            self._emit_progress("prog_insights_engine")
+        self._compute_insight_engine()
+
         # การวิเคราะห์อนุกรมเวลา (timeseries) — เมื่อมี datetime column และเปิดใช้งาน
         if self.timeseries:
             self._emit_progress("prog_timeseries")
@@ -169,6 +182,7 @@ class ProfileReport:
             cleaning_results=self._cleaning_diff,
             column_types=self._column_types,
             timeseries_results=self._timeseries,
+            extra_insights=self._business_insights(),
         )
 
         # กราฟ
@@ -322,6 +336,38 @@ class ProfileReport:
         except Exception as exc:  # noqa: BLE001 — การวิเคราะห์ target พังไม่ควรล้มทั้งรายงาน
             self._notes.append(f"target analysis failed: {exc}")
             self._target_associations = []
+
+    def _compute_insight_engine(self) -> None:
+        """ค้นหาข้อค้นพบจากการผสมคอลัมน์ (group-by + aggregate + statistical scoring)."""
+        if not self.insights_engine:
+            return
+        try:
+            self._insight_engine = discover_insights(
+                self.df,
+                self._column_types,
+                top_n=self.insights_top,
+                progress=self._progress_cb,
+            )
+        except Exception as exc:  # noqa: BLE001 — เอนจินพังไม่ควรล้มทั้งรายงาน
+            self._notes.append(f"cross-column insight engine failed: {exc}")
+            self._insight_engine = None
+
+    def _business_insights(self) -> list[Insight]:
+        """แปลง InsightCard เด่นสุด 3 อันดับ → Insight (หมวด business) เพื่อป้อนบทสรุปผู้บริหาร."""
+        if self._insight_engine is None or not self._insight_engine.cards:
+            return []
+        out: list[Insight] = []
+        for card in self._insight_engine.cards[:3]:
+            out.append(
+                Insight(
+                    category="business",
+                    severity=card.severity,
+                    title_th=card.title_th,
+                    description_th=card.description_th,
+                    recommendation_th=card.recommendation_th,
+                )
+            )
+        return out
 
     def _apply_cleaning(self) -> None:
         """ทำความสะอาดข้อความทุกคอลัมน์ (object/string) จริง — แทนที่ self.df และเก็บ diff.
@@ -532,6 +578,12 @@ class ProfileReport:
         return self._insights
 
     @property
+    def insight_engine(self) -> InsightEngineResult | None:
+        """ผลจาก cross-column insight engine (v0.6) — None ถ้าปิดใช้งาน insights_engine."""
+        self._ensure_ran()
+        return self._insight_engine
+
+    @property
     def text_metrics(self) -> dict[str, TextMetrics]:
         self._ensure_ran()
         return self._text_metrics
@@ -582,6 +634,9 @@ class ProfileReport:
             "overview": self._overview,
             "column_types": {k: v.value for k, v in self._column_types.items()},
             "insights": self._insights.to_dict() if self._insights is not None else None,
+            "insight_engine": (
+                self._insight_engine.to_dict() if self._insight_engine is not None else None
+            ),
             "quality_issues": [i.to_dict() for i in self._quality_issues],
             "anomalies": [a.to_dict() for a in self._anomalies],
             "cleaning_suggestions": [c.to_dict() for c in self._cleaning],
@@ -714,6 +769,17 @@ class ProfileReport:
                 ],
             }
 
+        # cross-column insights (insight engine, v0.6) — แนบ label ของ pattern ไว้ใช้ในเทมเพลต
+        business_section = None
+        if self._insight_engine is not None and self._insight_engine.cards:
+            business_section = {
+                "total": self._insight_engine.total,
+                "cards": [
+                    {**c.to_dict(), "pattern_label": L(f"pattern_{c.pattern}")}
+                    for c in self._insight_engine.cards
+                ],
+            }
+
         # cleaning diff — สรุปการทำความสะอาดที่ลงมือทำจริง (เมื่อ clean=True)
         cleaning_diff = [c.to_dict() for c in self._cleaning_diff]
         cleaning_diff_summary = None
@@ -736,6 +802,7 @@ class ProfileReport:
             "overview": self._overview,
             "type_distribution": type_distribution,
             "insight_section": insight_section,
+            "business_section": business_section,
             "quality_issues": [i.to_dict() for i in self._quality_issues],
             "anomalies": anomalies,
             "cleaning_diff": cleaning_diff,
@@ -796,6 +863,8 @@ def profile(
     target_column: str | None = None,
     clean: bool = False,
     timeseries: bool = True,
+    insights_engine: bool = True,
+    insights_top: int = 8,
     progress: Callable[[str], None] | None = None,
 ) -> ProfileReport:
     """สร้าง ProfileReport และรันการวิเคราะห์ทันที — ฟังก์ชันอำนวยความสะดวกหลัก.
@@ -803,6 +872,7 @@ def profile(
     ระบุ target_column เพื่อเพิ่มส่วน "การวิเคราะห์ตัวแปรเป้าหมาย" (ความสัมพันธ์ของทุกคอลัมน์กับเป้าหมาย)
     ระบุ clean=True เพื่อทำความสะอาดข้อความก่อนวิเคราะห์ และแสดงส่วน "การทำความสะอาด" (ก่อน/หลัง) ในรายงาน
     ระบุ timeseries=False เพื่อข้ามการวิเคราะห์อนุกรมเวลา (เร็วขึ้นบนข้อมูลที่ไม่ใช่ timeseries)
+    ระบุ insights_engine=False เพื่อข้ามการค้นหาข้อค้นพบจากการผสมคอลัมน์ (cross-column insights)
     """
     report = ProfileReport(
         df,
@@ -812,6 +882,8 @@ def profile(
         target_column=target_column,
         clean=clean,
         timeseries=timeseries,
+        insights_engine=insights_engine,
+        insights_top=insights_top,
         progress=progress,
     )
     report.run()

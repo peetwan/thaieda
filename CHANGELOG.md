@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-06-25
+
+Headline feature: **cross-column insight engine** — a *discoverer* (vs. the existing
+`insight` *interpreter*) that combines columns (group-by + aggregate + statistical scoring)
+to surface non-obvious business findings in Thai, ranked by an interestingness pipeline.
+Works on **any** dataset — zero column-name logic, no domain overfitting; everything is
+driven by `ColumnType` + cardinality + value ranges.
+
+### Added
+- **`thaieda.insight_engine` module** — discovers insights from column combinations:
+  - `discover_insights(df, column_types, *, top_n=8, sample_size=100_000, min_segment=30, progress=)`
+    — builds perspectives (breakdown × measure × agg) and detects **4 patterns**:
+    - **outstanding** — one segment dominates (`top/second ≥ 1.5`),
+    - **attribution** — one segment is a large share (`≥ 50%`) of a total (`≥ 3` segments),
+    - **comparison** — top segment differs significantly from the rest (ANOVA/Kruskal + JSD),
+    - **trend** — monotonic movement over an ordered (datetime-bucketed) axis (Mann-Kendall).
+  - Dataclasses `Perspective`, `InsightCard`, `InsightEngineResult` (all with `to_dict()`).
+  - **Interestingness pipeline**: `gate → score → penalize → rank` —
+    `final = gate × (0.5·pattern_score + 0.5·effect_size) × novelty × (1 − triviality)`.
+  - **Benjamini-Hochberg correction** across all candidate significance tests (FDR control
+    for hundreds of comparisons). Mann-Kendall p-values are computed with `math.erf`, so trend
+    significance works even without scipy; ANOVA p-values degrade to effect-size-only + a note.
+  - **Two-phase**: scores candidates on a stratified sample (~100k rows), then recomputes exact
+    numbers on the full data for the top-N only — handles 1M+ rows (804k rows in ~5s).
+  - **Triviality / non-additive guards**: excludes ID / near-unique / single-group breakdowns;
+    skips `sum` for measures bounded in `[0,1]` (or `[0,100]` percentage-like floats).
+  - Category keys are normalized before group-by (Thai numerals → Arabic, zero-width stripped,
+    trailing `.0` removed) via the shared `schema._normalize_key_series` — prevents split groups.
+- **`ProfileReport(insights_engine=True, insights_top=8)`** — new analysis stage (after target
+  analysis, before timeseries), wrapped in try/except → `notes`. Top 3 cards feed the existing
+  `InsightSummary` (new `business` category) so they appear in the executive summary.
+- **Dedicated HTML report section** "ข้อค้นพบจากการวิเคราะห์คอลัมน์ผสม" (Cross-Column Insights)
+  with pattern badges, per-card evidence mini-tables (top segments, share, lift, p-value, τ).
+- **CLI** `--no-insights` and `--insights-top N` flags on `profile` and `run` (on by default).
+- New `thaieda` top-level exports: `discover_insights`, `InsightCard`, `InsightEngineResult`,
+  `Perspective`.
+
 ## [0.5.0] - 2026-06-25
 
 Headline feature: **multi-file schema discovery** — analyze a whole folder of related
