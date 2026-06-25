@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 
 from thaieda.analysis import _anova, _scipy_stats
-from thaieda.detect import ColumnType
+from thaieda.detect import ColumnType, _name_hints_id
 from thaieda.schema import _normalize_key_series
 
 # ----------------------------------------------------------------------------
@@ -40,6 +40,7 @@ _W_EFFECT = 0.5  # น้ำหนักขนาดผล (effect size)
 _MIN_SEGMENT = 30  # แถวขั้นต่ำต่อกลุ่ม (กลุ่มเล็กกว่านี้ไม่น่าเชื่อถือ)
 _SIGNIFICANCE_ALPHA = 0.01  # เข้มกว่า 0.05 เพื่อกัน false positive (multiple comparisons)
 _MAX_BREAKDOWNS = 20  # cap จำนวน breakdown candidate (กันระเบิดบนตารางกว้าง)
+_MAX_BOOLEAN_BREAKDOWNS = 2  # cap จำนวน boolean breakdown (2 ค่า) — กัน insight ที่ครอบผล
 _MAX_MEASURES = 20  # cap จำนวน measure candidate
 _DOMINANCE_THRESHOLD = 1.5  # อัตราส่วน top/second ที่ถือว่า "outstanding"
 _SHARE_THRESHOLD = 0.5  # สัดส่วนที่ถือว่า "attribution"
@@ -333,7 +334,11 @@ _NON_BREAKDOWN_TYPES = {
 def _select_breakdowns(
     df: pd.DataFrame, column_types: dict[str, ColumnType], notes: list[str]
 ) -> list[_Breakdown]:
-    """เลือก candidate breakdowns — หมวดหมู่ (2-50 ค่า) + datetime ที่ bucket ได้."""
+    """เลือก candidate breakdowns — หมวดหมู่ (2-50 ค่า) + datetime ที่ bucket ได้.
+
+    จัดลำดับความสำคัญ: categorical ที่มีหลายกลุ่มขึ้นก่อน, boolean (2 ค่า) ลด priority
+    (boolean breakdown มักให้ insight ที่ถูกต้องแต่ไม่ค่อยน่าสนใจ — กลุ่มที่เยอะกว่าชนะเสมอ)
+    """
     out: list[_Breakdown] = []
     for col, ctype in column_types.items():
         if col not in df.columns:
@@ -351,12 +356,31 @@ def _select_breakdowns(
             nunique = int(df[col].dropna().nunique())
             if _MIN_BREAKDOWN_CARD <= nunique <= _MAX_BREAKDOWN_CARD:
                 out.append(_Breakdown(col, "categorical", ordinal=False))
+    # จัดลำดับ: breakdown ที่มีหลายกลุ่มขึ้นก่อน (boolean = 2 ค่า ลงหลัง) — ให้ categorical จริงได้โอกาสก่อน
+    out.sort(key=lambda b: _breakdown_cardinality(df, b), reverse=True)
+    # cap จำนวน boolean breakdowns (2 ค่า) ไว้ไม่เกิน 2 ตัว — กันครอบผล
+    bool_bds = [b for b in out if _breakdown_cardinality(df, b) <= 2]
+    if len(bool_bds) > _MAX_BOOLEAN_BREAKDOWNS:
+        kept_bool = set(bool_bds[:_MAX_BOOLEAN_BREAKDOWNS])
+        removed = [b.column for b in bool_bds[_MAX_BOOLEAN_BREAKDOWNS:]]
+        notes.append(
+            f"จำกัด boolean breakdown ไว้ {_MAX_BOOLEAN_BREAKDOWNS} ตัว "
+            f"(ข้าม: {', '.join(removed[:5])}) — ลด insight ที่ครอบผล"
+        )
+        out = [b for b in out if _breakdown_cardinality(df, b) > 2 or b in kept_bool]
     if len(out) > _MAX_BREAKDOWNS:
         notes.append(
             f"จำกัด breakdown ไว้ {_MAX_BREAKDOWNS} จาก {len(out)} คอลัมน์ (กันการคำนวณบานปลาย)"
         )
         out = out[:_MAX_BREAKDOWNS]
     return out
+
+
+def _breakdown_cardinality(df: pd.DataFrame, bd: _Breakdown) -> int:
+    """จำนวนค่าไม่ซ้ำของ breakdown (ใช้เรียงลำดับความสำคัญ)."""
+    if bd.kind == "datetime":
+        return 99  # datetime มีความสำคัญสูงเสมอ (trend ใช้ได้)
+    return int(df[bd.column].dropna().nunique())
 
 
 def _is_non_additive(values: np.ndarray) -> bool:
@@ -379,13 +403,22 @@ def _is_non_additive(values: np.ndarray) -> bool:
 def _select_measures(
     df: pd.DataFrame, column_types: dict[str, ColumnType], notes: list[str]
 ) -> dict[str, dict]:
-    """เลือก candidate measures — คอลัมน์ตัวเลขที่ความแปรปรวน > 0 (ไม่ใช่ ID).
+    """เลือก candidate measures — คอลัมน์ตัวเลขที่ความแปรปรวน > 0 (ไม่ใช่ ID/FK).
+
+    กรองคอลัมน์ที่ชื่อบอกใบ้ว่าเป็น ID/FK (เช่น store_id, product_id) ออก —
+    แม้ว่า detect จะจัดเป็น NUMERIC (เพราะค่าซ้ำจึงไม่เข้าเกณฑ์ ID) แต่ sum/mean ของ
+    ID ไม่มีความหมายทางธุรกิจ จึงไม่ควรเป็น measure
 
     คืน mapping ชื่อ measure -> {"non_additive": bool} (ใช้ตัดสินว่าจะทำ agg "sum" หรือไม่)
     """
     out: dict[str, dict] = {}
+    skipped_fk: list[str] = []
     for col, ctype in column_types.items():
         if ctype != ColumnType.NUMERIC or col not in df.columns:
+            continue
+        # กรอง FK ที่ชื่อบอกใบ้ว่าเป็น ID (เช่น store_id, customer_id) — ไม่ใช่ measure ที่มีความหมาย
+        if _name_hints_id(df[col]):
+            skipped_fk.append(col)
             continue
         numeric = pd.to_numeric(df[col], errors="coerce").dropna()
         if len(numeric) < 2 or float(numeric.std()) == 0.0 or numeric.nunique() <= 1:
@@ -394,6 +427,8 @@ def _select_measures(
         if len(out) >= _MAX_MEASURES:
             notes.append(f"จำกัด measure ไว้ {_MAX_MEASURES} คอลัมน์ (กันการคำนวณบานปลาย)")
             break
+    if skipped_fk:
+        notes.append(f"ข้ามคอลัมน์ ID/FK ที่ไม่ใช่ measure ที่มีความหมาย: {', '.join(skipped_fk[:5])}")
     return out
 
 
