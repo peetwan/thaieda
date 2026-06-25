@@ -178,6 +178,39 @@ LABELS: dict[str, dict[str, str]] = {
     # --- สรุปผลแบบตาราง (CLI) ---
     "summary_table": {"en": "Summary", "th": "สรุปผล"},
     "sampled_rows": {"en": "Sampled rows", "th": "สุ่มตัวอย่างแถว"},
+    # --- v0.5: รายงานชุดข้อมูลหลายตาราง (dataset / schema) ---
+    "dataset_report_title": {"en": "ThaiEDA Dataset Report", "th": "รายงานชุดข้อมูล ThaiEDA"},
+    "schema_overview": {"en": "Schema Overview", "th": "ภาพรวม Schema"},
+    "tables": {"en": "Tables", "th": "ตาราง"},
+    "relationships": {"en": "Relationships", "th": "ความสัมพันธ์"},
+    "er_diagram": {"en": "ER Diagram", "th": "แผนผังความสัมพันธ์"},
+    "orphan_findings": {"en": "Orphan Records", "th": "ข้อมูลกำพร้า"},
+    "from_table": {"en": "From", "th": "จากตาราง"},
+    "to_table": {"en": "To", "th": "ไปตาราง"},
+    "overlap": {"en": "Overlap", "th": "ครอบคลุม"},
+    "orphan_count": {"en": "Orphans", "th": "กำพร้า"},
+    "cardinality": {"en": "Cardinality", "th": "ความสัมพันธ์แบบ"},
+    "confidence": {"en": "Confidence", "th": "ความมั่นใจ"},
+    "key_candidates": {"en": "Key Columns", "th": "คอลัมน์คีย์"},
+    "match_method": {"en": "Match", "th": "วิธีจับคู่"},
+    "table_count": {"en": "Tables", "th": "จำนวนตาราง"},
+    "relationship_count": {"en": "Relationships", "th": "จำนวนความสัมพันธ์"},
+    "orphan_count_total": {"en": "Orphan Findings", "th": "จุดที่พบข้อมูลกำพร้า"},
+    "row_count": {"en": "Rows", "th": "จำนวนแถว"},
+    "no_relationships": {
+        "en": "No relationships detected between tables.",
+        "th": "ไม่พบความสัมพันธ์ระหว่างตาราง",
+    },
+    "no_orphans": {"en": "No orphan records found.", "th": "ไม่พบข้อมูลกำพร้า"},
+    "validated": {"en": "Validated", "th": "ตรวจค่าแล้ว"},
+    "name_only": {"en": "Name only", "th": "ชื่อเท่านั้น"},
+    "primary_key": {"en": "Primary Key", "th": "คีย์หลัก (PK)"},
+    "foreign_key": {"en": "Foreign Key", "th": "คีย์อ้างอิง (FK)"},
+    # --- progress (dataset) ---
+    "prog_dataset_match": {
+        "en": "Matching relationships...",
+        "th": "จับคู่ความสัมพันธ์...",
+    },
 }
 
 

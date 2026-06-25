@@ -24,6 +24,9 @@ from thaieda.i18n import label
 # ตัวเลือก format ที่รองรับสำหรับการอ่านไฟล์
 _FORMAT_CHOICES = ["auto", "csv", "json", "jsonl"]
 
+# นามสกุลไฟล์ที่นับเป็น "ตาราง" เมื่อสแกนไดเรกทอรี (โหมด dataset หลายตาราง)
+_DATASET_EXTS = (".csv", ".tsv", ".json", ".jsonl", ".ndjson")
+
 # ขนาดไฟล์ที่ถือว่า "ใหญ่" (10MB) — แสดงจำนวนแถวหลังอ่าน และแนะนำ flag เพื่อความเร็ว
 _LARGE_FILE_BYTES = 10 * 1024 * 1024
 
@@ -198,6 +201,30 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     _add_io_args(p_clean)
+
+    # ----- dataset (multi-file schema discovery) -----
+    p_dataset = sub.add_parser("dataset", help="วิเคราะห์หลายไฟล์พร้อมกัน ค้นหาความสัมพันธ์ระหว่างตาราง")
+    p_dataset.add_argument(
+        "input",
+        nargs="+",
+        help="พาธไดเรกทอรี หรือรายการไฟล์ CSV/JSON (เว้นวรรคคั่น)",
+    )
+    p_dataset.add_argument(
+        "-o",
+        "--output",
+        default=None,
+        help="พาธไฟล์ HTML ผลลัพธ์ (ค่าเริ่มต้น: <dir>/dataset.thaieda.html)",
+    )
+    p_dataset.add_argument(
+        "--lang", choices=["th", "en"], default="th", help="ภาษาของรายงาน (เริ่มต้น: th)"
+    )
+    p_dataset.add_argument(
+        "--no-validate",
+        action="store_true",
+        help="ข้ามการตรวจสอบ value overlap (เร็วขึ้น — จับคู่ด้วยชื่อคอลัมน์อย่างเดียว)",
+    )
+    p_dataset.add_argument("--json", default=None, help="ส่งออกข้อมูลเป็น JSON ไปยังพาธที่ระบุด้วย")
+    p_dataset.add_argument("--quiet", action="store_true", help="แสดงผลแบบย่อ (พิมพ์เฉพาะพาธไฟล์ผลลัพธ์)")
     return parser
 
 
@@ -295,6 +322,11 @@ def _run_profile(args: argparse.Namespace) -> int:
 
     quiet = args.quiet
     color = _supports_color()
+
+    # input เป็นไดเรกทอรีที่มีหลายไฟล์ → วิเคราะห์เป็นชุดข้อมูล (multi-file schema) อัตโนมัติ
+    routed = _maybe_route_dataset(args)
+    if routed is not None:
+        return routed
 
     df, code = _read_input(args, quiet=quiet, color=color)
     if df is None:
@@ -444,6 +476,11 @@ def _run_run(args: argparse.Namespace) -> int:
     quiet = args.quiet
     color = _supports_color()
 
+    # input เป็นไดเรกทอรีที่มีหลายไฟล์ → วิเคราะห์เป็นชุดข้อมูล (multi-file schema) อัตโนมัติ
+    routed = _maybe_route_dataset(args)
+    if routed is not None:
+        return routed
+
     df, code = _read_input(args, quiet=quiet, color=color)
     if df is None:
         return code
@@ -591,12 +628,123 @@ def _run_clean(args: argparse.Namespace) -> int:
 
 
 # ----------------------------------------------------------------------------
+# dataset (multi-file schema discovery)
+# ----------------------------------------------------------------------------
+def _dataset_core(
+    ds_input: str | list[str],
+    output_path: str,
+    lang: str,
+    validate: bool,
+    json_path: str | None,
+    quiet: bool,
+    color: bool,
+) -> int:
+    """รัน profile_dataset → DatasetReport แล้วบันทึก HTML/JSON + พิมพ์สรุป."""
+    from thaieda.report._dataset import DatasetReport
+    from thaieda.schema import profile_dataset
+
+    dataset = profile_dataset(
+        ds_input, lang=lang, validate_values=validate, progress=_make_progress(quiet, color)
+    )
+    report = DatasetReport(dataset, lang=lang)
+    if not quiet:
+        print(f"  {_paint('…', 'dim', color)} {label('prog_report', lang)}", flush=True)
+    report.to_html(output_path)
+    if json_path:
+        report.to_json(json_path)
+
+    if quiet:
+        print(output_path)
+        if json_path:
+            print(json_path)
+    else:
+        _print_dataset_summary(dataset, output_path, json_path, color)
+    return 0
+
+
+def _print_dataset_summary(dataset, html_path: str, json_path: str | None, color: bool) -> None:
+    """สรุปผลโหมด dataset บนเทอร์มินัล — ตาราง, ความสัมพันธ์, ข้อมูลกำพร้า."""
+    print(_section("วิเคราะห์ชุดข้อมูลหลายตาราง", color))
+    print(
+        f"  ตาราง: {len(dataset.tables)} | "
+        f"ความสัมพันธ์: {len(dataset.relationships)} | "
+        f"ข้อมูลกำพร้า: {len(dataset.orphan_findings)}"
+    )
+    for t in dataset.tables:
+        print(f"    • {t.name}: {t.row_count:,} แถว × {t.column_count} คอลัมน์")
+    if dataset.relationships:
+        print("  ความสัมพันธ์ที่พบ:")
+        for r in dataset.relationships[:12]:
+            print(f"    • {r.description_th} (มั่นใจ {r.confidence * 100:.0f}%)")
+        if len(dataset.relationships) > 12:
+            print(f"    … และอีก {len(dataset.relationships) - 12} ความสัมพันธ์")
+    for o in dataset.orphan_findings[:5]:
+        print(_paint(f"  ⚠ {o}", "warning", color))
+    for note in dataset.notes:
+        print(_paint(f"  ⚠ {note}", "warning", color))
+    print(_paint(f"✓ บันทึกรายงาน HTML: {html_path}", "ok", color))
+    if json_path:
+        print(_paint(f"✓ บันทึก JSON: {json_path}", "ok", color))
+
+
+def _run_dataset(args: argparse.Namespace) -> int:
+    quiet = args.quiet
+    color = _supports_color()
+
+    paths = [Path(p) for p in args.input]
+    missing = [str(p) for p in paths if not p.exists()]
+    if missing:
+        print(f"error: ไม่พบพาธ: {', '.join(missing)}", file=sys.stderr)
+        return 2
+
+    if len(paths) == 1 and paths[0].is_dir():
+        ds_input: str | list[str] = str(paths[0])
+        default_out = str(paths[0] / "dataset.thaieda.html")
+    else:
+        ds_input = [str(p) for p in paths]
+        default_out = str(paths[0].parent / "dataset.thaieda.html")
+
+    output_path = args.output or default_out
+    return _dataset_core(
+        ds_input, output_path, args.lang, not args.no_validate, args.json, quiet, color
+    )
+
+
+def _maybe_route_dataset(args: argparse.Namespace) -> int | None:
+    """ถ้า input เป็นไดเรกทอรีที่มีไฟล์รองรับ >= 2 → วิเคราะห์เป็นชุดข้อมูล (คืน exit code) มิฉะนั้น None."""
+    input_path = Path(args.input)
+    if not input_path.is_dir():
+        return None
+    files = [
+        f for f in sorted(input_path.iterdir()) if f.is_file() and f.suffix.lower() in _DATASET_EXTS
+    ]
+    if len(files) < 2:
+        return None
+    quiet = getattr(args, "quiet", False)
+    color = _supports_color()
+    if not quiet:
+        msg = f"  ℹ พบไดเรกทอรี ({len(files)} ไฟล์) — วิเคราะห์เป็นชุดข้อมูลหลายตาราง"
+        print(_paint(msg, "info", color), flush=True)
+    output_path = args.output or str(input_path / "dataset.thaieda.html")
+    return _dataset_core(
+        str(input_path),
+        output_path,
+        getattr(args, "lang", "th"),
+        True,
+        getattr(args, "json", None),
+        quiet,
+        color,
+    )
+
+
+# ----------------------------------------------------------------------------
 # entrypoint
 # ----------------------------------------------------------------------------
 _RUNNERS = {
     "profile": _run_profile,
     "run": _run_run,
     "clean": _run_clean,
+    "dataset": _run_dataset,
 }
 
 
