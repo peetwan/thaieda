@@ -108,3 +108,61 @@ def test_lazy_import_from_package():
 
     assert callable(thaieda.profile)
     assert thaieda.ProfileReport is not None
+
+
+# ------------------------------------------------------------- insights (v0.3)
+def test_report_has_insights(sample_df):
+    from thaieda.insight import InsightSummary
+
+    r = profile(sample_df)
+    assert isinstance(r.insights, InsightSummary)
+    assert r.insights.total_insights >= 1
+    assert r.insights.executive_summary_th
+
+
+def test_insights_in_html(sample_df):
+    r = profile(sample_df)
+    html = r.to_html()
+    assert "ข้อค้นพบสำคัญ" in html  # auto insights heading
+    assert "บทสรุปผู้บริหาร" in html  # executive summary label
+
+
+def test_insights_in_to_dict(sample_df):
+    r = profile(sample_df)
+    d = r.to_dict()
+    assert "insights" in d
+    assert d["insights"]["total_insights"] >= 1
+    assert "executive_summary_th" in d["insights"]
+
+
+# ------------------------------------------------------------- cleaning diff (v0.3)
+def test_clean_flag_produces_diff(sample_df):
+    r = profile(sample_df, clean=True)
+    # ต้องมีการทำความสะอาดจริง (zero-width / เลขไทย ในข้อมูลตัวอย่าง)
+    assert len(r.cleaning_diff) >= 1
+    ops = {c.operation for c in r.cleaning_diff}
+    assert "normalize_thai_numerals" in ops or "remove_zero_width_chars" in ops
+
+
+def test_clean_flag_cleans_dataframe(sample_df):
+    r = profile(sample_df, clean=True)
+    r.run()
+    # เลขไทยในคอลัมน์ price ต้องถูกแปลงเป็นเลขอารบิกแล้ว
+    assert "๑๒๐" not in list(r.df["price"])
+    assert "120" in list(r.df["price"])
+
+
+def test_clean_diff_in_html_and_dict(sample_df):
+    r = profile(sample_df, clean=True)
+    html = r.to_html()
+    assert "การทำความสะอาด" in html
+    d = r.to_dict()
+    assert "cleaning_diff" in d
+    assert len(d["cleaning_diff"]) >= 1
+
+
+def test_no_clean_no_diff(sample_df):
+    r = profile(sample_df, clean=False)
+    assert r.cleaning_diff == []
+    d = r.to_dict()
+    assert "cleaning_diff" not in d

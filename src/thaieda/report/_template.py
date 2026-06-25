@@ -78,6 +78,15 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
   footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border);
            color: var(--muted); font-size: 13px; }
   .note { color: var(--muted); font-size: 13px; font-style: italic; margin-top: 8px; }
+  .exec { background: var(--panel2); border: 1px solid var(--border);
+          border-left: 4px solid var(--accent); border-radius: 10px;
+          padding: 16px 20px; margin: 14px 0 18px; font-size: 15px; }
+  .exec .lbl { color: var(--accent); font-weight: 700; font-size: 13px;
+               text-transform: uppercase; letter-spacing: .5px; display: block; margin-bottom: 6px; }
+  .insight .rec { margin-top: 8px; font-size: 13px; }
+  .insight .rec .lbl { color: var(--accent); font-weight: 600; }
+  .insight .cat { float: right; }
+  .sevcount { display: inline-flex; gap: 8px; margin-left: 8px; }
   @media (max-width: 720px) { .imgrow { grid-template-columns: 1fr; } }
 </style>
 </head>
@@ -106,6 +115,32 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
   </div>
   {% if notes %}
     {% for n in notes %}<div class="note">⚠ {{ n }}</div>{% endfor %}
+  {% endif %}
+
+  <!-- ============ KEY INSIGHTS (AUTO) ============ -->
+  {% if insight_section %}
+  <h2>{{ L('auto_insights') }}
+    <span class="sevcount">
+      {% if insight_section.critical_count %}<span class="sev critical">{{ insight_section.critical_count }} {{ L('severity_critical') }}</span>{% endif %}
+      {% if insight_section.warning_count %}<span class="sev warning">{{ insight_section.warning_count }} {{ L('severity_warning') }}</span>{% endif %}
+      {% if insight_section.info_count %}<span class="sev info">{{ insight_section.info_count }} {{ L('severity_info') }}</span>{% endif %}
+    </span>
+  </h2>
+  <div class="exec">
+    <span class="lbl">{{ L('executive_summary') }}</span>
+    {{ insight_section.executive_summary_th }}
+  </div>
+  {% for ins in insight_section.insights %}
+  <div class="issue insight {{ ins.severity }}">
+    <div>
+      <span class="sev {{ ins.severity }}">{{ L('severity_' ~ ins.severity) }}</span>
+      <b>{{ ins.title_th }}</b>
+      <span class="badge cat">{{ ins.category_label }}</span>
+    </div>
+    <div class="desc-th">{{ ins.description_th }}</div>
+    <div class="rec"><span class="lbl">{{ L('recommendation') }}:</span> {{ ins.recommendation_th }}</div>
+  </div>
+  {% endfor %}
   {% endif %}
 
   <!-- ============ QUALITY ISSUES ============ -->
@@ -206,6 +241,36 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
       </table>
     </div>
   {% endfor %}
+  {% endif %}
+
+  <!-- ============ CLEANING APPLIED (DIFF) ============ -->
+  {% if cleaning_diff %}
+  <h2>{{ L('cleaning_diff') }} <span class="ng">({{ cleaning_diff|length }})</span></h2>
+  {% if cleaning_diff_summary %}
+  <div class="exec">
+    {{ L('total_cells_changed') }}: <b>{{ "{:,}".format(cleaning_diff_summary.total_cells_changed) }}</b>
+    · {{ L('most_impactful') }}: <b>{{ cleaning_diff_summary.most_impactful_op }}</b>
+    <span class="ng">({{ cleaning_diff_summary.most_impactful_th }} — {{ "{:,}".format(cleaning_diff_summary.most_impactful_rows) }})</span>
+  </div>
+  {% endif %}
+  <table>
+    <tr>
+      <th>{{ L('column') }}</th>
+      <th>{{ L('operation') }}</th>
+      <th>{{ L('rows_affected') }}</th>
+      <th>{{ L('before') }}</th>
+      <th>{{ L('after') }}</th>
+    </tr>
+    {% for c in cleaning_diff %}
+    <tr>
+      <td><b>{{ c.column }}</b></td>
+      <td>{{ c.operation }}<div class="ng">{{ c.description_th }}</div>{% if c.explanation %}<div class="ng">{{ L('explanation') }}: <span class="mono">{{ c.explanation }}</span></div>{% endif %}</td>
+      <td>{{ "{:,}".format(c.rows_affected) }}</td>
+      <td>{% for ex in c.before_examples %}<span class="ex mono">{{ ex }}</span>{% endfor %}</td>
+      <td>{% for ex in c.after_examples %}<span class="ex mono">{{ ex }}</span>{% endfor %}</td>
+    </tr>
+    {% endfor %}
+  </table>
   {% endif %}
 
   <!-- ============ CLEANING SUGGESTIONS ============ -->
