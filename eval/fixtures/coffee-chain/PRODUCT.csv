@@ -1,0 +1,61 @@
+product_id,product_name,category,serve_type,base_price,is_seasonal,is_limited_edition
+1,อเมซอน,Coffee,ร้อน,45,False,False
+2,อเมซอน,Coffee,เย็น,55,False,False
+3,อเมซอน,Coffee,ปั่น,60,False,False
+4,เอสเปรสโซ,Coffee,ร้อน,40,False,False
+5,เอสเปรสโซ,Coffee,เย็น,50,False,False
+6,เอสเปรสโซ,Coffee,ปั่น,55,False,False
+7,คาปูชิโน่,Coffee,ร้อน,50,False,False
+8,คาปูชิโน่,Coffee,เย็น,60,False,False
+9,ลาเต้อเมซอน,Coffee,ร้อน,50,False,False
+10,ลาเต้อเมซอน,Coffee,เย็น,60,False,False
+11,มอคค่า,Coffee,ร้อน,55,False,False
+12,แบล็คคอฟฟี่,Coffee,ร้อน,40,False,False
+13,แบล็คคอฟฟี่,Coffee,เย็น,50,False,False
+14,คาราเมลมัคคิอาโต,Coffee,ร้อน,55,True,False
+15,คาราเมลมัคคิอาโต,Coffee,เย็น,65,True,False
+16,คาราเมลมัคคิอาโต,Coffee,ปั่น,70,True,True
+17,คอฟฟี่มาร์เบิล,Coffee,เย็น,60,True,False
+18,ชาเขียวนม,Tea,ร้อน,40,False,False
+19,ชาเขียวนม,Tea,เย็น,50,False,False
+20,ชาเขียวนม,Tea,ปั่น,55,False,False
+21,ชานม,Tea,ร้อน,35,False,False
+22,ชานม,Tea,เย็น,45,False,False
+23,ชานม,Tea,ปั่น,50,False,False
+24,ชาดำ,Tea,เย็น,40,False,False
+25,ชามะนาว,Tea,เย็น,40,False,False
+26,โฮจิฉะบราวน์ชูการ์ลาเต้,Tea,เย็น,60,True,True
+27,ช็อกโกแลต,Chocolate & Milk,ร้อน,45,False,False
+28,ช็อกโกแลต,Chocolate & Milk,เย็น,55,False,False
+29,ช็อกโกแลต,Chocolate & Milk,ปั่น,60,False,False
+30,นมสด,Chocolate & Milk,ร้อน,35,False,False
+31,นมสด,Chocolate & Milk,เย็น,45,False,False
+32,นมสด,Chocolate & Milk,ปั่น,50,False,False
+33,มิลกี้สตรอว์เบอร์รี,Chocolate & Milk,เย็น,55,True,False
+34,มิลกี้สตรอว์เบอร์รี,Chocolate & Milk,ปั่น,60,True,False
+35,น้ำลิ้นจี่,Juice & Smoothie,เย็น,50,False,False
+36,น้ำลิ้นจี่,Juice & Smoothie,ปั่น,55,False,False
+37,น้ำสตรอว์เบอร์รีปั่น,Juice & Smoothie,ปั่น,55,False,False
+38,น้ำกีวีปั่น,Juice & Smoothie,ปั่น,55,False,False
+39,มิกซ์เบอร์รีปั่น,Juice & Smoothie,ปั่น,55,False,False
+40,ครัวซองเนยสด,Bakery,ชิ้น,45,False,False
+41,ครัวซองดับเบิ้ลช็อกโกแลต,Bakery,ชิ้น,49,False,False
+42,คุกกี้เนย,Bakery,ชิ้น,39,False,False
+43,คุกกี้เนยสายรุ้ง,Bakery,ชิ้น,39,False,False
+44,คุกกี้ช็อกโกแลตแครนเบอร์รี่,Bakery,ชิ้น,45,True,False
+45,ป๊อปคอร์นรสคาราเมล,Bakery,ชิ้น,49,False,False
+46,ป๊อปคอร์นกลิ่นทรัฟเฟิล,Bakery,ชิ้น,49,False,False
+47,ครัวซองแฮมชีส,Savory Bakery,ชิ้น,55,False,False
+48,เดนิชแฮมชีส,Savory Bakery,ชิ้น,55,False,False
+49,โทสต์แฮมทริปเปิ้ลชีส,Savory Bakery,ชิ้น,59,False,False
+50,ผักโขมอบชีสโทสต์,Savory Bakery,ชิ้น,55,False,False
+51,ป๊อปคอร์นรสซาวครีมและชีส,Savory Bakery,ชิ้น,49,False,False
+52,ทาร์ตไข่,Savory Bakery,ชิ้น,39,False,False
+53,ขนมปังกระเทียม,Savory Bakery,ชิ้น,35,False,False
+54,กาแฟแคปซูลเคนย่า,Merchandise,ชิ้น,250,False,True
+55,Ordinary Tumbler,Merchandise,ชิ้น,350,False,True
+56,กาแฟแคปซูลซีเล็คเต็ด,Merchandise,ชิ้น,250,False,False
+57,กาแฟแคปซูลซิกเนเจอร์,Merchandise,ชิ้น,250,False,False
+58,ช็อคโกแลตมอลต์ชนิดผง,Merchandise,ชิ้น,159,False,False
+59,ชาเขียวนมปรุงสำเร็จ,Merchandise,ชิ้น,159,False,False
+60,ชาไทยปรุงสำเร็จ,Merchandise,ชิ้น,159,False,False
