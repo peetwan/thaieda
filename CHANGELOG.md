@@ -5,6 +5,64 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-06-25
+
+Headline feature: **clean data + actionable insights** — 12 improvements addressing
+real-world gaps found by code review (Claude Code) and testing on messy Thai data.
+
+### Added — Data Cleaning
+- **`coerce_numeric_column()`** — converts string columns with Thai numerals to proper
+  numeric dtype (not NaN). Handles placeholder values (`-`, `N/A`, `ไม่มี`) → NaN first.
+- **`convert_buddhist_era()`** — converts BE years (2440–2599) to CE in both numeric
+  columns (`2530` → `1987`) and date-string columns (`2567-01-15` → `2024-01-15`).
+- **`normalize_dates()`** — standardizes Thai month name dates to ISO format
+  (`15 มกราคม 2567` → `15/01/2024`) and converts BE→CE in date strings.
+- **`remove_duplicate_rows()`** — detects and removes fully duplicated rows from a DataFrame.
+- **`handle_missing_values()`** — 5 strategies: `flag` (0/ไม่ระบุ), `drop`, `median`,
+  `mode`, `unknown`. Type-aware (numeric vs text).
+
+### Added — Insight Engine
+- **Correlation pattern** — detects strong pairwise correlations (|r| ≥ 0.7) between
+  numeric columns and generates insight cards with r-value and direction.
+- **Outlier pattern** — detects row-level statistical outliers (z-score ≥ 3) and
+  generates insight cards with outlier count, percentage, and max z-score.
+- **Cross-pattern novelty penalty** — when multiple patterns point to the same
+  breakdown × measure × segment (e.g., an outlier causing outstanding + comparison +
+  attribution), only the highest-ranked keeps full score.
+- **Adaptive `min_segment`** — auto-adjusts for small datasets (`max(5, total_n // 20)`)
+  with a note when triggered.
+- **Trend evidence `all_buckets`** — trend findings now include the full bucket series
+  in evidence, fixing the v0.7 bug where trend charts showed only 2 data points.
+- **`_recompute_full` for correlation/outlier** — correlation and outlier evidence is
+  recomputed on the full dataset (not just sample) during two-phase scoring.
+
+### Added — Quality Checks
+- **`check_placeholder_values()`** — flags placeholder values (`-`, `N/A`, `NULL`,
+  `ไม่มี`, `ไม่ระบุ`) that should be NaN. Vectorized with `.isin()`.
+- **`check_constant_column()`** — flags columns with zero variance (single unique value)
+  as useless for analysis.
+
+### Added — Detection
+- **Thai month name detection** — `_looks_like_datetime` now recognizes Thai month names
+  (`15 มกราคม 2567`, `1 ก.พ. 67`) in addition to numeric date formats.
+
+### Added — I/O
+- **Excel support** — `.xlsx` and `.xls` files via `pd.read_excel` (requires `openpyxl`).
+  Auto-detected from file extension; error message guides installation if missing.
+
+### Changed
+- **Vectorized `check_buddhist_era`** — uses `.str.extractall` instead of row-by-row
+  loop; falls back to original method on error. Counts rows (not matches) to prevent
+  percentage > 100%.
+- Roadmap shifted: v0.9 = LLM Q&A, v1.0 = interactive dashboard (was v0.8/v0.9).
+- Architecture section updated to reflect v0.8 modules.
+
+### Tests
+- 35 new tests in `test_v08.py` covering all new functions (happy path + edge cases).
+- Total: 356 passed, 1 skipped, ruff clean.
+
+---
+
 ## [0.7.0] - 2026-06-25
 
 Headline feature: **insight visualization** — every cross-column insight card now
