@@ -50,4 +50,11 @@ credentials*
 
 # Generated reports (output จากการรัน)
 *.thaieda.html
+*.cleaned.csv
 reports_output/
+
+# Test/example data — ห้าม commit (ไฟล์ใหญ่ ใช้ทดสอบเท่านั้น)
+data-example/
+
+# Git worktrees ภายใน (สำหรับงาน agent)
+_worktrees/

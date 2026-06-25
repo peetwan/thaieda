@@ -196,11 +196,17 @@ def read_data(
     auto_format = format == "auto"
     fmt = detect_format(p) if auto_format else format
 
+    # ข้อความบอก encoding ที่ลอง — ช่วยผู้ใช้รู้ว่าควรระบุ --encoding อะไรถ้าอ่านไม่ออก
+    if encoding == "auto":
+        tried_enc = f"encoding ที่ลอง: {', '.join(_ENCODING_CANDIDATES)} (เลือก {enc})"
+    else:
+        tried_enc = f"encoding: {enc}"
+
     try:
         return _read_with_format(p, fmt, enc)
     except Exception as exc:  # noqa: BLE001 — เก็บ error ไว้ก่อน ลอง format อื่นถ้าเดาเอง
         if not auto_format:
-            raise ValueError(f"อ่านไฟล์ {p} แบบ {fmt} ไม่สำเร็จ: {exc}") from exc
+            raise ValueError(f"อ่านไฟล์ {p} แบบ {fmt} ไม่สำเร็จ ({tried_enc}): {exc}") from exc
         # เดา format เอง — ลอง format อื่นที่เหลือ (เช่น ไม่มีนามสกุล → ลอง csv แล้ว json)
         for alt in ("json", "csv"):
             if alt == fmt:
@@ -210,7 +216,7 @@ def read_data(
             except Exception:  # noqa: BLE001 — ลองตัวถัดไป
                 continue
         raise ValueError(
-            f"อ่านไฟล์ {p} ไม่สำเร็จ (ลองทั้ง CSV และ JSON แล้ว): {exc}"
+            f"อ่านไฟล์ {p} ไม่สำเร็จ (ลองทั้ง CSV และ JSON แล้ว, {tried_enc}): {exc}"
         ) from exc
 
 

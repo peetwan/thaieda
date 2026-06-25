@@ -35,6 +35,13 @@ _TONE_STACK_RE = re.compile(f"([{_THAI_TONE_MARKS}])\\1+")
 # ไม้ยมก (ๆ) ที่ซ้ำกัน -> ตัวเดียว
 _YAMOK_REPEAT_RE = re.compile("ๆ{2,}")
 
+# ลายเซ็นที่ "อาจเป็น mojibake / ข้อความที่ ftfy ซ่อมได้" — ใช้กรองแถวก่อนเรียก ftfy
+# (เร็วขึ้นมากบนข้อมูลใหญ่: ข้อความไทย UTF-8 ปกติไม่มีอักขระเหล่านี้ จึงข้ามได้ทันที)
+#   * U+0080–U+00FF : Latin-1 supplement (ไบต์ของ mojibake ไทยตกในช่วงนี้ เช่น 'à¸')
+#   * U+FFFD        : replacement char (ถอดรหัสเสีย)
+#   * &...;          : HTML entity ที่ ftfy ถอดกลับได้
+_MOJIBAKE_HINT_RE = re.compile(r"[-ÿ�]|&[#a-zA-Z0-9]{1,8};")
+
 # จำนวนตัวอย่างก่อน/หลังที่เก็บต่อหนึ่งการทำความสะอาด
 _MAX_EXAMPLES = 5
 
@@ -68,7 +75,7 @@ class CleaningResult:
 
 
 # ----------------------------------------------------------------------------
-# helper หลัก — ใช้ฟังก์ชันแปลงระดับสตริงกับทั้งคอลัมน์
+# helper หลัก — ใช้ฟังก์ชันแปลงระดับสตริงกับทั้งคอลัมน์ (เวกเตอร์ไรซ์)
 # ----------------------------------------------------------------------------
 def _apply_str_transform(
     series: pd.Series,
@@ -77,31 +84,47 @@ def _apply_str_transform(
     description_th: str,
     *,
     visible: bool = False,
+    vectorized: Callable[[pd.Series], pd.Series] | None = None,
 ) -> tuple[pd.Series, CleaningResult]:
-    """ใช้ func กับทุกเซลล์ที่ไม่ว่าง นับแถวที่เปลี่ยน และเก็บตัวอย่างก่อน/หลัง.
+    """ใช้การแปลงระดับสตริงกับทุกเซลล์ที่ไม่ว่าง นับแถวที่เปลี่ยน และเก็บตัวอย่างก่อน/หลัง.
+
+    เวอร์ชันนี้ทำงานแบบเวกเตอร์ (vectorized) เพื่อให้เร็วบนข้อมูลขนาดใหญ่ (>1M แถว):
+      * คัดเฉพาะเซลล์ที่ไม่ว่างครั้งเดียว (notna mask) แทนการเช็ค pd.isna ทีละแถว
+      * ถ้ามี ``vectorized`` (เช่น .str.translate / .str.replace) จะใช้ตัวนั้น —
+        เป็น C-level ไม่วน Python ทีละเซลล์; ไม่งั้นถอยไปใช้ ``series.map(func)``
+        ซึ่งยังเร็วกว่าการวน .items() + กำหนดค่าด้วย .at ทีละแถวมาก
+      * กำหนดค่ากลับเฉพาะเซลล์ที่ "เปลี่ยนจริง" แบบกลุ่มเดียว (ไม่ใช่ทีละ .at)
 
     visible=True จะแสดงตัวอย่างผ่าน repr() เพื่อให้เห็นอักขระล่องหน/ช่องว่างที่เปลี่ยนไป
     """
     column = str(series.name) if series.name is not None else ""
-    out = series.copy()
-    affected = 0
+
+    notna = series.notna()
+    originals = series[notna].astype(str)
+    cleaned = vectorized(originals) if vectorized is not None else originals.map(func)
+    # เทียบก่อน/หลังแบบเวกเตอร์ — ได้ mask ของเซลล์ที่เปลี่ยนจริง
+    changed = cleaned.to_numpy() != originals.to_numpy()
+    affected = int(changed.sum())
+
+    out = series
     before_examples: list[str] = []
     after_examples: list[str] = []
+    if affected:
+        # แปลงเป็น object ก่อนกำหนดค่ากลับ — กันข้อผิดพลาดเมื่อคอลัมน์เป็นชนิดตัวเลข/บูลีน
+        # (เช่น customer_id เป็น int64 แล้วการทำความสะอาดคืนเป็นสตริง)
+        out = series.astype(object)
+        changed_originals = originals[changed]
+        changed_cleaned = cleaned[changed]
+        out.loc[changed_originals.index] = changed_cleaned
 
-    def show(text: str) -> str:
-        return repr(text) if visible else text
-
-    for idx, value in series.items():
-        if pd.isna(value):
-            continue
-        original = str(value)
-        cleaned = func(original)
-        if cleaned != original:
-            out.at[idx] = cleaned
-            affected += 1
-            if len(before_examples) < _MAX_EXAMPLES:
-                before_examples.append(show(original))
-                after_examples.append(show(cleaned))
+        show = (lambda t: repr(t)) if visible else (lambda t: t)
+        for before, after in zip(
+            changed_originals.to_numpy()[:_MAX_EXAMPLES],
+            changed_cleaned.to_numpy()[:_MAX_EXAMPLES],
+            strict=True,
+        ):
+            before_examples.append(show(str(before)))
+            after_examples.append(show(str(after)))
 
     result = CleaningResult(
         operation=operation,
@@ -125,6 +148,7 @@ def remove_zero_width_chars(series: pd.Series) -> tuple[pd.Series, CleaningResul
         operation="remove_zero_width_chars",
         description_th="ลบอักขระความกว้างศูนย์/ล่องหน",
         visible=True,
+        vectorized=lambda s: s.str.replace(_ZERO_WIDTH_RE.pattern, "", regex=True),
     )
 
 
@@ -135,6 +159,7 @@ def normalize_thai_numerals(series: pd.Series) -> tuple[pd.Series, CleaningResul
         lambda s: s.translate(_THAI_TO_ARABIC),
         operation="normalize_thai_numerals",
         description_th="แปลงเลขไทยเป็นเลขอารบิก (๐๑๒๓ → 0123)",
+        vectorized=lambda s: s.str.translate(_THAI_TO_ARABIC),
     )
 
 
@@ -191,6 +216,9 @@ def normalize_encoding(
     plans: dict[str, None] = {}  # dict รักษาลำดับที่พบ
 
     def fixer(text: str) -> str:
+        # ข้ามแถวที่ไม่มีลายเซ็น mojibake เลย — ftfy จะไม่เปลี่ยนอยู่แล้ว (เร็วขึ้นมากบนข้อมูลใหญ่)
+        if not _MOJIBAKE_HINT_RE.search(text):
+            return text
         result = fix_and_explain(text)
         if result.explanation:
             plan = _format_ftfy_plan(result.explanation)
@@ -215,6 +243,13 @@ def _strip_whitespace_str(text: str) -> str:
     return text.strip()
 
 
+def _vec_strip_whitespace(s: pd.Series) -> pd.Series:
+    """รุ่นเวกเตอร์ของ _strip_whitespace_str — ใช้ .str accessor (เทียบเท่ากันทุกขั้น)."""
+    s = s.str.replace(_NBSP, " ", regex=False)
+    s = s.str.replace(_MULTI_SPACE_RE.pattern, " ", regex=True)
+    return s.str.strip()
+
+
 def strip_whitespace(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
     """ตัดช่องว่างหน้า/หลัง, ยุบช่องว่างซ้อนให้เหลือช่องเดียว, แปลง non-breaking space เป็นช่องว่างปกติ."""
     return _apply_str_transform(
@@ -223,6 +258,7 @@ def strip_whitespace(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
         operation="strip_whitespace",
         description_th="ตัด/ยุบช่องว่าง และแปลง non-breaking space เป็นช่องว่างปกติ",
         visible=True,
+        vectorized=_vec_strip_whitespace,
     )
 
 
@@ -246,6 +282,13 @@ def _fix_repeated_str(text: str, max_repeat: int) -> str:
     return pattern.sub(lambda m: m.group(1) * max_repeat, text)
 
 
+def _vec_fix_repeated(s: pd.Series, max_repeat: int) -> pd.Series:
+    """รุ่นเวกเตอร์ของ _fix_repeated_str — ยุบไม้ยมกซ้ำ แล้วยุบอักขระซ้ำเกิน max_repeat."""
+    s = s.str.replace(_YAMOK_REPEAT_RE.pattern, "ๆ", regex=True)
+    pattern = r"(.)\1{" + str(max_repeat) + r",}"
+    return s.str.replace(pattern, lambda m: m.group(1) * max_repeat, regex=True)
+
+
 def fix_repeated_chars(series: pd.Series, max_repeat: int = 3) -> tuple[pd.Series, CleaningResult]:
     """ลดการซ้ำอักขระที่มากเกินไป (55555 → 555, ๆๆๆ → ๆ)."""
     if max_repeat < 1:
@@ -255,6 +298,7 @@ def fix_repeated_chars(series: pd.Series, max_repeat: int = 3) -> tuple[pd.Serie
         lambda s: _fix_repeated_str(s, max_repeat),
         operation="fix_repeated_chars",
         description_th=f"ลดการซ้ำอักขระที่เกิน {max_repeat} ตัว (เช่น 55555 → 555, ๆๆๆ → ๆ)",
+        vectorized=lambda s: _vec_fix_repeated(s, max_repeat),
     )
 
 
@@ -265,6 +309,7 @@ def fix_tone_mark_stacking(series: pd.Series) -> tuple[pd.Series, CleaningResult
         lambda s: _TONE_STACK_RE.sub(r"\1", s),
         operation="fix_tone_mark_stacking",
         description_th="ลบวรรณยุกต์ที่ซ้อนติดกัน (เช่น '่่' → '่')",
+        vectorized=lambda s: s.str.replace(_TONE_STACK_RE.pattern, r"\1", regex=True),
     )
 
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import difflib
 import re
 import unicodedata
+import warnings
 from collections import Counter
 from dataclasses import dataclass, field
 
@@ -29,6 +30,11 @@ _MIN_STAT_SAMPLE = 8
 _MIN_NUMERIC_SAMPLE = 5
 # จำนวนแถวขั้นต่ำสำหรับวิธี ML (Isolation Forest / LOF) — น้อยกว่านี้ผลไม่น่าเชื่อถือ
 _MIN_ML_SAMPLE = 100
+# จำนวนแถวสูงสุดที่ส่งเข้า IF/LOF — เกินนี้สุ่มตัวอย่างลงมา (กัน LOF ช้ามากบนข้อมูลหลักล้านแถว)
+# วิธีเชิงสถิติ (z-score/MAD/IQR) ยังรันบนข้อมูลเต็มเสมอ เพราะเป็นเวกเตอร์และเร็วอยู่แล้ว
+_MAX_ML_SAMPLE = 10000
+# สัดส่วนค่าซ้ำสูงสุดที่ยอมให้ LOF ทำงาน — เกินนี้ผล LOF ไม่น่าเชื่อถือ (ระยะเพื่อนบ้าน = 0)
+_MAX_LOF_DUP_RATIO = 0.5
 # สัดส่วน outlier สูงสุดที่ยอมรับจากวิธี ML — เกินนี้ถือว่า "ไม่ใช่ค่าหายากแล้ว"
 # (contamination='auto' อาจ flag จำนวนมากบนการกระจายแบบ uniform/discrete ซึ่งไม่มี outlier จริง)
 # ความผิดปกติควรเป็นของหายาก จึงตัดผลที่กว้างเกินไปทิ้งเพื่อลด noise ในรายงาน
@@ -301,6 +307,24 @@ def _numeric_valid(series: pd.Series) -> tuple[np.ndarray, np.ndarray, np.ndarra
     return numeric[valid_mask], np.flatnonzero(valid_mask), numeric
 
 
+def _subsample_for_ml(
+    valid: np.ndarray, valid_positions: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, bool]:
+    """สุ่มตัวอย่างลง _MAX_ML_SAMPLE แถวถ้าข้อมูลใหญ่เกิน — คืน (ค่า, ตำแหน่ง, สุ่มหรือไม่).
+
+    ใช้ seed คงที่ (42) เพื่อให้ผลทำซ้ำได้ และเรียงตำแหน่งที่สุ่มไว้ตามเดิมเพื่อรักษาลำดับแถว
+    IF/LOF บนข้อมูลหลักล้านแถวช้ามาก (LOF เป็น O(n²) เชิงระยะ) การสุ่มทำให้เร็วขึ้นมาก
+    โดยยังสะท้อนการกระจายของข้อมูลได้
+    """
+    n = int(valid.size)
+    if n <= _MAX_ML_SAMPLE:
+        return valid, valid_positions, False
+    rng = np.random.default_rng(42)
+    sel = rng.choice(n, size=_MAX_ML_SAMPLE, replace=False)
+    sel.sort()  # รักษาลำดับตำแหน่งแถวเดิม
+    return valid[sel], valid_positions[sel], True
+
+
 def detect_isolation_forest(series: pd.Series) -> AnomalyIssue | None:
     """ตรวจ outlier ด้วย Isolation Forest (วิธี ML) — เหมาะกับคอลัมน์ตัวเลขที่มี >100 แถว.
 
@@ -317,6 +341,10 @@ def detect_isolation_forest(series: pd.Series) -> AnomalyIssue | None:
     except ImportError:
         return None
 
+    # ข้อมูลใหญ่เกิน -> สุ่มตัวอย่างลง _MAX_ML_SAMPLE แถว (เร็วขึ้นมาก ผลยังเชื่อถือได้)
+    valid, valid_positions, sampled = _subsample_for_ml(valid, valid_positions)
+    sample_size = int(valid.size)
+
     x = valid.reshape(-1, 1)
     model = IsolationForest(contamination="auto", random_state=42)
     preds = model.fit_predict(x)  # -1 = outlier, 1 = ปกติ
@@ -324,7 +352,7 @@ def detect_isolation_forest(series: pd.Series) -> AnomalyIssue | None:
     out_mask = preds == -1
     count = int(out_mask.sum())
     # 0 = ไม่พบ, มากเกินไป = การกระจายไม่มี outlier จริง (ผลไม่น่าเชื่อถือ) -> ข้าม
-    if count == 0 or count / valid.size > _MAX_ML_OUTLIER_FRAC:
+    if count == 0 or count / sample_size > _MAX_ML_OUTLIER_FRAC:
         return None
 
     order = np.argsort(scores[out_mask])  # ผิดปกติสุดก่อน
@@ -337,19 +365,22 @@ def detect_isolation_forest(series: pd.Series) -> AnomalyIssue | None:
         f"{_fmt_number(float(v))} (score={s:.3f})"
         for v, s in zip(out_values[:_MAX_INDICES], out_scores[:_MAX_INDICES], strict=True)
     ]
+    sample_en = f" on a {sample_size:,}-row sample" if sampled else ""
+    sample_th = f" (สุ่มตัวอย่าง {sample_size:,} แถว)" if sampled else ""
     return AnomalyIssue(
         check_name="isolation_forest",
         severity="warning",
         column=col,
         anomaly_type="statistical",
         count=count,
-        percentage=_pct(count, int(valid.size)),
+        percentage=_pct(count, sample_size),
         description=(
-            f"Isolation Forest flagged {count} outlier(s) (most anomalous score "
+            f"Isolation Forest flagged {count} outlier(s){sample_en} (most anomalous score "
             f"{min_score:.3f}; lower = more anomalous)."
         ),
         description_th=(
-            f"Isolation Forest พบค่าผิดปกติ {count} ค่า (คะแนนผิดปกติสุด {min_score:.3f}; ยิ่งต่ำยิ่งผิดปกติ)"
+            f"Isolation Forest พบค่าผิดปกติ {count} ค่า{sample_th} "
+            f"(คะแนนผิดปกติสุด {min_score:.3f}; ยิ่งต่ำยิ่งผิดปกติ)"
         ),
         examples=examples,
         suggestion=(
@@ -375,15 +406,30 @@ def detect_lof(series: pd.Series) -> AnomalyIssue | None:
     except ImportError:
         return None
 
-    n_neighbors = min(20, int(valid.size) - 1)
+    # ข้อมูลใหญ่เกิน -> สุ่มตัวอย่างลง _MAX_ML_SAMPLE แถว (LOF ช้ามากบนข้อมูลหลักล้านแถว)
+    valid, valid_positions, sampled = _subsample_for_ml(valid, valid_positions)
+    sample_size = int(valid.size)
+
+    # ค่าซ้ำมาก -> LOF ไม่น่าเชื่อถือ (ระยะถึงเพื่อนบ้าน = 0) และ sklearn จะเตือน -> ข้าม
+    n_unique = int(np.unique(valid).size)
+    dup_ratio = 1.0 - n_unique / sample_size
+    if dup_ratio > _MAX_LOF_DUP_RATIO:
+        return None
+    # เพิ่ม n_neighbors เมื่อมีค่าซ้ำพอควร เพื่อลด warning เรื่อง duplicate distances
+    n_dup = sample_size - n_unique
+    n_neighbors = min(max(20, n_dup * 2), sample_size - 1)
+
     x = valid.reshape(-1, 1)
     model = LocalOutlierFactor(n_neighbors=n_neighbors)
-    preds = model.fit_predict(x)  # -1 = outlier
+    # กัน warning "Duplicate values..." ที่จัดการแล้วด้านบน ไม่ให้รบกวน output ของผู้ใช้
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=UserWarning)
+        preds = model.fit_predict(x)  # -1 = outlier
     scores = model.negative_outlier_factor_  # ยิ่งต่ำ (ติดลบมาก) ยิ่งผิดปกติ
     out_mask = preds == -1
     count = int(out_mask.sum())
     # 0 = ไม่พบ, มากเกินไป = การกระจายไม่มี outlier จริง (ผลไม่น่าเชื่อถือ) -> ข้าม
-    if count == 0 or count / valid.size > _MAX_ML_OUTLIER_FRAC:
+    if count == 0 or count / sample_size > _MAX_ML_OUTLIER_FRAC:
         return None
 
     order = np.argsort(scores[out_mask])  # ผิดปกติสุดก่อน
@@ -396,19 +442,21 @@ def detect_lof(series: pd.Series) -> AnomalyIssue | None:
         f"{_fmt_number(float(v))} (LOF={s:.3f})"
         for v, s in zip(out_values[:_MAX_INDICES], out_scores[:_MAX_INDICES], strict=True)
     ]
+    sample_en = f" on a {sample_size:,}-row sample" if sampled else ""
+    sample_th = f" (สุ่มตัวอย่าง {sample_size:,} แถว)" if sampled else ""
     return AnomalyIssue(
         check_name="local_outlier_factor",
         severity="warning",
         column=col,
         anomaly_type="statistical",
         count=count,
-        percentage=_pct(count, int(valid.size)),
+        percentage=_pct(count, sample_size),
         description=(
-            f"Local Outlier Factor flagged {count} outlier(s) (most anomalous factor "
+            f"Local Outlier Factor flagged {count} outlier(s){sample_en} (most anomalous factor "
             f"{min_score:.3f}; more negative = more anomalous)."
         ),
         description_th=(
-            f"Local Outlier Factor พบค่าผิดปกติ {count} ค่า (ค่าผิดปกติสุด {min_score:.3f}; "
+            f"Local Outlier Factor พบค่าผิดปกติ {count} ค่า{sample_th} (ค่าผิดปกติสุด {min_score:.3f}; "
             "ยิ่งติดลบมากยิ่งผิดปกติ)"
         ),
         examples=examples,

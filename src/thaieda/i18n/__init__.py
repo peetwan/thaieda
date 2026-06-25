@@ -163,6 +163,21 @@ LABELS: dict[str, dict[str, str]] = {
     "ts_acf_plot": {"en": "Autocorrelation (ACF)", "th": "ฟังก์ชันสหสัมพันธ์ในตัว (ACF)"},
     "ts_has": {"en": "Yes", "th": "มี"},
     "ts_none": {"en": "No", "th": "ไม่มี"},
+    # --- progress (ข้อความความคืบหน้าระหว่างประมวลผล) ---
+    "prog_read": {"en": "Reading file...", "th": "อ่านไฟล์..."},
+    "prog_detect": {"en": "Detecting column types...", "th": "ตรวจจับประเภทคอลัมน์..."},
+    "prog_quality": {"en": "Checking data quality...", "th": "ตรวจสอบคุณภาพ..."},
+    "prog_anomaly": {"en": "Detecting anomalies...", "th": "ตรวจความผิดปกติ..."},
+    "prog_clean": {"en": "Cleaning text...", "th": "ทำความสะอาด..."},
+    "prog_timeseries": {"en": "Analyzing timeseries...", "th": "วิเคราะห์อนุกรมเวลา..."},
+    "prog_insights": {"en": "Summarizing insights...", "th": "สรุปข้อค้นพบ..."},
+    "prog_charts": {"en": "Building charts...", "th": "สร้างกราฟ..."},
+    "prog_report": {"en": "Generating report...", "th": "สร้างรายงาน..."},
+    # --- คอลัมน์ประเภทเบอร์โทร (เพิ่มเติม) ---
+    "type_phone_number": {"en": "Phone Number", "th": "เบอร์โทรศัพท์"},
+    # --- สรุปผลแบบตาราง (CLI) ---
+    "summary_table": {"en": "Summary", "th": "สรุปผล"},
+    "sampled_rows": {"en": "Sampled rows", "th": "สุ่มตัวอย่างแถว"},
 }
 
 

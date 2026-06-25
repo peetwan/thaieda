@@ -87,7 +87,63 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
   .insight .rec .lbl { color: var(--accent); font-weight: 600; }
   .insight .cat { float: right; }
   .sevcount { display: inline-flex; gap: 8px; margin-left: 8px; }
-  @media (max-width: 720px) { .imgrow { grid-template-columns: 1fr; } }
+  /* --- v0.4.1: sticky section navigation --- */
+  .nav { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; gap: 6px;
+         background: rgba(21,23,28,.92); backdrop-filter: blur(6px);
+         border: 1px solid var(--border); border-radius: 10px;
+         padding: 8px 10px; margin: 18px 0 8px; }
+  .nav a { color: var(--muted); text-decoration: none; font-size: 13px; font-weight: 600;
+           padding: 4px 10px; border-radius: 16px; white-space: nowrap; }
+  .nav a:hover { color: var(--fg); background: var(--panel2); }
+  h2 { scroll-margin-top: 60px; }
+  /* --- v0.4.1: bigger executive summary --- */
+  .exec.hero { font-size: 16px; line-height: 1.7; border-left-width: 5px;
+               background: linear-gradient(180deg, var(--panel2), var(--panel)); }
+  /* --- v0.4.1: severity emoji icon on cards --- */
+  .ico { margin-right: 6px; font-size: 14px; }
+  /* --- v0.4.1: type-colored badges/chips --- */
+  .chip.t-numeric, .badge.t-numeric { border-color: var(--info); color: var(--info); }
+  .chip.t-thai_text, .badge.t-thai_text { border-color: #51cf66; color: #51cf66; }
+  .chip.t-mixed_text, .badge.t-mixed_text { border-color: #9775fa; color: #9775fa; }
+  .chip.t-english_text, .badge.t-english_text { border-color: #4dabf7; color: #4dabf7; }
+  .chip.t-categorical, .badge.t-categorical { border-color: #ffa94d; color: #ffa94d; }
+  .chip.t-datetime, .badge.t-datetime { border-color: #38d9a9; color: #38d9a9; }
+  .chip.t-id, .badge.t-id { border-color: #f783ac; color: #f783ac; }
+  .chip.t-phone_number, .badge.t-phone_number { border-color: #ffd43b; color: #ffd43b; }
+  .chip.t-empty, .badge.t-empty { border-color: var(--muted); color: var(--muted); }
+  /* --- v0.4.1: timeseries highlight banner --- */
+  .banner { background: rgba(56,217,169,.10); border: 1px solid #2b7a64;
+            border-left: 4px solid #38d9a9; border-radius: 10px;
+            padding: 12px 16px; margin: 14px 0; font-size: 14px; }
+  .banner b { color: #38d9a9; }
+  /* --- v0.4.1: cleaning diff (strikethrough red -> green) --- */
+  .diff .b { color: var(--critical); text-decoration: line-through;
+             text-decoration-color: rgba(255,107,107,.6); }
+  .diff .arrow { color: var(--muted); margin: 0 6px; }
+  .diff .a { color: #51cf66; }
+  .diff .row { display: block; margin: 3px 0; }
+  /* --- v0.4.1: responsive (stack on mobile) --- */
+  @media (max-width: 720px) {
+    .wrap { padding: 20px 14px 60px; }
+    .imgrow { grid-template-columns: 1fr; }
+    .cards { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+    table, thead, tbody, th, td, tr { display: block; }
+    thead tr { position: absolute; left: -9999px; }
+    td { border: none; border-bottom: 1px solid var(--border); padding: 6px 8px; }
+    .nav { position: static; }
+    .insight .cat { float: none; display: inline-block; }
+  }
+  /* --- v0.4.1: print-friendly --- */
+  @media print {
+    :root { --bg: #fff; --panel: #fff; --panel2: #f4f4f4; --fg: #111;
+            --muted: #555; --border: #ccc; }
+    body { font-size: 12px; }
+    .nav { display: none; }
+    .wrap { max-width: none; padding: 0; }
+    .issue, .col, .card, .exec, .banner { break-inside: avoid; }
+    img { max-width: 100%; }
+    a { color: inherit; text-decoration: none; }
+  }
 </style>
 </head>
 <body>
@@ -97,8 +153,20 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
     <div class="sub">{{ L('generated_by') }} ThaiEDA v{{ version }} · {{ overview.rows }} {{ L('rows') }} × {{ overview.columns }} {{ L('columns') }}</div>
   </header>
 
+  <!-- ============ SECTION NAV (sticky) ============ -->
+  <nav class="nav">
+    <a href="#overview">{{ L('overview') }}</a>
+    {% if insight_section %}<a href="#insights">{{ L('auto_insights') }}</a>{% endif %}
+    <a href="#quality">{{ L('quality_issues') }}</a>
+    <a href="#anomalies">{{ L('anomalies') }}</a>
+    {% if target_section %}<a href="#target">{{ L('target_analysis') }}</a>{% endif %}
+    {% if timeseries_section %}<a href="#timeseries">{{ L('timeseries') }}</a>{% endif %}
+    {% if cleaning_diff %}<a href="#cleaning">{{ L('cleaning_diff') }}</a>{% endif %}
+    <a href="#columns">{{ L('column_details') }}</a>
+  </nav>
+
   <!-- ============ OVERVIEW ============ -->
-  <h2>{{ L('overview') }}</h2>
+  <h2 id="overview">{{ L('overview') }}</h2>
   <div class="cards">
     <div class="card"><div class="k">{{ L('rows') }}</div><div class="v">{{ "{:,}".format(overview.rows) }}</div></div>
     <div class="card"><div class="k">{{ L('columns') }}</div><div class="v">{{ overview.columns }}</div></div>
@@ -110,7 +178,7 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
   <h3>{{ L('column_types') }}</h3>
   <div class="typedist">
     {% for tk, tlabel, cnt in type_distribution %}
-      <span class="chip">{{ tlabel }} <b>{{ cnt }}</b></span>
+      <span class="chip t-{{ tk }}">{{ tlabel }} <b>{{ cnt }}</b></span>
     {% endfor %}
   </div>
   {% if notes %}
@@ -119,21 +187,21 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
 
   <!-- ============ KEY INSIGHTS (AUTO) ============ -->
   {% if insight_section %}
-  <h2>{{ L('auto_insights') }}
+  <h2 id="insights">{{ L('auto_insights') }}
     <span class="sevcount">
       {% if insight_section.critical_count %}<span class="sev critical">{{ insight_section.critical_count }} {{ L('severity_critical') }}</span>{% endif %}
       {% if insight_section.warning_count %}<span class="sev warning">{{ insight_section.warning_count }} {{ L('severity_warning') }}</span>{% endif %}
       {% if insight_section.info_count %}<span class="sev info">{{ insight_section.info_count }} {{ L('severity_info') }}</span>{% endif %}
     </span>
   </h2>
-  <div class="exec">
+  <div class="exec hero">
     <span class="lbl">{{ L('executive_summary') }}</span>
     {{ insight_section.executive_summary_th }}
   </div>
   {% for ins in insight_section.insights %}
   <div class="issue insight {{ ins.severity }}">
     <div>
-      <span class="sev {{ ins.severity }}">{{ L('severity_' ~ ins.severity) }}</span>
+      <span class="sev {{ ins.severity }}"><span class="ico">{{ sev_icons[ins.severity] }}</span>{{ L('severity_' ~ ins.severity) }}</span>
       <b>{{ ins.title_th }}</b>
       <span class="badge cat">{{ ins.category_label }}</span>
     </div>
@@ -144,12 +212,12 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
   {% endif %}
 
   <!-- ============ QUALITY ISSUES ============ -->
-  <h2>{{ L('quality_issues') }} <span class="ng">({{ quality_issues|length }})</span></h2>
+  <h2 id="quality">{{ L('quality_issues') }} <span class="ng">({{ quality_issues|length }})</span></h2>
   {% if quality_issues %}
     {% for iss in quality_issues %}
     <div class="issue {{ iss.severity }}">
       <div>
-        <span class="sev {{ iss.severity }}">{{ L('severity_' ~ iss.severity) }}</span>
+        <span class="sev {{ iss.severity }}"><span class="ico">{{ sev_icons[iss.severity] }}</span>{{ L('severity_' ~ iss.severity) }}</span>
         <b>{{ iss.column }}</b> · <span class="ng">{{ iss.check_name }}</span>
       </div>
       <div class="meta">{{ L('count') }}: {{ "{:,}".format(iss.count) }} ({{ iss.percentage }}%)</div>
@@ -168,12 +236,12 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
   {% endif %}
 
   <!-- ============ ANOMALIES ============ -->
-  <h2>{{ L('anomalies') }} <span class="ng">({{ anomalies|length }})</span></h2>
+  <h2 id="anomalies">{{ L('anomalies') }} <span class="ng">({{ anomalies|length }})</span></h2>
   {% if anomalies %}
     {% for an in anomalies %}
     <div class="issue {{ an.severity }}">
       <div>
-        <span class="sev {{ an.severity }}">{{ L('severity_' ~ an.severity) }}</span>
+        <span class="sev {{ an.severity }}"><span class="ico">{{ sev_icons[an.severity] }}</span>{{ L('severity_' ~ an.severity) }}</span>
         <b>{{ an.column }}</b> · <span class="ng">{{ an.check_name }}</span>
         <span class="badge">{{ an.type_label }}</span>
       </div>
@@ -194,7 +262,7 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
 
   <!-- ============ TARGET ANALYSIS ============ -->
   {% if target_section %}
-  <h2>{{ L('target_analysis') }} <span class="ng">({{ L('target_column') }}: {{ target_section.target_column }})</span></h2>
+  <h2 id="target">{{ L('target_analysis') }} <span class="ng">({{ L('target_column') }}: {{ target_section.target_column }})</span></h2>
   {% if target_section.associations %}
     <table>
       <tr>
@@ -245,7 +313,15 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
 
   <!-- ============ TIMESERIES ANALYSIS ============ -->
   {% if timeseries_section %}
-  <h2>{{ L('timeseries') }} <span class="ng">({{ L('type_datetime') }}: {{ timeseries_section.time_column }})</span></h2>
+  <h2 id="timeseries">{{ L('timeseries') }} <span class="ng">({{ L('type_datetime') }}: {{ timeseries_section.time_column }})</span></h2>
+  {% if timeseries_section.trend_count or timeseries_section.seasonal_count %}
+  <div class="banner">
+    📈 {{ L('ts_trend') }}/{{ L('ts_seasonality') }}:
+    {% if timeseries_section.trend_count %}<b>{{ timeseries_section.trend_count }}</b> {{ L('column') }} {{ L('ts_trend') }}{% endif %}
+    {% if timeseries_section.trend_count and timeseries_section.seasonal_count %} · {% endif %}
+    {% if timeseries_section.seasonal_count %}<b>{{ timeseries_section.seasonal_count }}</b> {{ L('column') }} {{ L('ts_seasonality') }}{% endif %}
+  </div>
+  {% endif %}
   {% for ts in timeseries_section.columns %}
   <div class="col">
     <div class="head">
@@ -295,7 +371,7 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
 
   <!-- ============ CLEANING APPLIED (DIFF) ============ -->
   {% if cleaning_diff %}
-  <h2>{{ L('cleaning_diff') }} <span class="ng">({{ cleaning_diff|length }})</span></h2>
+  <h2 id="cleaning">{{ L('cleaning_diff') }} <span class="ng">({{ cleaning_diff|length }})</span></h2>
   {% if cleaning_diff_summary %}
   <div class="exec">
     {{ L('total_cells_changed') }}: <b>{{ "{:,}".format(cleaning_diff_summary.total_cells_changed) }}</b>
@@ -308,39 +384,35 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
       <th>{{ L('column') }}</th>
       <th>{{ L('operation') }}</th>
       <th>{{ L('rows_affected') }}</th>
-      <th>{{ L('before') }}</th>
-      <th>{{ L('after') }}</th>
+      <th>{{ L('before') }} → {{ L('after') }}</th>
     </tr>
     {% for c in cleaning_diff %}
     <tr>
       <td><b>{{ c.column }}</b></td>
       <td>{{ c.operation }}<div class="ng">{{ c.description_th }}</div>{% if c.explanation %}<div class="ng">{{ L('explanation') }}: <span class="mono">{{ c.explanation }}</span></div>{% endif %}</td>
       <td>{{ "{:,}".format(c.rows_affected) }}</td>
-      <td>{% for ex in c.before_examples %}<span class="ex mono">{{ ex }}</span>{% endfor %}</td>
-      <td>{% for ex in c.after_examples %}<span class="ex mono">{{ ex }}</span>{% endfor %}</td>
+      <td class="diff">{% for ex in c.before_examples %}<span class="row"><span class="b mono">{{ ex }}</span><span class="arrow">→</span><span class="a mono">{{ c.after_examples[loop.index0] }}</span></span>{% endfor %}</td>
     </tr>
     {% endfor %}
   </table>
   {% endif %}
 
   <!-- ============ CLEANING SUGGESTIONS ============ -->
-  <h2>{{ L('cleaning_suggestions') }} <span class="ng">({{ cleaning_suggestions|length }})</span></h2>
+  <h2 id="cleaning-suggestions">{{ L('cleaning_suggestions') }} <span class="ng">({{ cleaning_suggestions|length }})</span></h2>
   {% if cleaning_suggestions %}
     <table>
       <tr>
         <th>{{ L('column') }}</th>
         <th>{{ L('operation') }}</th>
         <th>{{ L('rows_affected') }}</th>
-        <th>{{ L('before') }}</th>
-        <th>{{ L('after') }}</th>
+        <th>{{ L('before') }} → {{ L('after') }}</th>
       </tr>
       {% for c in cleaning_suggestions %}
       <tr>
         <td><b>{{ c.column }}</b></td>
         <td>{{ c.operation }}<div class="ng">{{ c.description_th }}</div>{% if c.explanation %}<div class="ng">{{ L('explanation') }}: <span class="mono">{{ c.explanation }}</span></div>{% endif %}</td>
         <td>{{ "{:,}".format(c.rows_affected) }}</td>
-        <td>{% for ex in c.before_examples %}<span class="ex mono">{{ ex }}</span>{% endfor %}</td>
-        <td>{% for ex in c.after_examples %}<span class="ex mono">{{ ex }}</span>{% endfor %}</td>
+        <td class="diff">{% for ex in c.before_examples %}<span class="row"><span class="b mono">{{ ex }}</span><span class="arrow">→</span><span class="a mono">{{ c.after_examples[loop.index0] }}</span></span>{% endfor %}</td>
       </tr>
       {% endfor %}
     </table>
@@ -387,12 +459,12 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
   {% endif %}
 
   <!-- ============ COLUMN DETAILS ============ -->
-  <h2>{{ L('column_details') }}</h2>
+  <h2 id="columns">{{ L('column_details') }}</h2>
   {% for col in columns %}
   <div class="col">
     <div class="head">
       <span class="nm">{{ col.name }}</span>
-      <span class="badge">{{ col.type_label }}</span>
+      <span class="badge t-{{ col.type_key }}">{{ col.type_label }}</span>
     </div>
 
     {% if col.is_text and col.metrics %}
