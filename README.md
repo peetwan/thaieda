@@ -99,8 +99,15 @@ run_folder("data/")  → FolderResult
 ## Version Highlights
 
 - **v1.1 — Folder reports:** `run_folder()` analyzes CSV/Excel/JSON/JSONL/TSV folders, `FolderResult.to_master_html()` builds one master HTML with sidebar navigation, and the internal `_Breakdown` result is frozen so report summaries are stable and hash-safe.
-- **v1.2 — Report redesign:** HTML reports now read like an executive briefing: executive summary, key findings, business translation, priority actions, plain-language explanations, and a narrative flow from “what happened” to “what to do next”.
+- **v1.2 — Report redesign:** HTML reports now read like an executive briefing: executive summary, key findings, business translation, priority actions, plain-language explanations, and a narrative flow from "what happened" to "what to do next".
 - **v1.3 — Smart pre-analysis:** `_detect_language()` detects Thai/English/mixed/numeric data with confidence and per-column detail; `_detect_data_type()` classifies transaction/registry/survey/timeseries/mixed datasets before EDA; quality checks become language-aware so English-only data skips Thai-specific warnings automatically.
+- **v1.4 — Pipeline hardening (14-dataset audit):** 21 defects fixed from a full audit of 14 datasets (coffee-chain fixtures + public test data). Key improvements:
+  - **ID/FK semantics** — ID columns excluded from categorical anomaly checks (rare categories, fuzzy duplicates); `*_id` columns detected as ID/FK even with low unique ratio; Buddhist Era check no longer fires on ID columns; timeseries excludes ID/FK/code columns from measures.
+  - **Smarter type detection** — Thai low-cardinality text (e.g. `serve_type`, `payment_method`) classified as categorical instead of `thai_text`/`mixed_text`; text-named columns (e.g. `review`, `feedback`) preserved as text even with few unique values.
+  - **Cleaning safeguards** — `fix_repeated_chars` skips numeric/decimal strings (`1.00005` stays unchanged); `fix_keyboard_layout` requires Thai chars in the column before attempting layout conversion (`Floyd` stays English); `check_normalization` skips repeated-char spam on short code/category values (ticket numbers, cabin codes); `_apply_cleaning` now calls `remove_duplicate_rows` and `handle_missing_values` when `clean=True`.
+  - **Fewer false positives** — Fuzzy duplicate guard skips short near-identical labels (`INLAND ↔ ISLAND`); script mixing skipped on low-cardinality columns; numeric outliers on heavy-tail distributions (skew > 2.0) downgraded to info severity.
+  - **Better reporting** — `payment_method` no longer mistaken for amount column; `Unnamed: 0` index artifacts ignored; Titanic classified as registry/mixed instead of survey; conditional missing (e.g. `holiday_name`) annotated; duplicate insights on constant columns deduplicated; date-dimension tautologies (year/month/week) suppressed.
+  - **New quality checks** — Per-column missing value detection with severity thresholds (warning >5%, info 1–5%); CSV semicolon-delimiter warning when a single-column DataFrame has many `;` in values.
 
 ---
 
@@ -305,6 +312,14 @@ Control exactly what data leaves your machine when using LLM analysis:
 | Smart data type | Orders/reviews/timeseries | Pre-classifies transaction/registry/survey/timeseries/mixed |
 | Language-aware checks | English-only DataFrame | Skips Thai-specific พ.ศ./เลขไทย warnings automatically |
 | Thai holidays | Spike on Dec 5 | Attributes to Father's Day |
+| ID/FK semantics | `order_id`, `store_id` | Detected as ID even with low unique ratio; excluded from category anomaly |
+| BE on ID | `order_id=2531` | No longer flagged as พ.ศ. (BE check requires date-like column) |
+| Numeric string preservation | `1.00005` in numeric data | `fix_repeated_chars` skips decimal/numeric strings |
+| Keyboard layout guard | `Floyd` in English column | Not converted to Thai (requires Thai chars in column first) |
+| Payment method detection | `payment_method` column | Classified as categorical, not amount column |
+| Index artifact cleanup | `Unnamed: 0` column | Ignored in analysis, flagged as index artifact |
+| Per-column missing values | `Age` 20% missing | Quality issue with severity threshold (warning >5%, info 1-5%) |
+| CSV delimiter warning | `;`-delimited file read as 1 column | Warns to re-read with `sep=';'` |
 
 ---
 

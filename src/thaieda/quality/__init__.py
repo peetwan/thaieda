@@ -23,6 +23,7 @@ SEVERITY_ORDER = {"critical": 0, "warning": 1, "info": 2}
 
 # ช่วงปี พ.ศ. ที่เป็นไปได้ (≈ ค.ศ. 1900–2056)
 _BE_MIN, _BE_MAX = 2440, 2599
+_DATE_YEAR_COLUMN_HINTS = ("date", "year", "yr", "ปี")
 
 # อักขระล่องหน/ความกว้างศูนย์ที่พบบ่อยในข้อความไทยบนเว็บ
 _ZERO_WIDTH_CHARS = {
@@ -100,10 +101,18 @@ def _visible_repr(text: str) -> str:
     return repr(text)
 
 
+def _is_date_year_column(column: str) -> bool:
+    """True ถ้าชื่อคอลัมน์สื่อว่าเป็นวันที่/ปี เพื่อกัน false positive จาก ID."""
+    normalized = str(column).strip().lower()
+    return any(hint in normalized for hint in _DATE_YEAR_COLUMN_HINTS)
+
+
 # ----------------------------------------------------------------------------
 # (a) Buddhist Era detection
 # ----------------------------------------------------------------------------
-def check_buddhist_era(series: pd.Series, column: str) -> QualityIssue | None:
+def check_buddhist_era(
+    series: pd.Series, column: str, *, allow_non_date_name: bool = False
+) -> QualityIssue | None:
     """ตรวจหาเลขปี พ.ศ. (2440–2599) ที่อาจปนกับ ค.ศ. ในคอลัมน์ตัวเลข/วันที่ — v0.8 vectorized.
 
     v1.1 fix: กรองค่าที่ไม่ใช่รูปแบบวันที่ออก — กัน false positive จากตัวเลขทั่วไป
@@ -111,6 +120,8 @@ def check_buddhist_era(series: pd.Series, column: str) -> QualityIssue | None:
     """
     values = _non_null_str(series)
     if len(values) == 0:
+        return None
+    if not allow_non_date_name and not _is_date_year_column(column):
         return None
 
     # v1.1: กรองเฉพาะค่าที่มีรูปแบบวันที่ (มี - หรือ / คั่น และมี 4 หลัก)
@@ -383,6 +394,17 @@ _DUP_TONE_RE = re.compile(f"[{_THAI_TONE_MARKS}]{{2,}}")
 _DUP_VOWEL_RE = re.compile(f"[{_THAI_UPPER_VOWELS}]{{2,}}")
 # อักขระเดียวกันซ้ำ 3+ ครั้ง (เช่น 5555, ๆๆๆ, อืมมม)
 _REPEAT_SPAM_RE = re.compile(r"(.)\1{2,}")
+_THAI_LAUGHTER_RE = re.compile(r"^5{3,}$")
+
+
+def _skip_repeated_spam_check(text: str) -> bool:
+    """ข้าม repeated-char spam ใน code/category สั้น ๆ ที่มีเลขปน เช่น Ticket/Cabin."""
+    stripped = text.strip()
+    return (
+        len(stripped) < 15
+        and any(ch.isdigit() for ch in stripped)
+        and not _THAI_LAUGHTER_RE.match(stripped)
+    )
 
 
 def _has_combining_order_issue(text: str) -> bool:
@@ -414,7 +436,7 @@ def check_normalization(series: pd.Series, column: str) -> QualityIssue | None:
             problems.append("duplicate vowels")
         if _has_combining_order_issue(v):
             problems.append("combining order")
-        if _REPEAT_SPAM_RE.search(v):
+        if not _skip_repeated_spam_check(v) and _REPEAT_SPAM_RE.search(v):
             problems.append("repeated-char spam")
         # full-width vs half-width — ตรวจผ่าน NFKC ว่าเปลี่ยนไหม
         if v != unicodedata.normalize("NFKC", v) and _has_fullwidth(v):
@@ -519,7 +541,31 @@ _TEXT_TYPES = {
     ColumnType.CATEGORICAL,
 }
 # ประเภทคอลัมน์ที่อาจมีปี
-_YEAR_TYPES = {ColumnType.NUMERIC, ColumnType.DATETIME, ColumnType.ID}
+_YEAR_TYPES = {ColumnType.NUMERIC, ColumnType.DATETIME}
+
+
+def check_missing_values(series: pd.Series, column: str) -> QualityIssue | None:
+    """รายงานค่าว่างแยกตามคอลัมน์เมื่อเกิน threshold: info >1%, warning >5%."""
+    total = len(series)
+    if total == 0:
+        return None
+    count = int(series.isna().sum())
+    percentage = _pct(count, total)
+    if percentage < 1.0:
+        return None
+    severity = "warning" if percentage > 5.0 else "info"
+    return QualityIssue(
+        check_name="missing_values",
+        severity=severity,
+        column=column,
+        count=count,
+        percentage=percentage,
+        description=f"Column has {count} missing values ({percentage:.1f}%).",
+        description_th=f"คอลัมน์มีค่าว่าง {count} ค่า ({percentage:.1f}%)",
+        examples=["<NA>"],
+        suggestion="Handle missing values before analysis (impute, flag, or drop as appropriate).",
+        suggestion_th="จัดการค่าว่างก่อนวิเคราะห์ (เติมค่า, flag, หรือลบตามความเหมาะสม)",
+    )
 
 
 def run_quality_checks(
@@ -539,6 +585,9 @@ def run_quality_checks(
         series = df[col]
         ctype = column_types.get(col_name, ColumnType.EMPTY)
 
+        if (issue := check_missing_values(series, col_name)) is not None:
+            issues.append(issue)
+
         if ctype == ColumnType.EMPTY:
             continue
 
@@ -546,11 +595,23 @@ def run_quality_checks(
         column_has_thai = column_language in {"thai", "mixed"}
         should_run_thai = run_thai_specific or column_has_thai
 
-        # Buddhist Era — คอลัมน์เลข/วันที่ และข้อความ (date strings)
+        # Buddhist Era — เฉพาะคอลัมน์วันที่/ปีจริง ไม่รันบน ID เพื่อกัน false positive
+        be_candidate = ctype == ColumnType.DATETIME or (
+            ctype != ColumnType.ID
+            and _is_date_year_column(col_name)
+            and (ctype in _YEAR_TYPES or ctype in _TEXT_TYPES)
+        )
         if (
             should_run_thai
-            and (ctype in _YEAR_TYPES or ctype in _TEXT_TYPES)
-            and (issue := check_buddhist_era(series, col_name)) is not None
+            and be_candidate
+            and (
+                issue := check_buddhist_era(
+                    series,
+                    col_name,
+                    allow_non_date_name=ctype == ColumnType.DATETIME,
+                )
+            )
+            is not None
         ):
             issues.append(issue)
 
@@ -685,6 +746,7 @@ __all__ = [
     "check_script_composition",
     "check_normalization",
     "check_whitespace",
+    "check_missing_values",
     "check_placeholder_values",
     "check_constant_column",
     "run_quality_checks",

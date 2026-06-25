@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import warnings
 from enum import Enum
 from typing import Any
 
@@ -125,6 +126,16 @@ def is_thai_text(series: pd.Series, threshold: float = 0.15) -> bool:
 
 
 _LANGUAGE_SAMPLE_ROWS = 500
+_LOW_CARDINALITY_MAX_UNIQUE = 20
+_SHORT_LABEL_AVG_LEN = 15
+_SEMICOLON_DELIMITER_MIN_COUNT = 3
+
+# ชื่อคอลัมน์ที่บอกว่าเป็นข้อความ/รีวิว — ไม่ควรถูกบังคับเป็น categorical แม้ cardinality ต่ำ
+_TEXT_NAME_HINTS_RE = re.compile(
+    r"(review|feedback|comment|description|text|note|notes|summary|message|"
+    r"รีวิว|ความคิดเห็น|ข้อความ|บันทึก|คำอธิบาย|รายละเอียด)",
+    re.IGNORECASE,
+)
 _ZERO_WIDTH_RE = re.compile(r"[\u200b\u200c\u200d\ufeff\u2060]")
 _THAI_BLOCK_RE = re.compile(r"[\u0e00-\u0e7f]+")
 _LATIN_WORD_RE = re.compile(r"[A-Za-z]+")
@@ -476,18 +487,27 @@ def _detect_language(df: pd.DataFrame) -> dict[str, Any]:
     }
 
 
+def _name_is_id_or_fk(series: pd.Series) -> bool:
+    """ชื่อคอลัมน์เป็น primary id หรือ foreign key แบบ *_id หรือไม่."""
+    name = str(series.name).lower() if series.name is not None else ""
+    return name == "id" or name.endswith("_id")
+
+
 def _name_hints_id(series: pd.Series) -> bool:
     """ชื่อคอลัมน์บอกใบ้ว่าเป็น ID หรือไม่ (เช่น 'id', 'user_id')."""
     name = str(series.name).lower() if series.name is not None else ""
-    return name == "id" or name.endswith("_id") or name.endswith("id")
+    return _name_is_id_or_fk(series) or name.endswith("id")
 
 
 def _looks_like_id(series: pd.Series, non_null: pd.Series) -> bool:
-    """เดาว่าเป็นคอลัมน์ตัวระบุ (ID) เชิงตัวเลข — ต้องไม่ซ้ำเกือบทั้งหมด และชื่อบอกใบ้.
+    """เดาว่าเป็นคอลัมน์ตัวระบุ (ID/FK) เชิงตัวเลข.
 
-    เราไม่จัดคอลัมน์ตัวเลขทั่วไปที่บังเอิญไม่ซ้ำให้เป็น ID เพราะค่าวัดหลายอย่าง
-    (ราคา, น้ำหนัก) ก็ไม่ซ้ำได้ จึงต้องอาศัยชื่อคอลัมน์เป็นสัญญาณ
+    ถ้าชื่อเป็น ``id`` หรือ ``*_id`` ให้ถือเป็น ID/FK แม้ค่าซ้ำเยอะ (foreign key)
+    ส่วนชื่อที่แค่ลงท้าย ``id`` แบบหลวม ๆ ยังต้องไม่ซ้ำเกือบทั้งหมดเพื่อกัน false positive
+    จากค่าวัดตัวเลขทั่วไปที่บังเอิญไม่ซ้ำ.
     """
+    if _name_is_id_or_fk(series):
+        return True
     n = len(non_null)
     if n < 5:
         return False
@@ -498,6 +518,8 @@ def _looks_like_id(series: pd.Series, non_null: pd.Series) -> bool:
 
 def _looks_like_string_id(series: pd.Series, non_null: pd.Series, str_sample: list[str]) -> bool:
     """เดาว่าเป็น ID แบบสตริง (รหัส/UUID) — ไม่ซ้ำ, token เดี่ยว, สั้น, ไม่ใช่ข้อความไทยยาว."""
+    if _name_is_id_or_fk(series):
+        return True
     n = len(non_null)
     if n < 5:
         return False
@@ -588,8 +610,8 @@ def clean_phone_string(value: str) -> str:
 def detect_column_type(series: pd.Series) -> ColumnType:
     """จำแนกประเภทของ pandas Series หนึ่งคอลัมน์.
 
-    ลำดับการตัดสิน: empty -> datetime -> numeric -> (id) -> text(thai/eng/mixed)
-    -> categorical.
+    ลำดับการตัดสิน: empty -> datetime -> id/fk -> numeric -> low-cardinality labels
+    -> text(thai/eng/mixed) -> categorical.
     """
     non_null = series.dropna()
     if len(non_null) == 0:
@@ -598,6 +620,11 @@ def detect_column_type(series: pd.Series) -> ColumnType:
     # --- datetime ---
     if pd.api.types.is_datetime64_any_dtype(series):
         return ColumnType.DATETIME
+
+    # ID/FK จากชื่อคอลัมน์ต้องมาก่อน numeric เพื่อไม่ให้ order_id/store_id
+    # ที่ซ้ำเยอะ (foreign key) ถูกตีเป็นตัวเลขเชิงสถิติ
+    if _name_is_id_or_fk(series):
+        return ColumnType.ID
 
     # --- numeric (รวมกรณี dtype เป็นเลขอยู่แล้ว) ---
     if pd.api.types.is_numeric_dtype(series) and not pd.api.types.is_bool_dtype(series):
@@ -611,6 +638,7 @@ def detect_column_type(series: pd.Series) -> ColumnType:
     # --- สุ่มตัวอย่างไม่เกิน 1000 ค่า เพื่อตรวจ object column ---
     sample = non_null.head(1000)
     str_sample = [str(v) for v in sample]
+    n = len(str_sample)
 
     # ตรวจเบอร์โทรศัพท์ — ต้องเช็คก่อน numeric เพราะเบอร์โทรเป็นเลขล้วน
     # แต่ไม่ควรถือเป็น numeric สำหรับสถิติ (เบอร์ไม่มีความหมายทางสถิติ)
@@ -635,8 +663,22 @@ def detect_column_type(series: pd.Series) -> ColumnType:
     if _looks_like_string_id(series, non_null, str_sample):
         return ColumnType.ID
 
+    nunique = non_null.nunique()
+    unique_ratio = nunique / len(non_null)
+    avg_len = sum(len(s.strip()) for s in str_sample) / n
+
+    # หมวดหมู่คำสั้นซ้ำ ๆ ต้องชนะการตรวจภาษาไทย/ผสม เช่น serve_type
+    # (ร้อน/เย็น/ปั่น) หรือ payment_method (QR/PromptPay) ไม่ใช่ free text
+    # แต่ถ้าชื่อคอลัมน์บอกว่าเป็นข้อความ/review/feedback ให้ข้าม เพราะประโยคสั้นซ้ำ ๆ ก็ยังเป็น text
+    col_name = str(series.name).lower() if series.name is not None else ""
+    if (
+        nunique <= _LOW_CARDINALITY_MAX_UNIQUE
+        and avg_len < _SHORT_LABEL_AVG_LEN
+        and not _TEXT_NAME_HINTS_RE.search(col_name)
+    ):
+        return ColumnType.CATEGORICAL
+
     # --- วิเคราะห์สคริปต์ของข้อความด้วยสัดส่วนรวม (mean ต่อเซลล์) ---
-    n = len(str_sample)
     mean_thai = sum(_thai_content_ratio(s) for s in str_sample) / n
     mean_latin = sum(_latin_content_ratio(s) for s in str_sample) / n
 
@@ -654,8 +696,6 @@ def detect_column_type(series: pd.Series) -> ColumnType:
 
     # ข้อความที่ไม่ใช่ไทย: ตัดสินว่าเป็น categorical หรือ english_text
     # cardinality check ก่อน
-    nunique = non_null.nunique()
-    unique_ratio = nunique / len(non_null)
     avg_tokens = sum(len(s.split()) for s in str_sample) / n
 
     if (nunique < 50 or unique_ratio < 0.05) and avg_tokens < 4:
@@ -697,7 +737,31 @@ def _looks_like_datetime(values: list[str]) -> bool:
 
 def detect_all(df: pd.DataFrame) -> dict[str, ColumnType]:
     """จำแนกทุกคอลัมน์ใน DataFrame คืน mapping ชื่อคอลัมน์ -> ColumnType."""
+    _warn_if_likely_wrong_semicolon_delimiter(df)
     return {str(col): detect_column_type(df[col]) for col in df.columns}
+
+
+def _warn_if_likely_wrong_semicolon_delimiter(df: pd.DataFrame) -> None:
+    """เตือนกรณี CSV คั่นด้วย ';' แต่ถูกอ่านเป็นคอลัมน์เดียว."""
+    if len(df.columns) != 1 or df.empty:
+        return
+
+    sample = df.iloc[:, 0].dropna().astype(str).head(100)
+    if sample.empty:
+        return
+
+    semicolon_counts = sample.str.count(";")
+    rows_with_many = int((semicolon_counts >= _SEMICOLON_DELIMITER_MIN_COUNT).sum())
+    min_rows = max(3, int(len(sample) * 0.5))
+    if rows_with_many < min_rows:
+        return
+
+    warnings.warn(
+        "DataFrame has one column but many values contain repeated ';'. "
+        "The CSV may have been read with the wrong delimiter; try pd.read_csv(..., sep=';').",
+        UserWarning,
+        stacklevel=2,
+    )
 
 
 __all__ = [

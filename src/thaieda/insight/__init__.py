@@ -112,6 +112,80 @@ _MAX_CORR_PAIRS = 8
 _TYPE_MISMATCH_RATIO = 0.8
 # สัดส่วนแถวซ้ำที่ถือว่ารุนแรง (ยกระดับเป็น warning)
 _DUP_WARN_RATIO = 0.01
+_DATE_COMPONENT_NAMES = {
+    "year",
+    "month",
+    "month_number",
+    "week",
+    "week_number",
+    "day",
+    "day_of_week",
+    "day_of_month",
+    "quarter",
+}
+_DATE_DIMENSION_HINTS = {"date", "full_date", "calendar_date", "date_key", "day_date"}
+
+
+def _is_date_component_name(name: str) -> bool:
+    """ชื่อคอลัมน์ที่เป็นส่วนประกอบของวันที่ใน date dimension."""
+    return str(name).strip().lower() in _DATE_COMPONENT_NAMES
+
+
+def _has_date_dimension_context(df: pd.DataFrame) -> bool:
+    """มี date column จริงหรือชื่อ table-like ที่ทำให้ year/month/week เป็น tautology."""
+    names = {str(c).strip().lower() for c in df.columns}
+    if names & _DATE_DIMENSION_HINTS:
+        return True
+    return any(pd.api.types.is_datetime64_any_dtype(df[c]) for c in df.columns)
+
+
+def _column_from_description(text: str) -> str:
+    """ดึงชื่อคอลัมน์จากข้อความ Insight รูปแบบ "คอลัมน์ 'col': ..."."""
+    marker = "คอลัมน์ '"
+    start = text.find(marker)
+    if start < 0:
+        return ""
+    start += len(marker)
+    end = text.find("'", start)
+    return text[start:end] if end >= 0 else ""
+
+
+def _dedupe_insights(insights: list[Insight]) -> list[Insight]:
+    """ตัด insight ซ้ำจาก quality/anomaly ตามหัวข้อปัญหา + คอลัมน์ โดยเก็บรายการแรกไว้."""
+    out: list[Insight] = []
+    seen: set[tuple[str, str]] = set()
+    for insight in insights:
+        column = _column_from_description(insight.description_th)
+        key = (insight.title_th, column)
+        if column and key in seen:
+            continue
+        if column:
+            seen.add(key)
+        out.append(insight)
+    return out
+
+
+def _dedupe_quality_anomaly(
+    quality_issues: list[QualityIssue], anomaly_issues: list[AnomalyIssue]
+) -> tuple[list[QualityIssue], list[AnomalyIssue]]:
+    """ตัด issue ซ้ำตาม (check_name, column) โดยให้ quality มาก่อน anomaly."""
+    seen: set[tuple[str, str]] = set()
+    q_out: list[QualityIssue] = []
+    for issue in quality_issues:
+        key = (issue.check_name, issue.column)
+        if key in seen:
+            continue
+        seen.add(key)
+        q_out.append(issue)
+
+    a_out: list[AnomalyIssue] = []
+    for issue in anomaly_issues:
+        key = (issue.check_name, issue.column)
+        if key in seen:
+            continue
+        seen.add(key)
+        a_out.append(issue)
+    return q_out, a_out
 
 
 # ----------------------------------------------------------------------------
@@ -345,8 +419,11 @@ def _distribution_insights(
     if not column_types:
         return []
     out: list[Insight] = []
+    date_dimension = _has_date_dimension_context(df)
     for col, ctype in column_types.items():
         if ctype != ColumnType.NUMERIC or col not in df.columns:
+            continue
+        if date_dimension and _is_date_component_name(col):
             continue
         numeric = pd.to_numeric(df[col], errors="coerce").dropna()
         if len(numeric) < _MIN_DISTRIBUTION_SAMPLE or numeric.nunique() <= 1:
@@ -397,6 +474,11 @@ def _distribution_insights(
 def _correlation_insights(df: pd.DataFrame) -> list[Insight]:
     """คู่คอลัมน์ตัวเลขที่สหสัมพันธ์สูง (|r| > 0.7) — อาจซ้ำซ้อน (multicollinearity)."""
     numeric = df.select_dtypes(include="number")
+    if _has_date_dimension_context(df):
+        numeric = numeric.drop(
+            columns=[c for c in numeric.columns if _is_date_component_name(str(c))],
+            errors="ignore",
+        )
     if numeric.shape[1] < 2:
         return []
     if numeric.shape[1] > _MAX_CORR_COLS:
@@ -642,6 +724,11 @@ def generate_insights(
     target_associations = target_associations or []
     cleaning_results = cleaning_results or []
     timeseries_results = timeseries_results or {}
+    if _has_date_dimension_context(df):
+        quality_issues = [i for i in quality_issues if not _is_date_component_name(i.column)]
+        anomaly_issues = [i for i in anomaly_issues if not _is_date_component_name(i.column)]
+
+    quality_issues, anomaly_issues = _dedupe_quality_anomaly(quality_issues, anomaly_issues)
 
     insights: list[Insight] = []
     insights.extend(_insight_from_quality(i) for i in quality_issues)
@@ -665,6 +752,8 @@ def generate_insights(
     # ข้อค้นพบจาก cross-column insight engine (v0.6) — แปลงเป็น Insight มาแล้วจากภายนอก
     if extra_insights:
         insights.extend(extra_insights)
+
+    insights = _dedupe_insights(insights)
 
     # เรียงตามความรุนแรง (วิกฤตก่อน) — เสถียร จึงรักษาลำดับการเพิ่มภายในระดับเดียวกัน
     insights.sort(key=lambda i: _SEVERITY_ORDER.get(i.severity, 99))

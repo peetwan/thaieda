@@ -16,7 +16,12 @@ import pandas as pd
 from thaieda import __version__
 from thaieda.analysis import TargetAssociation, analyze_target
 from thaieda.anomaly import AnomalyIssue, detect_anomalies
-from thaieda.clean import CleaningResult, clean_thai_text
+from thaieda.clean import (
+    CleaningResult,
+    clean_thai_text,
+    handle_missing_values,
+    remove_duplicate_rows,
+)
 from thaieda.detect import ColumnType, _detect_language, detect_all
 from thaieda.i18n import TECHNICAL_TO_PLAIN, label
 from thaieda.insight import Insight, InsightSummary, generate_insights
@@ -52,8 +57,12 @@ _CLEANABLE_TYPES = {
 }
 
 _MONEY_COLUMN_RE = re.compile(
-    r"(amount|amt|price|revenue|sales|total|subtotal|net|gross|cost|paid|payment|"
+    r"(amount|amt|price|revenue|sales|total|subtotal|net|gross|cost|paid|"
     r"เงิน|ราคา|ยอด|รายได้|ขาย|มูลค่า)",
+    re.IGNORECASE,
+)
+_NON_AMOUNT_COLUMN_RE = re.compile(
+    r"(^|_)(method|type|channel|status)($|_)|payment_?(method|type|channel|status)",
     re.IGNORECASE,
 )
 _TRANSACTION_COLUMN_RE = re.compile(r"(transaction|txn|order|invoice|receipt|bill)", re.IGNORECASE)
@@ -64,9 +73,72 @@ _ENTITY_ID_RE = re.compile(
 )
 _RATING_COLUMN_RE = re.compile(
     r"(rating|score|satisfaction|nps|csat|survey|feedback|review|comment|"
-    r"คะแนน|ความพึงพอใจ|รีวิว|ความคิดเห็น)",
+    r"response|question|answer|^q\d+$|คะแนน|ความพึงพอใจ|รีวิว|ความคิดเห็น|คำถาม|คำตอบ)",
     re.IGNORECASE,
 )
+_NON_RESPONSE_TEXT_RE = re.compile(
+    r"(^|_)(name|first_name|last_name|fullname|person|passenger|customer|user|employee|"
+    r"ticket|code|id|uuid|guid|email|phone|address)($|_)",
+    re.IGNORECASE,
+)
+_UNNAMED_INDEX_RE = re.compile(r"^Unnamed:\s*\d+$", re.IGNORECASE)
+_CODE_LIKE_COLUMN_RE = re.compile(
+    r"(^|_)(code|status|type|method|category|class|segment|flag|level)($|_)",
+    re.IGNORECASE,
+)
+_DATE_COMPONENT_RE = re.compile(
+    r"^(year|month|month_number|week|week_number|day|day_of_week|day_of_month|quarter)$",
+    re.IGNORECASE,
+)
+_CONDITIONAL_MISSING_RE = re.compile(
+    r"(holiday|event|promotion|promo|campaign|เทศกาล|วันหยุด|เหตุการณ์)",
+    re.IGNORECASE,
+)
+
+
+def _is_index_artifact_column(name: str) -> bool:
+    """คอลัมน์ index artifact จาก CSV เช่น ``Unnamed: 0`` ที่ไม่ควรถูกวิเคราะห์."""
+    return bool(_UNNAMED_INDEX_RE.match(str(name).strip()))
+
+
+def _is_money_measure_name(name: str) -> bool:
+    """ชื่อคอลัมน์ที่สื่อถึงยอดเงิน/ตัววัดเงินจริง ไม่ใช่ payment_method/type."""
+    col = str(name).lower()
+    return bool(_MONEY_COLUMN_RE.search(col)) and not _NON_AMOUNT_COLUMN_RE.search(col)
+
+
+def _is_id_like_column(name: str, ctype: ColumnType | None = None) -> bool:
+    """คอลัมน์ที่เป็น ID/FK ตามชื่อหรือผล detect — ไม่ควรใช้เป็น metric/measure."""
+    col = str(name).strip().lower()
+    return ctype == ColumnType.ID or col == "id" or col.endswith("_id")
+
+
+def _is_date_component_column(name: str) -> bool:
+    """คอลัมน์ส่วนประกอบของวันที่ใน date dimension (year/month/week/day)."""
+    return bool(_DATE_COMPONENT_RE.match(str(name).strip().lower()))
+
+
+def _is_low_cardinality_code_or_boolean(series: pd.Series, name: str) -> bool:
+    """True เมื่อ numeric column ดูเป็น code/flag/boolean มากกว่าค่าที่ควรวิเคราะห์เป็น metric."""
+    non_null = series.dropna()
+    if non_null.empty:
+        return True
+    unique = int(non_null.nunique(dropna=True))
+    if unique <= 1:
+        return True
+    vals = set(pd.to_numeric(non_null, errors="coerce").dropna().unique().tolist())
+    if vals and vals.issubset({0, 1}):
+        return True
+    if _CODE_LIKE_COLUMN_RE.search(str(name)):
+        ratio = unique / max(len(non_null), 1)
+        return unique <= 20 and ratio <= 0.2
+    return False
+
+
+def _is_conditional_missing_column(name: str) -> bool:
+    """ชื่อคอลัมน์ที่มักว่างตามเงื่อนไข เช่น holiday_name/event_name."""
+    return bool(_CONDITIONAL_MISSING_RE.search(str(name)))
+
 
 _DATA_TYPE_GUIDANCE: dict[str, dict[str, Any]] = {
     "transaction": {
@@ -149,7 +221,10 @@ def _detect_data_type(df: pd.DataFrame) -> dict[str, Any]:
         raise TypeError("_detect_data_type expects a pandas DataFrame.")
 
     rows, cols = df.shape
-    col_names = [str(c) for c in df.columns]
+    all_col_names = [str(c) for c in df.columns]
+    index_artifact_cols = [c for c in all_col_names if _is_index_artifact_column(c)]
+    # ข้ามคอลัมน์ index artifact (เช่น Unnamed: 0 จาก CSV) ใน heuristic ทุกชนิด
+    col_names = [c for c in all_col_names if c not in index_artifact_cols]
     language_info = _detect_language(df)
     detected_language = str(language_info.get("language", "numeric"))
 
@@ -158,10 +233,14 @@ def _detect_data_type(df: pd.DataFrame) -> dict[str, Any]:
     ]
     entity_id_cols = [c for c in col_names if _ENTITY_ID_RE.search(c.lower())]
     transaction_cols = [c for c in col_names if _TRANSACTION_COLUMN_RE.search(c.lower())]
-    amount_cols = [c for c in col_names if _MONEY_COLUMN_RE.search(c.lower())]
+    amount_cols = [c for c in col_names if _is_money_measure_name(c)]
     rating_cols = [c for c in col_names if _RATING_COLUMN_RE.search(c.lower())]
 
-    numeric_cols = [c for c in col_names if pd.api.types.is_numeric_dtype(df[c])]
+    numeric_cols = [
+        c
+        for c in col_names
+        if pd.api.types.is_numeric_dtype(df[c]) and not pd.api.types.is_bool_dtype(df[c])
+    ]
     text_cols = [
         c
         for c in col_names
@@ -201,7 +280,7 @@ def _detect_data_type(df: pd.DataFrame) -> dict[str, Any]:
         min_v = float(vals.min())
         max_v = float(vals.max())
         unique = int(vals.nunique())
-        if name_hit or (0 <= min_v <= 10 and 1 <= max_v <= 10 and unique <= 11):
+        if name_hit and 0 <= min_v <= 10 and 1 <= max_v <= 10 and unique <= 11:
             low_scale_rating_cols.append(c)
 
     amount_numeric_cols = [c for c in amount_cols if c in numeric_cols]
@@ -209,16 +288,24 @@ def _detect_data_type(df: pd.DataFrame) -> dict[str, Any]:
         for c in numeric_cols:
             vals = pd.to_numeric(df[c], errors="coerce").dropna()
             if len(vals) >= 5 and float(vals.max()) > 10 and int(vals.nunique()) > 10:
-                is_amount = not c.lower().endswith("_id") and c not in low_scale_rating_cols
+                is_amount = (
+                    not _is_id_like_column(c)
+                    and c not in low_scale_rating_cols
+                    and not _is_low_cardinality_code_or_boolean(df[c], c)
+                    and not _is_date_component_column(c)
+                )
                 if is_amount:
                     amount_numeric_cols.append(c)
 
-    text_response_cols = [
-        c
-        for c in text_cols
-        if _RATING_COLUMN_RE.search(c.lower())
-        or (df[c].dropna().astype(str).str.len().median() if len(df[c].dropna()) else 0) >= 20
-    ]
+    has_survey_name_evidence = bool(rating_cols)
+    text_response_cols: list[str] = []
+    for c in text_cols:
+        if _NON_RESPONSE_TEXT_RE.search(c.lower()) or _is_id_like_column(c):
+            continue
+        name_hit = _RATING_COLUMN_RE.search(c.lower()) is not None
+        median_len = df[c].dropna().astype(str).str.len().median() if len(df[c].dropna()) else 0
+        if name_hit or (has_survey_name_evidence and median_len >= 20):
+            text_response_cols.append(c)
 
     scores = {
         "transaction": 0,
@@ -254,9 +341,9 @@ def _detect_data_type(df: pd.DataFrame) -> dict[str, Any]:
 
     if low_scale_rating_cols or rating_cols:
         scores["survey"] += 3
-    if text_response_cols:
+    if text_response_cols and (low_scale_rating_cols or rating_cols):
         scores["survey"] += 3
-    if text_cols and numeric_cols:
+    if (low_scale_rating_cols or rating_cols or text_response_cols) and text_cols and numeric_cols:
         scores["survey"] += 1
 
     if has_datetime_index:
@@ -320,6 +407,8 @@ def _detect_data_type(df: pd.DataFrame) -> dict[str, Any]:
         evidence.append("พบคอลัมน์คะแนน/รีวิว: " + ", ".join((low_scale_rating_cols + rating_cols)[:4]))
     if text_response_cols:
         evidence.append(f"พบข้อความตอบกลับ/รีวิว: {', '.join(text_response_cols[:4])}")
+    if index_artifact_cols:
+        evidence.append(f"ข้ามคอลัมน์ index artifact: {', '.join(index_artifact_cols[:4])}")
     if not evidence:
         evidence.append("โครงสร้างข้อมูลไม่เข้ากับรูปแบบเดียวชัดเจน จึงจัดเป็นข้อมูลผสม")
 
@@ -341,6 +430,7 @@ def _detect_data_type(df: pd.DataFrame) -> dict[str, Any]:
             "datetime_columns": datetime_cols,
             "rating_columns": list(dict.fromkeys(low_scale_rating_cols + rating_cols)),
             "text_columns": text_response_cols,
+            "index_artifact_columns": index_artifact_cols,
         },
     }
 
@@ -411,11 +501,66 @@ class ProfileReport:
         self._basic_stats: dict[str, dict[str, Any]] = {}
         self._data_type: dict[str, Any] = {}
         self._notes: list[str] = []
+        self._ignored_columns: set[str] = {
+            str(c) for c in self.df.columns if _is_index_artifact_column(str(c))
+        }
 
     def _emit_progress(self, key: str) -> None:
         """แจ้งความคืบหน้าหนึ่งขั้นตอน (localized ตามภาษาของรายงาน) ถ้ามี callback."""
         if self._progress_cb is not None:
             self._progress_cb(label(key, self.lang))
+
+    def _mark_ignored_columns(self) -> None:
+        """ระบุคอลัมน์ที่เป็น artifact/derived date component เพื่อไม่ส่งเข้า anomaly/timeseries/insight."""
+        for col in self.df.columns:
+            name = str(col)
+            if _is_index_artifact_column(name):
+                self._ignored_columns.add(name)
+                continue
+            if _is_date_component_column(name):
+                self._ignored_columns.add(name)
+
+        index_cols = [c for c in self._ignored_columns if _is_index_artifact_column(c)]
+        if index_cols:
+            self._notes.append(
+                "Ignored CSV index artifact column(s): " + ", ".join(sorted(index_cols))
+            )
+
+    def _analysis_columns(self) -> list[str]:
+        """คอลัมน์ที่ควรวิเคราะห์จริง (ตัด index/date-component artifact ออก)."""
+        return [str(c) for c in self.df.columns if str(c) not in self._ignored_columns]
+
+    def _analysis_df(self) -> pd.DataFrame:
+        """DataFrame สำหรับ analysis ที่ไม่รวมคอลัมน์ artifact."""
+        cols = self._analysis_columns()
+        if len(cols) == len(self.df.columns):
+            return self.df
+        return self.df.loc[:, cols]
+
+    def _analysis_column_types(self) -> dict[str, ColumnType]:
+        """column_types เฉพาะคอลัมน์ที่วิเคราะห์จริง."""
+        return {c: t for c, t in self._column_types.items() if c not in self._ignored_columns}
+
+    def _refine_column_types_for_report(self) -> None:
+        """ปรับ type เฉพาะรายงาน: คอลัมน์ review/comment สั้น ๆ ยังเป็น text response ไม่ใช่ category."""
+        for col in self.df.columns:
+            name = str(col)
+            if self._column_types.get(name) != ColumnType.CATEGORICAL:
+                continue
+            series = self.df[col]
+            if not (pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series)):
+                continue
+            if not _RATING_COLUMN_RE.search(name.lower()) or _NON_RESPONSE_TEXT_RE.search(
+                name.lower()
+            ):
+                continue
+            lang = str(_detect_language(pd.DataFrame({name: series})).get("language", "numeric"))
+            if lang == "thai":
+                self._column_types[name] = ColumnType.THAI_TEXT
+            elif lang == "mixed":
+                self._column_types[name] = ColumnType.MIXED_TEXT
+            elif lang == "english":
+                self._column_types[name] = ColumnType.ENGLISH_TEXT
 
     # ------------------------------------------------------------------ run
     def run(self) -> ProfileReport:
@@ -428,6 +573,8 @@ class ProfileReport:
         self._emit_progress("prog_detect")
         self._data_type = _detect_data_type(self.df)
         self._column_types = detect_all(self.df)
+        self._refine_column_types_for_report()
+        self._mark_ignored_columns()
         self._overview = self._compute_overview()
         self._emit_progress("prog_quality")
         self._quality_issues = run_quality_checks(
@@ -450,7 +597,8 @@ class ProfileReport:
 
         # ความผิดปกติ (statistical/text/encoding/categorical) — text checks ต้องมี tokenizer
         self._emit_progress("prog_anomaly")
-        self._anomalies = detect_anomalies(self.df, self._column_types, tokenizer)
+        analysis_df = self._analysis_df()
+        self._anomalies = detect_anomalies(analysis_df, self._analysis_column_types(), tokenizer)
         self._note_if_ml_skipped()
 
         # Named entities (NER) — เฉพาะคอลัมน์ข้อความไทย และเมื่อมี NER engine ที่ใช้ได้
@@ -479,13 +627,13 @@ class ProfileReport:
         # สรุปข้อค้นพบสำคัญอัตโนมัติ (ตีความผลทั้งหมดเป็นภาษาไทย) — ทำหลังวิเคราะห์ครบ
         self._emit_progress("prog_insights")
         self._insights = generate_insights(
-            self.df,
+            self._analysis_df(),
             self._quality_issues,
             self._anomalies,
             self._text_metrics,
             target_associations=self._target_associations,
             cleaning_results=self._cleaning_diff,
-            column_types=self._column_types,
+            column_types=self._analysis_column_types(),
             timeseries_results=self._timeseries,
             extra_insights=self._business_insights(),
         )
@@ -534,11 +682,24 @@ class ProfileReport:
         indexed.index = pd.DatetimeIndex(time_values[valid])
         indexed = indexed.sort_index()
 
-        numeric_cols = [
-            str(c)
-            for c in self.df.columns
-            if str(c) != str(time_col) and self._column_types.get(str(c)) == ColumnType.NUMERIC
-        ]
+        numeric_cols: list[str] = []
+        skipped_metric_cols: list[str] = []
+        for c in self.df.columns:
+            col = str(c)
+            ctype = self._column_types.get(col)
+            if col == str(time_col) or col in self._ignored_columns or ctype != ColumnType.NUMERIC:
+                continue
+            if _is_id_like_column(col, ctype) or _is_low_cardinality_code_or_boolean(
+                self.df[c], col
+            ):
+                skipped_metric_cols.append(col)
+                continue
+            numeric_cols.append(col)
+        if skipped_metric_cols:
+            self._notes.append(
+                "timeseries skipped non-measure ID/code column(s): "
+                + ", ".join(skipped_metric_cols[:8])
+            )
         if not numeric_cols:
             return
         self._ts_time_col = str(time_col)
@@ -613,6 +774,7 @@ class ProfileReport:
             str(c)
             for c in self.df.columns
             if self._column_types.get(str(c)) == ColumnType.NUMERIC
+            and str(c) not in self._ignored_columns
             and int(self.df[c].notna().sum()) > 100
         ]
         if big_numeric:
@@ -670,8 +832,8 @@ class ProfileReport:
             return
         try:
             self._insight_engine = discover_insights(
-                self.df,
-                self._column_types,
+                self._analysis_df(),
+                self._analysis_column_types(),
                 top_n=self.insights_top,
                 progress=self._progress_cb,
             )
@@ -697,13 +859,32 @@ class ProfileReport:
         return out
 
     def _apply_cleaning(self) -> None:
-        """ทำความสะอาดข้อความทุกคอลัมน์ (object/string) จริง — แทนที่ self.df และเก็บ diff.
+        """ทำความสะอาดข้อมูลจริง — ลบแถวซ้ำ, จัดการ missing, และทำความสะอาดข้อความ.
 
         ใช้ DEFAULT_OPERATIONS ของ clean_thai_text (แก้ encoding/zw/ช่องว่าง/normalize ฯลฯ)
         เก็บเฉพาะการดำเนินการที่มีผล (>0 แถว) ไว้ใน self._cleaning_diff เพื่อแสดงก่อน/หลังในรายงาน
         """
         cleaned_df = self.df.copy()
         diffs: list[CleaningResult] = []
+
+        try:
+            cleaned_df, dup_result = remove_duplicate_rows(cleaned_df)
+            if dup_result.rows_affected > 0:
+                diffs.append(dup_result)
+        except Exception as exc:  # noqa: BLE001 — การลบแถวซ้ำพังไม่ควรล้มทั้งรายงาน
+            self._notes.append(f"duplicate-row cleaning failed: {exc}")
+
+        for col in cleaned_df.columns:
+            series = cleaned_df[col]
+            try:
+                cleaned_series, missing_result = handle_missing_values(series, strategy="flag")
+            except Exception as exc:  # noqa: BLE001 — การจัดการ missing พังไม่ควรล้มทั้งรายงาน
+                self._notes.append(f"missing-value cleaning failed for '{col}': {exc}")
+                continue
+            cleaned_df[col] = cleaned_series
+            if missing_result.rows_affected > 0:
+                diffs.append(missing_result)
+
         for col in cleaned_df.columns:
             series = cleaned_df[col]
             # ทำความสะอาดเฉพาะคอลัมน์ข้อความ — ข้ามตัวเลข/วันที่/บูลีน
@@ -785,6 +966,7 @@ class ProfileReport:
             "missing_cells": missing,
             "missing_pct": round((missing / total_cells * 100.0) if total_cells else 0.0, 2),
             "duplicate_rows": int(df.duplicated().sum()),
+            "ignored_columns": sorted(self._ignored_columns),
             "type_counts": type_counts,
         }
 
@@ -799,6 +981,9 @@ class ProfileReport:
         }
 
         if ctype == ColumnType.NUMERIC:
+            if col in self._ignored_columns:
+                stats["note"] = "ignored: index/date component artifact"
+                return stats
             numeric = pd.to_numeric(series, errors="coerce").dropna()
             if len(numeric) > 0:
                 stats.update(
@@ -1138,6 +1323,41 @@ class ProfileReport:
 
         return actions
 
+    def _conditional_missing_notes(self) -> list[dict[str, Any]]:
+        """เพิ่ม key finding แบบ info เมื่อคอลัมน์มีชื่อที่น่าจะว่างตามเงื่อนไข เช่น holiday/event."""
+        out: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in [*self._quality_issues, *self._anomalies]:
+            column = str(item.column)
+            if column in seen or not _is_conditional_missing_column(column):
+                continue
+            if item.percentage < 50 or not (
+                "missing" in item.check_name
+                or "null" in item.check_name
+                or "ค่าว่าง" in item.description_th
+                or "ขาด" in item.description_th
+            ):
+                continue
+            seen.add(column)
+            out.append(
+                {
+                    "source": "report_note",
+                    "severity": "info",
+                    "column": column,
+                    "check_name": "conditional_missing_possible",
+                    "count": item.count,
+                    "percentage": item.percentage,
+                    "description_th": (
+                        f"คอลัมน์ '{column}' มีค่าว่างสูง แต่อาจเป็น conditional missing "
+                        "(ว่างเมื่อไม่มีวันหยุด/เหตุการณ์/แคมเปญ)"
+                    ),
+                    "suggestion_th": (
+                        "ตรวจ business rule ก่อนเติมค่า/ลบแถว เพราะค่าว่างอาจมีความหมายว่า 'ไม่เกิดเหตุการณ์'"
+                    ),
+                }
+            )
+        return out
+
     def _translate_to_business(self, finding: dict[str, Any]) -> str:
         """แปล finding เชิงเทคนิคให้เป็นภาษาผลกระทบทางธุรกิจ/การตัดสินใจ."""
         column = str(finding.get("column") or finding.get("title_th") or "คอลัมน์นี้")
@@ -1149,6 +1369,12 @@ class ProfileReport:
         count = int(finding.get("count") or 0)
         pct_text = f"{pct:.1f}%" if pct else (f"{count:,} รายการ" if count else "บางส่วน")
         col_lower = column.lower()
+
+        if _is_index_artifact_column(column):
+            return (
+                f"{column} น่าจะเป็นคอลัมน์ index ที่ติดมาจากไฟล์ CSV "
+                "ไม่ใช่ข้อมูลธุรกิจ จึงควร ignore/drop ก่อนวิเคราะห์"
+            )
 
         if (
             check_name == "constant_column"
@@ -1169,6 +1395,11 @@ class ProfileReport:
             return f"{column} {pct_text} อยู่ไกลจากช่วงปกติ — ควรแยกว่าเป็นเคสพิเศษจริงหรือข้อมูลผิดก่อนใช้ในโมเดล/สรุปผล"  # noqa: E501
 
         if "missing" in check_name or "ค่าว่าง" in description or "ขาด" in description:
+            if _is_conditional_missing_column(column):
+                return (
+                    f"{column} อาจว่างตามเงื่อนไข (เช่น ไม่มีวันหยุด/เหตุการณ์) {pct_text} — "
+                    "ตรวจตรรกะธุรกิจก่อนเติมค่า ไม่ควรสรุปว่าเป็น data quality issue ทันที"
+                )
             return f"{column} ขาดข้อมูล {pct_text} — อาจทำให้การแบ่งกลุ่ม รายงาน หรือโมเดลเอนเอียง ควรกำหนดวิธีเติม/ตัดก่อนใช้จริง"  # noqa: E501
 
         if "duplicate" in check_name or "ซ้ำ" in description:
@@ -1231,11 +1462,20 @@ class ProfileReport:
     def _top_findings(self) -> list[dict[str, Any]]:
         """เลือก Key Findings 3–5 ข้อที่สำคัญที่สุด แทนการโชว์ list ยาวด้านบน."""
         raw: list[dict[str, Any]] = []
+        seen_qa: set[tuple[str, str]] = set()
         for issue in self._quality_issues:
+            key = (issue.check_name, issue.column)
+            if key in seen_qa:
+                continue
+            seen_qa.add(key)
             entry = issue.to_dict()
             entry["source"] = "quality"
             raw.append(entry)
         for anomaly in self._anomalies:
+            key = (anomaly.check_name, anomaly.column)
+            if key in seen_qa:
+                continue
+            seen_qa.add(key)
             entry = anomaly.to_dict()
             entry["source"] = "anomaly"
             raw.append(entry)
@@ -1244,8 +1484,13 @@ class ProfileReport:
                 entry = card.to_dict()
                 entry["source"] = "business"
                 perspective = entry.get("perspective", {})
-                entry["column"] = perspective.get("measure") or perspective.get("breakdown")
+                column = perspective.get("measure") or perspective.get("breakdown")
+                if column and str(column) in self._ignored_columns:
+                    continue
+                entry["column"] = column
                 raw.append(entry)
+
+        raw.extend(self._conditional_missing_notes())
 
         if not raw and self._insights is not None:
             for insight in self._insights.insights[:5]:

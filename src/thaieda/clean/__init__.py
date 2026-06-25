@@ -36,6 +36,12 @@ _TONE_STACK_RE = re.compile(f"([{_THAI_TONE_MARKS}])\\1+")
 # ไม้ยมก (ๆ) ที่ซ้ำกัน -> ตัวเดียว
 _YAMOK_REPEAT_RE = re.compile("ๆ{2,}")
 
+# ข้อมูลที่เป็นตัวเลข/วันที่/โค้ดเลขล้วนต้องไม่ถูกยุบ repeated digit
+# เช่น wine.csv: 1.00005, 10.0333333333333 เป็นค่าตัวเลขจริง ไม่ใช่ข้อความธรรมชาติ
+_NUMERIC_LIKE_RE = re.compile(r"^\d+\.?\d*$")
+_DATE_LIKE_RE = re.compile(r"^\d{1,4}[-/]\d{1,2}[-/]\d{1,4}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?$")
+_THAI_DIGIT_LAUGHTER_RE = re.compile(r"^5{4,}$")
+
 # ลายเซ็นที่ "อาจเป็น mojibake / ข้อความที่ ftfy ซ่อมได้" — ใช้กรองแถวก่อนเรียก ftfy
 # (เร็วขึ้นมากบนข้อมูลใหญ่: ข้อความไทย UTF-8 ปกติไม่มีอักขระเหล่านี้ จึงข้ามได้ทันที)
 #   * U+0080–U+00FF : Latin-1 supplement (ไบต์ของ mojibake ไทยตกในช่วงนี้ เช่น 'à¸')
@@ -99,6 +105,8 @@ def _apply_str_transform(
     visible=True จะแสดงตัวอย่างผ่าน repr() เพื่อให้เห็นอักขระล่องหน/ช่องว่างที่เปลี่ยนไป
     """
     column = str(series.name) if series.name is not None else ""
+    original_dtype = series.dtype
+    preserve_string_dtype = isinstance(original_dtype, pd.StringDtype)
 
     notna = series.notna()
     originals = series[notna].astype(str)
@@ -117,6 +125,8 @@ def _apply_str_transform(
         changed_originals = originals[changed]
         changed_cleaned = cleaned[changed]
         out.loc[changed_originals.index] = changed_cleaned
+        if preserve_string_dtype:
+            out = out.astype(original_dtype)
 
         show = (lambda t: repr(t)) if visible else (lambda t: t)
         for before, after in zip(
@@ -276,6 +286,8 @@ def normalize_unicode(series: pd.Series, form: str = "NFC") -> tuple[pd.Series, 
 
 
 def _fix_repeated_str(text: str, max_repeat: int) -> str:
+    if _should_skip_repeated_char_fix(text):
+        return text
     # ยุบไม้ยมกที่ซ้ำ (ๆๆๆ) ให้เหลือตัวเดียว — การเขียน ๆ ซ้ำไม่มีความหมาย
     text = _YAMOK_REPEAT_RE.sub("ๆ", text)
     # ยุบอักขระอื่นที่ซ้ำเกิน max_repeat ให้เหลือ max_repeat ตัว (เช่น 55555 -> 555)
@@ -283,11 +295,22 @@ def _fix_repeated_str(text: str, max_repeat: int) -> str:
     return pattern.sub(lambda m: m.group(1) * max_repeat, text)
 
 
+def _should_skip_repeated_char_fix(text: str) -> bool:
+    """True เมื่อค่าดูเป็นตัวเลข/วันที่ ไม่ใช่ข้อความธรรมชาติที่ควร normalize."""
+    stripped = text.strip()
+    if not stripped or _THAI_DIGIT_LAUGHTER_RE.match(stripped):
+        return False
+    return bool(_NUMERIC_LIKE_RE.match(stripped) or _DATE_LIKE_RE.match(stripped))
+
+
 def _vec_fix_repeated(s: pd.Series, max_repeat: int) -> pd.Series:
     """รุ่นเวกเตอร์ของ _fix_repeated_str — ยุบไม้ยมกซ้ำ แล้วยุบอักขระซ้ำเกิน max_repeat."""
-    s = s.str.replace(_YAMOK_REPEAT_RE.pattern, "ๆ", regex=True)
+    skip = s.map(_should_skip_repeated_char_fix)
+    work = s.mask(skip, "")
+    work = work.str.replace(_YAMOK_REPEAT_RE.pattern, "ๆ", regex=True)
     pattern = r"(.)\1{" + str(max_repeat) + r",}"
-    return s.str.replace(pattern, lambda m: m.group(1) * max_repeat, regex=True)
+    fixed = work.str.replace(pattern, lambda m: m.group(1) * max_repeat, regex=True)
+    return fixed.where(~skip, s)
 
 
 def fix_repeated_chars(series: pd.Series, max_repeat: int = 3) -> tuple[pd.Series, CleaningResult]:
@@ -357,8 +380,8 @@ def pythainlp_normalize(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
 
 # จำนวน token ที่เป็นคำไทยจริงขั้นต่ำ และสัดส่วนขั้นต่ำ เพื่อยอมรับการแก้ keyboard layout
 # (กัน false positive: ข้อความอังกฤษจริงที่แปลงแล้วได้คำไทยมั่ว ๆ)
-_KEYBOARD_MIN_KNOWN = 1
-_KEYBOARD_MIN_RATIO = 0.67
+_KEYBOARD_MIN_KNOWN = 2
+_KEYBOARD_MIN_RATIO = 0.80
 _KEYBOARD_MIN_THAI_CHARS = 3
 
 # แคช dictionary คำไทย (โหลดครั้งเดียว) — None = ยังไม่โหลด
@@ -378,6 +401,12 @@ def _thai_words() -> frozenset[str]:
 def _count_thai_chars(text: str) -> int:
     """นับจำนวนอักขระไทย (ช่วง U+0E00–U+0E7F) ในข้อความ."""
     return sum(1 for ch in text if "฀" <= ch <= "๿")
+
+
+def _series_has_thai_chars(series: pd.Series) -> bool:
+    """True ถ้าคอลัมน์มีอักขระไทยอยู่แล้วใน sample ที่ไม่ว่าง."""
+    values = series.dropna().head(1000).astype(str)
+    return any(_count_thai_chars(v) > 0 for v in values)
 
 
 def _make_keyboard_fixer() -> Callable[[str], str]:
@@ -415,8 +444,8 @@ def fix_keyboard_layout(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
     """ตรวจและแก้การพิมพ์ผิด keyboard layout — พิมพ์อังกฤษทั้งที่ตั้งใจพิมพ์ไทย.
 
     เช่น พิมพ์ 'l;ylfu' (ลืมสลับแป้น) แทน 'สวัสดี' — ฟังก์ชันนี้จะแปลงกลับด้วย
-    pythainlp.util.eng_to_thai เฉพาะเซลล์ที่แปลงแล้วได้ "คำไทยจริง" เท่านั้น
-    (ข้อความอังกฤษจริงจะไม่ถูกแตะต้อง)
+    pythainlp.util.eng_to_thai เฉพาะคอลัมน์ที่มีอักษรไทยอยู่แล้ว และเฉพาะเซลล์ที่แปลงแล้วได้
+    "คำไทยจริง" เท่านั้น (ข้อความอังกฤษจริงจะไม่ถูกแตะต้อง)
 
     Raises:
         ImportError: ถ้าไม่ได้ติดตั้ง pythainlp (ติดตั้งผ่าน thaieda[thai]).
@@ -425,6 +454,17 @@ def fix_keyboard_layout(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
         fixer = _make_keyboard_fixer()
     except ImportError as exc:
         raise ImportError(f"fix_keyboard_layout {_PYTHAINLP_INSTALL_HINT}.") from exc
+
+    if not _series_has_thai_chars(series):
+        return series, CleaningResult(
+            operation="fix_keyboard_layout",
+            rows_affected=0,
+            column=str(series.name or ""),
+            description_th=(
+                "ข้ามการแก้ keyboard layout เพราะคอลัมน์ไม่มีอักขระไทยอยู่แล้ว "
+                "(กันการแปลงคำอังกฤษจริง เช่น Floyd)"
+            ),
+        )
 
     return _apply_str_transform(
         series,

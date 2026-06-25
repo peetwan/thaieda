@@ -257,26 +257,43 @@ def detect_numeric_outliers(series: pd.Series) -> AnomalyIssue | None:
     examples = [_fmt_number(float(v)) for v in outlier_values[:_MAX_INDICES]]
     indices = [int(p) for p in outlier_positions[:_MAX_INDICES]]
 
+    heavy_tail = skew > 2.0
+    severity = "info" if heavy_tail and n >= 30 else "warning"
+    context_note = (
+        " Heavy-tailed distributions often contain valid business extremes; "
+        "treat this as context, not automatically as a data defect."
+        if heavy_tail
+        else ""
+    )
+    context_note_th = (
+        " การกระจายแบบหางยาวมักมีค่าสุดขั้วทางธุรกิจที่ถูกต้อง จึงไม่ใช่ defect ของข้อมูลเสมอไป"
+        if heavy_tail
+        else ""
+    )
+
     return AnomalyIssue(
         check_name="numeric_outliers",
-        severity="warning",
+        severity=severity,
         column=col,
         anomaly_type="statistical",
         count=count,
         percentage=_pct(count, n),
         description=(
             f"{count} numeric outlier(s) detected using the {method} method "
-            f"(distribution skew ≈ {skew:.2f})."
+            f"(distribution skew ≈ {skew:.2f}).{context_note}"
         ),
         description_th=(
-            f"พบค่าผิดปกติเชิงตัวเลข {count} ค่า ด้วยวิธี {method} (ความเบ้ของการกระจาย ≈ {skew:.2f})"
+            f"พบค่าผิดปกติเชิงตัวเลข {count} ค่า ด้วยวิธี {method} "
+            f"(ความเบ้ของการกระจาย ≈ {skew:.2f}){context_note_th}"
         ),
         examples=examples,
         suggestion=(
-            "Inspect these values; they may be data-entry errors, "
-            "units mismatch, or genuine extremes."
+            "Inspect these values; they may be data-entry errors, units mismatch, "
+            "genuine extremes, or valid business extremes."
         ),
-        suggestion_th="ตรวจสอบค่าเหล่านี้ — อาจเป็นการกรอกผิด หน่วยไม่ตรงกัน หรือค่าสุดขั้วจริง",
+        suggestion_th=(
+            "ตรวจสอบค่าเหล่านี้ — อาจเป็นการกรอกผิด หน่วยไม่ตรงกัน ค่าสุดขั้วจริง หรือค่าสุดขั้วทางธุรกิจที่ถูกต้อง"
+        ),
         indices=indices,
     )
 
@@ -790,6 +807,11 @@ def _diacritic_order_anomalies(items: list[tuple[int, str]], col: str) -> Anomal
 
 def _script_mixing_anomalies(items: list[tuple[int, str]], col: str) -> AnomalyIssue | None:
     """เซลล์ที่สัดส่วนไทย/ละตินผิดปกติเทียบกับค่าเฉลี่ยคอลัมน์ (เช่น คอลัมน์ไทยแต่เซลล์เป็นละตินล้วน)."""
+    # คอลัมน์หมวดหมู่คำสั้น/จำนวนค่าน้อย (เช่น payment_method, event_name)
+    # มักตั้งใจผสมไทย-อังกฤษอยู่แล้ว จึงไม่ควรถูก flag เป็น script mixing
+    if len({s for _, s in items}) <= 20:
+        return None
+
     ratios: list[tuple[int, str, float]] = []  # (pos, text, thai_ratio)
     for pos, s in items:
         thai, latin = _thai_latin_letter_counts(s)
@@ -799,7 +821,7 @@ def _script_mixing_anomalies(items: list[tuple[int, str]], col: str) -> AnomalyI
         return None
 
     col_mean = float(np.mean([r for _, _, r in ratios]))
-    # ตรวจเฉพาะคอลัมน์ที่ "ส่วนใหญ่เป็นไทย" แล้วมีเซลล์ที่เป็นละตินเด่นผิดปกติ
+
     if col_mean < 0.6:
         return None
     flagged = [(pos, s) for pos, s, r in ratios if r <= 0.2]
@@ -884,6 +906,15 @@ def _rare_category_anomaly(
     )
 
 
+def _looks_like_distinct_short_code_pair(a: str, b: str) -> bool:
+    """True ถ้าคู่ label สั้นแบบ code/category น่าจะเป็นคนละหมวดจริงมากกว่า typo."""
+    a_s, b_s = a.strip(), b.strip()
+    if max(len(a_s), len(b_s)) >= 10 or abs(len(a_s) - len(b_s)) > 1:
+        return False
+    code_re = re.compile(r"^[A-Za-z0-9_/#\- ]+$")
+    return bool(code_re.fullmatch(a_s) and code_re.fullmatch(b_s))
+
+
 def _fuzzy_duplicate_anomaly(
     counts: Counter[str], items: list[tuple[int, str]], col: str
 ) -> AnomalyIssue | None:
@@ -896,17 +927,23 @@ def _fuzzy_duplicate_anomaly(
             a, b = cats[i], cats[j]
             if a.casefold() == b.casefold():
                 continue  # ต่างแค่ตัวพิมพ์ -> จัดเป็น case inconsistency แทน
-            if _string_similarity(a, b) > 0.8:
+            similarity = _string_similarity(a, b)
+            if similarity > 0.8:
+                # เช่น INLAND ↔ ISLAND เป็น label/code สั้นที่ต่างกันจริง ไม่ควร standardize
+                if _looks_like_distinct_short_code_pair(a, b):
+                    continue
                 pairs.append((a, b))
                 involved.update((a, b))
                 if len(pairs) >= _MAX_INDICES:
                     break
         if len(pairs) >= _MAX_INDICES:
             break
+
     if not pairs:
         return None
     indices = [pos for pos, v in items if v in involved][:_MAX_INDICES]
     count = sum(counts[c] for c in involved)
+
     examples = [f"{a} ↔ {b}" for a, b in pairs[:_MAX_INDICES]]
     return AnomalyIssue(
         check_name="fuzzy_duplicates",
@@ -1157,7 +1194,10 @@ def detect_column_anomalies(
 # ----------------------------------------------------------------------------
 _TEXT_TYPES = {ColumnType.THAI_TEXT, ColumnType.MIXED_TEXT, ColumnType.ENGLISH_TEXT}
 _THAI_TYPES = {ColumnType.THAI_TEXT, ColumnType.MIXED_TEXT}
-_CATEGORICAL_TYPES = {ColumnType.CATEGORICAL, ColumnType.ID}
+# ID/FK ไม่ถือเป็น categorical สำหรับการตรวจ anomaly — ค่า unique ของ ID
+# จะถูกมองเป็น rare category 100% และ fuzzy duplicate แบบ false positive
+# การตรวจ ID ที่เหมาะสม (uniqueness/null/format) ควรทำแยกเป็นกฎเฉพาะ
+_CATEGORICAL_TYPES = {ColumnType.CATEGORICAL}
 
 
 def _detect_anomalies_frame(
