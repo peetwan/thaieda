@@ -677,9 +677,7 @@ class ProfileReport:
                 "time_column": self._ts_time_col,
                 # นับคอลัมน์ที่มีแนวโน้ม/ฤดูกาล ไว้แสดงเป็นแบนเนอร์สรุปด้านบน
                 "trend_count": sum(1 for r in self._timeseries.values() if r.has_trend),
-                "seasonal_count": sum(
-                    1 for r in self._timeseries.values() if r.has_seasonality
-                ),
+                "seasonal_count": sum(1 for r in self._timeseries.values() if r.has_seasonality),
                 "columns": [
                     {
                         "column": col,

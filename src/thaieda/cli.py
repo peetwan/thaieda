@@ -130,9 +130,7 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help="สุ่มตัวอย่าง N แถวก่อนวิเคราะห์ (เหมาะกับไฟล์ใหญ่ — ค่าเริ่มต้น: ใช้ข้อมูลทั้งหมด)",
     )
-    p_profile.add_argument(
-        "--quiet", action="store_true", help="แสดงผลแบบย่อ (พิมพ์เฉพาะพาธไฟล์ผลลัพธ์)"
-    )
+    p_profile.add_argument("--quiet", action="store_true", help="แสดงผลแบบย่อ (พิมพ์เฉพาะพาธไฟล์ผลลัพธ์)")
     _add_io_args(p_profile)
 
     # ----- run (single-command pipeline) -----
@@ -178,9 +176,7 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help="สุ่มตัวอย่าง N แถวก่อนประมวลผล (เหมาะกับไฟล์ใหญ่ — ค่าเริ่มต้น: ใช้ข้อมูลทั้งหมด)",
     )
-    p_run.add_argument(
-        "--quiet", action="store_true", help="แสดงผลแบบย่อ (พิมพ์เฉพาะพาธไฟล์ผลลัพธ์)"
-    )
+    p_run.add_argument("--quiet", action="store_true", help="แสดงผลแบบย่อ (พิมพ์เฉพาะพาธไฟล์ผลลัพธ์)")
     _add_io_args(p_run)
 
     # ----- clean -----

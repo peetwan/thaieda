@@ -223,9 +223,7 @@ def _associate(
         if out is None:
             return None
         r, p = out
-        desc = (
-            f"สหสัมพันธ์ Pearson ระหว่าง '{col}' กับ '{target_name}' = {r:.3f} — {_sig_th(p, alpha)}"
-        )
+        desc = f"สหสัมพันธ์ Pearson ระหว่าง '{col}' กับ '{target_name}' = {r:.3f} — {_sig_th(p, alpha)}"
         return TargetAssociation(col, target_name, "correlation", r, p, desc)
 
     # numeric × categorical (ทิศใดก็ได้) -> ANOVA F
@@ -243,16 +241,12 @@ def _associate(
         if out is None:
             return None
         f, p = out
-        desc = (
-            f"ANOVA F ของ '{col}' เทียบกับ '{target_name}' = {f:.3f} — {_sig_th(p, alpha)}"
-        )
+        desc = f"ANOVA F ของ '{col}' เทียบกับ '{target_name}' = {f:.3f} — {_sig_th(p, alpha)}"
         return TargetAssociation(col, target_name, "anova", f, p, desc)
 
     # categorical × categorical -> Chi-square
     if target_kind == "categorical" and col_kind == "categorical":
-        frame = pd.DataFrame(
-            {"a": series.astype("object"), "b": target.astype("object")}
-        ).dropna()
+        frame = pd.DataFrame({"a": series.astype("object"), "b": target.astype("object")}).dropna()
         if len(frame) < _MIN_SAMPLE:
             return None
         observed = pd.crosstab(frame["a"], frame["b"]).to_numpy(dtype="float64")
@@ -260,9 +254,7 @@ def _associate(
         if out is None:
             return None
         chi2, p = out
-        desc = (
-            f"Chi-square ระหว่าง '{col}' กับ '{target_name}' = {chi2:.3f} — {_sig_th(p, alpha)}"
-        )
+        desc = f"Chi-square ระหว่าง '{col}' กับ '{target_name}' = {chi2:.3f} — {_sig_th(p, alpha)}"
         return TargetAssociation(col, target_name, "chi_square", chi2, p, desc)
 
     return None

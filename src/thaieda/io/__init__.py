@@ -161,14 +161,10 @@ def _read_with_format(path: Path, fmt: str, encoding: str) -> pd.DataFrame:
         return _read_json_lines(path, encoding)
     if fmt == "json":
         return _read_json_any(path, encoding)
-    raise ValueError(
-        f"format ไม่รองรับ: {fmt!r} — รองรับเฉพาะ auto, csv, json, jsonl"
-    )
+    raise ValueError(f"format ไม่รองรับ: {fmt!r} — รองรับเฉพาะ auto, csv, json, jsonl")
 
 
-def read_data(
-    path: str | Path, format: str = "auto", encoding: str = "auto"
-) -> pd.DataFrame:
+def read_data(path: str | Path, format: str = "auto", encoding: str = "auto") -> pd.DataFrame:
     """อ่านไฟล์ CSV/JSON อัตโนมัติ — ตรวจ encoding และ format ให้เอง.
 
     Args:
@@ -188,9 +184,7 @@ def read_data(
         raise FileNotFoundError(f"ไม่พบไฟล์: {p}")
 
     if format != "auto" and format not in _VALID_FORMATS:
-        raise ValueError(
-            f"format ไม่รองรับ: {format!r} — รองรับเฉพาะ auto, csv, json, jsonl"
-        )
+        raise ValueError(f"format ไม่รองรับ: {format!r} — รองรับเฉพาะ auto, csv, json, jsonl")
 
     enc = detect_encoding(p) if encoding == "auto" else encoding
     auto_format = format == "auto"

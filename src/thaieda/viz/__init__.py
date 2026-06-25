@@ -695,9 +695,7 @@ _SEASONAL = "#69db7c"  # สีเขียว สำหรับองค์ป
 _RESIDUAL = "#ffa94d"  # สีส้ม สำหรับ residual
 
 
-def create_timeseries_plot(
-    series: pd.Series, title: str = "", font_path: str | None = None
-) -> str:
+def create_timeseries_plot(series: pd.Series, title: str = "", font_path: str | None = None) -> str:
     """กราฟเส้น timeseries พร้อมเส้นแนวโน้ม (trend line) คืนค่าเป็น base64 PNG.
 
     ถ้า index เป็น DatetimeIndex จะใช้เป็นแกน x (เรียงตามเวลา) ไม่งั้นใช้ตำแหน่ง

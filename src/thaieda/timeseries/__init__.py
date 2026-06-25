@@ -161,9 +161,7 @@ def _detect_frequency(dt_index: pd.DatetimeIndex) -> tuple[str, float]:
     return _classify_frequency(median_seconds), median_seconds
 
 
-def _detect_time_gaps(
-    dt_index: pd.DatetimeIndex, median_seconds: float
-) -> list[tuple[str, str]]:
+def _detect_time_gaps(dt_index: pd.DatetimeIndex, median_seconds: float) -> list[tuple[str, str]]:
     """หาช่องว่างของเวลา (ช่วงที่ delta ใหญ่ผิดปกติ) — คืนรายการ (เริ่ม, จบ) เป็นสตริง.
 
     ใช้วิธีเทียบ delta กับ median delta (ไม่พึ่ง freq string ของ pandas เพื่อเลี่ยงปัญหาเวอร์ชัน)
@@ -352,9 +350,7 @@ def _build_ts_insights(
             f"พบแนวโน้ม{_TREND_TH[trend_direction]} (ค่าเปลี่ยนเฉลี่ย {slope:+.4g} ต่อช่วงเวลา)"
         )
     if has_seasonality and seasonal_period > 0:
-        insights.append(
-            f"พบรูปแบบตามฤดูกาล (seasonality) รอบ {seasonal_period} จุด"
-        )
+        insights.append(f"พบรูปแบบตามฤดูกาล (seasonality) รอบ {seasonal_period} จุด")
     if gap_count > 0:
         insights.append(f"พบช่องว่างข้อมูล {gap_count} ช่วง (เวลาที่ขาดหาย)")
     if n_anomalies > 0:

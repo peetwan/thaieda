@@ -316,9 +316,7 @@ def fix_tone_mark_stacking(series: pd.Series) -> tuple[pd.Series, CleaningResult
 # ----------------------------------------------------------------------------
 # การทำความสะอาดที่ใช้ pythainlp (optional dependency [thai])
 # ----------------------------------------------------------------------------
-_PYTHAINLP_INSTALL_HINT = (
-    "ต้องติดตั้ง pip install thaieda[thai] (แพ็กเกจ 'pythainlp') ก่อนใช้งานฟังก์ชันนี้"
-)
+_PYTHAINLP_INSTALL_HINT = "ต้องติดตั้ง pip install thaieda[thai] (แพ็กเกจ 'pythainlp') ก่อนใช้งานฟังก์ชันนี้"
 
 
 def _pythainlp_available() -> bool:

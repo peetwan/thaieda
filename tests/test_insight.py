@@ -55,9 +55,7 @@ def test_generate_insights_returns_summary():
 
 def test_quality_and_anomaly_become_insights():
     df = pd.DataFrame({"year": [2567, 2024, 2568], "price": list(range(3))})
-    summary = generate_insights(
-        df, [_quality_issue()], [_anomaly_issue()], {}
-    )
+    summary = generate_insights(df, [_quality_issue()], [_anomaly_issue()], {})
     assert summary.total_insights == 2
     assert summary.critical_count == 1
     assert summary.warning_count == 1
@@ -173,9 +171,7 @@ def test_integration_with_real_checks():
     column_types = detect_all(df)
     quality = run_quality_checks(df, column_types)
     anomalies = detect_anomalies(df, column_types, None)
-    summary = generate_insights(
-        df, quality, anomalies, {}, column_types=column_types
-    )
+    summary = generate_insights(df, quality, anomalies, {}, column_types=column_types)
     assert summary.total_insights >= 1
     # ต้องมี insight เกี่ยวกับ พ.ศ. (buddhist_era ถูกตรวจพบ)
     assert any("พุทธศักราช" in i.title_th for i in summary.insights)
