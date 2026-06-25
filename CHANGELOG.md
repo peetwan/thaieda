@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-06-25
+
+Headline feature: **insight visualization** — every cross-column insight card now
+includes an auto-generated chart matched to its pattern, embedded in the HTML report.
+
+### Added
+- **`thaieda.viz` insight chart functions**:
+  - `create_insight_outstanding_chart(segments, top_segment, title, font_path)` —
+    horizontal bar chart; top segment highlighted in green, others in muted gray.
+  - `create_insight_attribution_chart(segments, top_segment, share, title, font_path)` —
+    donut chart with the dominant segment's share % in the center.
+  - `create_insight_comparison_chart(df, breakdown, measure, top_segment, title, font_path)` —
+    box plot by group; top segment highlighted in red, groups beyond top-9 collapsed into "อื่น ๆ".
+  - `create_insight_trend_chart(segments, direction, tau, title, font_path)` —
+    line chart with filled area, direction arrow annotation, and τ value in the title.
+  - `create_insight_chart(card_dict, df, font_path)` — dispatcher that picks the right
+    chart based on the card's `pattern` field.
+- **`ProfileReport._build_insight_charts()`** — generates a chart for each insight card
+  during `profile()` and embeds it in the HTML report alongside the text + evidence table.
+- **HTML template** — insight cards now render an `<img>` (base64 PNG) when a chart is
+  available; evidence table is hidden for trend cards (the line chart replaces it).
+
+### Changed
+- Roadmap shifted: v0.8 = LLM Q&A, v0.9 = interactive dashboard (was v0.7/v0.8).
+
+### Fixed
+- Trend chart annotation: replaced Unicode arrows (↗↘) with ASCII text ("Trend UP"/"Trend DOWN")
+  to avoid missing-glyph warnings on Thai fonts.
+
+---
+
 ## [0.6.0] - 2026-06-25
 
 Headline feature: **cross-column insight engine** — a *discoverer* (vs. the existing

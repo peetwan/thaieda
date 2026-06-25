@@ -19,6 +19,7 @@ src/thaieda/
   analysis/       target variable analysis (v0.2)
   insight/        auto insight summary — interpreter (v0.3) + distribution/correlation (v0.4)
   insight_engine/ cross-column insight discovery — discoverer: 4 patterns + BH correction (v0.6)
+  insight_viz/     auto charts for insight cards: bar/donut/box/line (v0.7, inside viz/)
   timeseries/     timeseries analysis (v0.4)
   schema/         multi-file schema discovery — PK/FK + relationship matching (v0.5)
   viz/            visualization + Thai font

@@ -938,6 +938,334 @@ def auto_select_charts(
     return charts
 
 
+# ------------------------------------------------------------------------------
+# Insight charts (v0.7) — กราฟสำหรับ cross-column insight cards
+# ------------------------------------------------------------------------------
+# สีประจำแต่ละ pattern (เข้ากับธีมเข้ม)
+_PATTERN_COLORS = {
+    "outstanding": "#69db7c",  # เขียว — เด่น
+    "attribution": "#ffd43b",  # เหลือง — สัดส่วน
+    "comparison": "#ff8787",  # แดงอ่อน — ต่าง
+    "trend": "#4dabf7",  # ฟ้า — แนวโน้ม
+}
+# จำนวน segment สูงสุดที่แสดงในกราฟ (กันรกเกินไป)
+_MAX_INSIGHT_BARS = 15
+# จำนวน bucket สูงสุดในกราฟ trend
+_MAX_TREND_POINTS = 50
+
+
+def create_insight_outstanding_chart(
+    segments: list[list],
+    top_segment: str,
+    title: str = "",
+    font_path: str | None = None,
+) -> str:
+    """กราฟแท่งแนวนอน — เปรียบเทียบ segment ที่โดดเด่นกับกลุ่มอื่น (outstanding pattern).
+
+    segments: [[label, value], ...] — เรียงจากมากไปน้อย
+    ไฮไลต์ segment ที่โดดเด่นด้วยสีเขียว, ที่เหลือสีจาง
+    คืนสตริงว่างถ้าไม่มีข้อมูล
+    """
+    setup_matplotlib_thai_font()
+    prop = _font_prop(font_path)
+
+    if not segments:
+        return ""
+    labels = [str(s[0]) for s in segments[:_MAX_INSIGHT_BARS]]
+    values = [float(s[1]) for s in segments[:_MAX_INSIGHT_BARS]]
+    # เรียง barh จากล่างขึ้น (มากสุดบน)
+    labels = labels[::-1]
+    values = values[::-1]
+    colors = [
+        _PATTERN_COLORS["outstanding"] if lbl == top_segment else "#3a3f47"
+        for lbl in labels
+    ]
+
+    fig, ax = plt.subplots(
+        figsize=(7, max(3.0, 0.35 * len(labels) + 1)), facecolor=_DARK_BG
+    )
+    ax.set_facecolor(_DARK_BG)
+    positions = range(len(labels))
+    ax.barh(list(positions), values, color=colors, alpha=0.85)
+    ax.set_yticks(list(positions))
+    ax.set_yticklabels(_wrap_labels(labels, limit=20), fontproperties=prop, color=_DARK_FG)
+    if title:
+        ax.set_title(title, color=_DARK_FG, fontproperties=prop, fontsize=11)
+    ax.set_xlabel("value", color=_DARK_FG, fontproperties=prop)
+    _style_dark_axes(ax)
+    return _fig_to_base64(fig)
+
+
+def create_insight_attribution_chart(
+    segments: list[list],
+    top_segment: str,
+    share: float,
+    title: str = "",
+    font_path: str | None = None,
+) -> str:
+    """กราฟโดนัท (donut) — แสดงสัดส่วน segment ที่ครอง vs ที่เหลือ (attribution pattern).
+
+    segments: [[label, value], ...] เรียงจากมากไปน้อย
+    แสดง top segment เป็นสีเหลือง, ที่เหลือรวมกันเป็นสีเทา
+    คืนสตริงว่างถ้าไม่มีข้อมูล
+    """
+    setup_matplotlib_thai_font()
+    prop = _font_prop(font_path)
+
+    if not segments:
+        return ""
+    top_val = float(segments[0][1])
+    rest_val = sum(float(s[1]) for s in segments[1:])
+    if top_val <= 0 and rest_val <= 0:
+        return ""
+
+    sizes = [top_val, rest_val] if rest_val > 0 else [top_val]
+    colors = (
+        [_PATTERN_COLORS["attribution"], "#3a3f47"]
+        if rest_val > 0
+        else [_PATTERN_COLORS["attribution"]]
+    )
+
+    fig, ax = plt.subplots(figsize=(5, 4), facecolor=_DARK_BG)
+    ax.set_facecolor(_DARK_BG)
+    wedges, _texts, autotexts = ax.pie(
+        sizes,
+        labels=None,
+        colors=colors,
+        autopct="%1.0f%%",
+        startangle=90,
+        pctdistance=0.75,
+        wedgeprops=dict(width=0.45, edgecolor=_DARK_BG, linewidth=2),
+        textprops=dict(color=_DARK_FG, fontproperties=prop, fontsize=10),
+    )
+    for t in autotexts:
+        t.set_color("#15171c" if t.get_text() == f"{int(share)}%" else _DARK_FG)
+        t.set_fontweight("bold")
+    # ข้อความกลางโดนัท
+    ax.text(
+        0, 0, f"{share:.0f}%",
+        ha="center", va="center",
+        color=_PATTERN_COLORS["attribution"],
+        fontproperties=prop,
+        fontsize=20,
+        fontweight="bold",
+    )
+    if title:
+        ax.set_title(title, color=_DARK_FG, fontproperties=prop, fontsize=11)
+    return _fig_to_base64(fig)
+
+
+def create_insight_comparison_chart(
+    df: pd.DataFrame,
+    breakdown: str,
+    measure: str,
+    top_segment: str,
+    title: str = "",
+    font_path: str | None = None,
+) -> str:
+    """Box plot ตามกลุ่ม — เปรียบเทียบการแจกแจงของ measure ระหว่าง segment เด่น vs ที่เหลือ.
+
+    ไฮไลต์กลุ่มเด่นด้วยสีแดงอ่อน, ที่เหลือสีเทา
+    จำกัดจำนวนกลุ่มที่แสดง (top 10 + "อื่น ๆ") กันกราฟรก
+    คืนสตริงว่างถ้าข้อมูลไม่พอ
+    """
+    setup_matplotlib_thai_font()
+    prop = _font_prop(font_path)
+
+    num = pd.to_numeric(df[measure], errors="coerce")
+    cat = df[breakdown].astype(str)
+    valid = num.notna() & cat.notna()
+    if int(valid.sum()) < 4:
+        return ""
+
+    frame = pd.DataFrame({"_g": cat[valid], "_m": num[valid]})
+    vc = frame["_g"].value_counts()
+    # เก็บ top 9 กลุ่ม + รวมที่เหลือเป็น "อื่น ๆ"
+    top_groups = vc.index[:9].tolist()
+    frame["_g"] = frame["_g"].where(frame["_g"].isin(top_groups), "อื่น ๆ")
+    # เรียง: top_segment ก่อน, แล้วตามขนาด
+    groups = frame.groupby("_g", observed=True)["_m"]
+    group_list = sorted(
+        groups.groups.keys(),
+        key=lambda g: (0 if g == top_segment else 1, -groups.size()[g]),
+    )
+    if len(group_list) < 2:
+        return ""
+
+    data = [groups.get_group(g).to_numpy(dtype="float64") for g in group_list]
+    labels = _wrap_labels([str(g) for g in group_list], limit=14)
+
+    fig, ax = plt.subplots(
+        figsize=(max(6.0, 1.2 * len(group_list) + 2), 4.5), facecolor=_DARK_BG
+    )
+    ax.set_facecolor(_DARK_BG)
+    bp = ax.boxplot(
+        data,
+        patch_artist=True,
+        showfliers=True,
+        flierprops=dict(
+            marker="o",
+            markersize=3,
+            markerfacecolor="#5c5c5c",
+            markeredgecolor="#5c5c5c",
+            alpha=0.4,
+        ),
+        medianprops=dict(color="#ffffff"),
+        whiskerprops=dict(color=_DARK_FG),
+        capprops=dict(color=_DARK_FG),
+    )
+    for i, patch in enumerate(bp["boxes"]):
+        if group_list[i] == top_segment:
+            patch.set_facecolor(_PATTERN_COLORS["comparison"])
+            patch.set_alpha(0.55)
+        else:
+            patch.set_facecolor("#3a3f47")
+            patch.set_alpha(0.45)
+        patch.set_edgecolor(_DARK_FG)
+
+    ax.set_xticks(range(1, len(labels) + 1))
+    ax.set_xticklabels(labels, rotation=30, ha="right", color=_DARK_FG, fontproperties=prop)
+    if title:
+        ax.set_title(title, color=_DARK_FG, fontproperties=prop, fontsize=11)
+    ax.set_ylabel(measure, color=_DARK_FG, fontproperties=prop, fontsize=10)
+    _style_dark_axes(ax)
+    return _fig_to_base64(fig)
+
+
+def create_insight_trend_chart(
+    segments: list[list],
+    direction: str,
+    tau: float,
+    title: str = "",
+    font_path: str | None = None,
+) -> str:
+    """กราฟเส้น — แสดงแนวโน้มตามช่วงเวลา (trend pattern).
+
+    segments: [[label, value], ...] เรียงตามลำดับเวลา
+    เส้นสีฟ้าพร้อมจุด, ลูกศรชี้ทิศทาง (เพิ่ม/ลด)
+    คืนสตริงว่างถ้าไม่มีข้อมูล
+    """
+    setup_matplotlib_thai_font()
+    prop = _font_prop(font_path)
+
+    if not segments or len(segments) < 2:
+        return ""
+    labels = [str(s[0]) for s in segments[:_MAX_TREND_POINTS]]
+    values = [float(s[1]) for s in segments[:_MAX_TREND_POINTS]]
+    x = list(range(len(values)))
+
+    fig, ax = plt.subplots(figsize=(8, 4), facecolor=_DARK_BG)
+    ax.set_facecolor(_DARK_BG)
+    ax.plot(x, values, color=_PATTERN_COLORS["trend"], linewidth=2, alpha=0.9, zorder=2)
+    ax.scatter(x, values, color=_PATTERN_COLORS["trend"], s=24, zorder=3)
+    # เติมพื้นใต้เส้นเบา ๆ
+    ax.fill_between(x, values, min(values) - (max(values) - min(values)) * 0.1,
+                    color=_PATTERN_COLORS["trend"], alpha=0.08)
+
+    # ลูกศรทิศทาง (ใช้ ASCII เพื่อหลีกเลี่ยง glyph ที่อาจไม่มีใน font ไทย)
+    arrow_y = values[-1]
+    val_range = max(values) - min(values)
+    y_offset = val_range * 0.15 * (1 if direction == "up" else -1)
+    ax.annotate(
+        "Trend UP" if direction == "up" else "Trend DOWN",
+        xy=(x[-1], arrow_y),
+        xytext=(x[-1] - 1.5, arrow_y + y_offset),
+        color=_PATTERN_COLORS["trend"],
+        fontproperties=prop,
+        fontsize=11,
+        fontweight="bold",
+        arrowprops=dict(arrowstyle="->", color=_PATTERN_COLORS["trend"], lw=1.5),
+    )
+
+    n = len(labels)
+    step = max(1, n // 8)
+    ax.set_xticks(x[::step])
+    ax.set_xticklabels(_wrap_labels([labels[i] for i in range(0, n, step)], limit=12),
+                        rotation=30, ha="right", color=_DARK_FG, fontproperties=prop)
+    if title:
+        ax.set_title(f"{title} (τ={tau:.2f})", color=_DARK_FG, fontproperties=prop, fontsize=11)
+    ax.set_ylabel("value", color=_DARK_FG, fontproperties=prop)
+    _style_dark_axes(ax)
+    return _fig_to_base64(fig)
+
+
+def create_insight_chart(
+    card_dict: dict,
+    df: pd.DataFrame | None = None,
+    font_path: str | None = None,
+) -> str:
+    """เลือกกราฟที่เหมาะกับ insight card โดยอัตโนมัติ — คืน base64 PNG หรือสตริงว่าง.
+
+    card_dict: InsightCard.to_dict() ที่มี pattern, perspective, evidence
+    df: DataFrame ต้นฉบับ (สำหรับ comparison ที่ต้องเข้าถึงข้อมูลดิบ)
+    """
+    if font_path is None:
+        font_path = get_thai_font_path()
+
+    pattern = card_dict.get("pattern", "")
+    evidence = card_dict.get("evidence", {})
+    perspective = card_dict.get("perspective", {})
+    breakdown = perspective.get("breakdown", "")
+    measure = perspective.get("measure")
+
+    if pattern == "outstanding":
+        segments = evidence.get("top_segments", [])
+        if not segments:
+            return ""
+        # เติม top_segment ถ้ามี (อาจไม่ได้อยู่ใน top_segments)
+        top_seg = evidence.get("top_segment", "")
+        top_val = evidence.get("top_value", 0)
+        if top_seg and not any(s[0] == top_seg for s in segments):
+            segments = [[top_seg, top_val]] + segments
+        return create_insight_outstanding_chart(
+            segments, top_seg, title=f"{breakdown} × {measure or 'count'}",
+            font_path=font_path,
+        )
+
+    if pattern == "attribution":
+        segments = evidence.get("top_segments", [])
+        if not segments:
+            return ""
+        top_seg = evidence.get("top_segment", "")
+        share = float(evidence.get("share", 0))
+        return create_insight_attribution_chart(
+            segments, top_seg, share,
+            title=f"{breakdown} × {measure or 'count'}",
+            font_path=font_path,
+        )
+
+    if pattern == "comparison":
+        if df is None or not breakdown or not measure:
+            return ""
+        top_seg = evidence.get("top_segment", "")
+        return create_insight_comparison_chart(
+            df, breakdown, measure, top_seg,
+            title=f"{breakdown} × {measure}",
+            font_path=font_path,
+        )
+
+    if pattern == "trend":
+        # trend ใช้ first/last value + n_buckets — สร้าง segments จาก evidence
+        # ถ้าไม่มี top_segments ให้สร้างจาก first/last
+        segments = evidence.get("top_segments", [])
+        if not segments:
+            first_v = evidence.get("first_value", 0)
+            last_v = evidence.get("last_value", 0)
+            segments = [
+                [evidence.get("first_bucket", "start"), first_v],
+                [evidence.get("last_bucket", "end"), last_v],
+            ]
+        return create_insight_trend_chart(
+            segments,
+            evidence.get("direction", "up"),
+            float(evidence.get("tau", 0)),
+            title=f"{breakdown} × {measure or 'count'}",
+            font_path=font_path,
+        )
+
+    return ""
+
+
 __all__ = [
     "get_thai_font_path",
     "setup_matplotlib_thai_font",
@@ -955,6 +1283,11 @@ __all__ = [
     "create_timeseries_plot",
     "create_decomposition_plot",
     "create_acf_plot",
+    "create_insight_outstanding_chart",
+    "create_insight_attribution_chart",
+    "create_insight_comparison_chart",
+    "create_insight_trend_chart",
+    "create_insight_chart",
     "auto_visualize",
     "auto_select_charts",
 ]

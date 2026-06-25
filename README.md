@@ -47,6 +47,7 @@ thaieda run data.csv -o report.html
 
 | Version | Highlights |
 |---------|-----------|
+| **v0.7** | Insight visualization — auto-generated charts for each cross-column finding (bar, donut, box plot, trend line) |
 | **v0.6** | Cross-column insight engine — discovers outstanding / attribution / comparison / trend findings (group-by + statistical scoring, BH-corrected) |
 | **v0.5** | Multi-file schema discovery, ER diagram, relationship validation, orphan detection |
 | **v0.4** | Timeseries analysis (trend/seasonality/STL/ACF/gaps), distribution & correlation insights |
@@ -208,6 +209,17 @@ pip install "thaieda[thai,ner,viz,ml,stats,timeseries,detect]"
 - **Domain-agnostic** — zero column-name logic, no overfitting; driven entirely by `ColumnType` + cardinality + value ranges. Works on retail, HR, finance, sensor data, anything
 - **Scales to 1M+ rows** — two-phase sampling (score on a ~100k sample, recompute exact numbers on the full data for the top-N only)
 - **Thai-aware** — category keys normalized before group-by; every finding is written in Thai with evidence (top segments, share %, lift %, p-value, τ)
+
+### Insight Visualization (v0.7)
+
+- **Auto-chart per finding** — each cross-column insight card now includes a visualization matched to its pattern:
+  - **Outstanding** → horizontal bar chart (top segment highlighted in green)
+  - **Attribution** → donut chart with share % in the center
+  - **Comparison** → box plot by group (top segment highlighted in red)
+  - **Trend** → line chart with direction arrow and τ value
+- **Seamless integration** — charts are generated automatically during `profile()` and embedded in the HTML report alongside the finding's text and evidence table
+- **Dark-themed** — all charts use the same dark theme as the report (no jarring color mismatch)
+- **Graceful degradation** — if a chart can't be generated (insufficient data), the card still shows with text + evidence table only
 
 ### Multi-File Schema Discovery (v0.5)
 
@@ -385,7 +397,7 @@ thaieda/
   insight_engine/ # Cross-column insight discovery: group-by + 4 patterns + scoring (v0.6)
   timeseries/  # Timeseries analysis: trend/seasonality/STL/ACF/gaps (v0.4)
   schema/      # Multi-file schema discovery: PK/FK detection + relationship matching (v0.5)
-  viz/         # Visualization + auto chart + Thai font (+ timeseries plots v0.4)
+  viz/         # Visualization + auto chart + Thai font (+ timeseries plots v0.4, + insight charts v0.7)
   report/      # HTML report generation (Jinja2) + DatasetReport (v0.5)
   i18n/        # Bilingual labels (Thai/English)
   llm/         # LLM Q&A
@@ -409,8 +421,9 @@ thaieda/
 | **v0.4** | Timeseries analysis, distribution & correlation insights | ✅ Done |
 | **v0.5** | Multi-file schema discovery, ER diagram, relationship validation, orphan detection | ✅ Done |
 | **v0.6** | Cross-column insight engine (outstanding / attribution / comparison / trend, BH-corrected) | ✅ Done |
-| **v0.7** | LLM Q&A (litellm + Ollama local), Thai explanations | 📋 Planned |
-| **v0.8** | Interactive dashboard (Streamlit/FastAPI), Thai UI | 📋 Planned |
+| **v0.7** | Insight visualization — auto charts for each cross-column finding | ✅ Done |
+| **v0.8** | LLM Q&A (litellm + Ollama local), Thai explanations | 📋 Planned |
+| **v0.9** | Interactive dashboard (Streamlit/FastAPI), Thai UI | 📋 Planned |
 
 ---
 

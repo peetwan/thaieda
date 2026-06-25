@@ -102,6 +102,8 @@ class ProfileReport:
         self._ts_time_col: str | None = None
         # กราฟ timeseries ต่อคอลัมน์ (line/decomposition/acf)
         self._timeseries_charts: dict[str, dict[str, str]] = {}
+        # กราฟ cross-column insight ต่อ card index (v0.7)
+        self._insight_charts: dict[int, str] = {}
         self._insights: InsightSummary | None = None
         # ผลจาก cross-column insight engine (v0.6) — None ถ้าปิดใช้งานหรือยังไม่ได้รัน
         self._insight_engine: InsightEngineResult | None = None
@@ -196,6 +198,9 @@ class ProfileReport:
             # กราฟอนุกรมเวลา (line/decomposition/acf) — เมื่อมีผลวิเคราะห์ timeseries
             if self._timeseries:
                 self._build_timeseries_charts()
+            # กราฟ cross-column insights (outstanding/attribution/comparison/trend) — v0.7
+            if self._insight_engine is not None and self._insight_engine.cards:
+                self._build_insight_charts()
 
         self._ran = True
         return self
@@ -275,6 +280,25 @@ class ProfileReport:
             except Exception as exc:  # noqa: BLE001
                 self._notes.append(f"ACF plot failed for '{col}': {exc}")
             self._timeseries_charts[col] = {k: v for k, v in charts.items() if v}
+
+    def _build_insight_charts(self) -> None:
+        """สร้างกราฟสำหรับ cross-column insight cards — แต่ละ card ได้กราฟตาม pattern (v0.7).
+
+        outstanding → bar chart, attribution → donut, comparison → box plot, trend → line
+        กราฟที่สร้างไม่ได้ (ข้อมูลไม่พอ) จะถูกข้าม — card นั้นไม่มีกราฟ
+        """
+        from thaieda.viz import create_insight_chart, get_thai_font_path
+
+        if self._insight_engine is None:
+            return
+        font_path = get_thai_font_path()
+        for i, card in enumerate(self._insight_engine.cards):
+            try:
+                img = create_insight_chart(card.to_dict(), df=self.df, font_path=font_path)
+                if img:
+                    self._insight_charts[i] = img
+            except Exception as exc:  # noqa: BLE001 — กราฟพังไม่ควรล้มทั้งรายงาน
+                self._notes.append(f"insight chart failed for card #{i}: {exc}")
 
     def _note_if_ml_skipped(self) -> None:
         """ถ้ามีคอลัมน์ตัวเลขใหญ่ (>100 แถว) แต่ไม่มี scikit-learn ให้บันทึก note ว่าข้ามวิธี ML."""
@@ -769,14 +793,18 @@ class ProfileReport:
                 ],
             }
 
-        # cross-column insights (insight engine, v0.6) — แนบ label ของ pattern ไว้ใช้ในเทมเพลต
+        # cross-column insights (insight engine, v0.6) — แนบ label ของ pattern และกราฟ (v0.7)
         business_section = None
         if self._insight_engine is not None and self._insight_engine.cards:
             business_section = {
                 "total": self._insight_engine.total,
                 "cards": [
-                    {**c.to_dict(), "pattern_label": L(f"pattern_{c.pattern}")}
-                    for c in self._insight_engine.cards
+                    {
+                        **c.to_dict(),
+                        "pattern_label": L(f"pattern_{c.pattern}"),
+                        "chart": self._insight_charts.get(i, ""),
+                    }
+                    for i, c in enumerate(self._insight_engine.cards)
                 ],
             }
 

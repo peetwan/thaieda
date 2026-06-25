@@ -227,7 +227,12 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
       <span class="cat ng">{{ L('breakdown') }}: <code>{{ c.perspective.breakdown }}</code>{% if c.perspective.measure %} · {{ L('measure') }}: <code>{{ c.perspective.measure }}</code>{% endif %} · {{ c.perspective.agg }}</span>
     </div>
     <div class="desc-th">{{ c.description_th }}</div>
-    {% if c.evidence.top_segments %}
+    {% if c.chart %}
+    <div class="imgrow full" style="margin-top: 10px;">
+      <img src="data:image/png;base64,{{ c.chart }}" alt="insight chart">
+    </div>
+    {% endif %}
+    {% if c.evidence.top_segments and c.pattern != 'trend' %}
     <table class="evtable">
       <tr><th>{{ L('segment') }}</th><th>{{ L('value') }}</th></tr>
       {% for seg, val in c.evidence.top_segments %}
