@@ -71,6 +71,30 @@ General-purpose EDA tools (pandas-profiling, ydata-profiling) treat Thai text as
 | **Keyboard layout typos** | `l;ylfu` typed instead of `สวัสดี` | Fixes wrong keyboard layout |
 | **Mojibake** | Text with broken encoding from TIS-620/CP874 | Repairs with ftfy |
 
+### When to use ThaiEDA?
+
+- **Use ThaiEDA when** your data contains Thai text, Buddhist Era dates, Thai numerals, zero-width characters, or multiple related files that need relationship discovery
+- **Use ydata-profiling when** you want rich interactive charts on clean English numeric data
+- **Use both** — ThaiEDA to clean and profile Thai-specific issues → ydata-profiling to explore the cleaned result
+
+### Eval Results
+
+ThaiEDA includes a reproducible eval framework (`eval/`) with hand-authored ground-truth manifests. Run it:
+
+```bash
+PYTHONPATH="src" python eval/run_eval.py
+```
+
+| Capability | Metric | Result | Target |
+|------------|--------|--------|--------|
+| **Relationship discovery** | Precision / Recall / F1 | **1.00 / 1.00 / 1.00** | ≥0.90 |
+| **Insight honesty** | False discoveries on noise | **0** (BH correction works) | ≤2 |
+| **Insight honesty** | Determinism (repeat runs) | **identical** | identical |
+| **Thai quality** | Detection precision | **1.00** | 1.00 |
+| **Thai quality** | Silent corruption caught | **city 5→4 groups** (zero-width merge) | — |
+
+> See [eval/results/REPORT.md](eval/results/REPORT.md) for the full report with findings and limitations.
+
 ---
 
 ## Quick Start
