@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import re
 import unicodedata
 from collections.abc import Callable
@@ -457,6 +458,382 @@ def normalize_phone_numbers(series: pd.Series) -> tuple[pd.Series, CleaningResul
 
 
 # ----------------------------------------------------------------------------
+# v0.8: การแปลงคอลัมน์ string ที่ควรเป็นตัวเลข → numeric dtype
+# ----------------------------------------------------------------------------
+# ค่าที่ใช้แทน NaN ที่พบบ่อยในข้อมูลไทย (นอกจาก empty string)
+_PLACEHOLDER_VALUES = frozenset(
+    {
+        "-",
+        "--",
+        "---",
+        "na",
+        "n/a",
+        "N/A",
+        "NA",
+        "null",
+        "NULL",
+        "None",
+        "none",
+        "nan",
+        "NaN",
+        "ไม่ระบุ",
+        "ไม่มี",
+    }
+)
+
+# ค่าที่ใช้แทน NaN ในข้อมูลไทย (ขยายจาก placeholder)
+_THAI_MISSING_VALUES = frozenset(
+    {
+        "-",
+        "--",
+        "---",
+        "na",
+        "n/a",
+        "N/A",
+        "NA",
+        "null",
+        "NULL",
+        "None",
+        "none",
+        "nan",
+        "NaN",
+        "ไม่ระบุ",
+        "ไม่มี",
+        "?",
+        "ไม่ทราบ",
+        "ไม่ต้องมี",
+    }
+)
+
+
+def coerce_numeric_column(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
+    """แปลงคอลัมน์ string ที่ควรเป็นตัวเลข → numeric dtype (v0.8).
+
+    แก้ปัญหา: เลขไทย '๑๐๐' หลัง normalize_thai_numerals กลายเป็น '100' แต่ยังเป็น string
+    — ทำให้ pd.to_numeric เจอ '100' แปลงเป็น 100.0 ได้ แต่ค่าที่แปลงไม่ได้กลายเป็น NaN
+
+    ขั้นตอน:
+      1. แปลง placeholder values ('-', 'N/A', 'ไม่มี') → NaN ก่อน (กันเป็น numeric ผิด)
+      2. ลอง pd.to_numeric — ถ้าแปลงได้ >50% ของค่าที่ไม่ใช่ placeholder ถือว่าคอลัมน์เป็น numeric
+      3. คืน Series ที่เป็น numeric แล้ว + CleaningResult
+
+    ถ้าแปลงไม่ได้ (เป็นข้อความจริง ๆ) คืน series เดิม ไม่แตะ
+    """
+    notna = series.notna()
+    if not notna.any():
+        return series, CleaningResult(
+            operation="coerce_numeric", rows_affected=0, column=str(series.name or "")
+        )
+
+    # 1. แปลง placeholder → NaN
+    str_vals = series[notna].astype(str).str.strip()
+    placeholder_mask = str_vals.isin(_PLACEHOLDER_VALUES)
+    placeholders_found = int(placeholder_mask.sum())
+
+    # 2. ลองแปลงเป็น numeric (หลังจากลบ placeholder แล้ว)
+    non_placeholder = str_vals[~placeholder_mask]
+    if non_placeholder.empty:
+        return series, CleaningResult(
+            operation="coerce_numeric", rows_affected=0, column=str(series.name or "")
+        )
+
+    coerced = pd.to_numeric(non_placeholder, errors="coerce")
+    converted_ok = coerced.notna()
+    ok_count = int(converted_ok.sum())
+    total_count = int(non_placeholder.shape[0])
+
+    # ถ้าแปลงได้ >50% ถือว่าคอลัมน์นี้ควรเป็น numeric
+    if total_count == 0 or ok_count / total_count < 0.5:
+        return series, CleaningResult(
+            operation="coerce_numeric", rows_affected=0, column=str(series.name or "")
+        )
+
+    # 3. สร้าง Series ผลลัพธ์
+    out = series.astype(object)
+    # placeholder → NaN
+    placeholder_idx = str_vals[placeholder_mask].index
+    out.loc[placeholder_idx] = pd.NA
+    # numeric values
+    numeric_idx = non_placeholder[converted_ok].index
+    out.loc[numeric_idx] = coerced[converted_ok].to_numpy()
+    # ค่าที่แปลงไม่ได้ (แปลงได้ <100%) → คงค่าเดิมไว้
+    failed_idx = non_placeholder[~converted_ok].index
+    out.loc[failed_idx] = non_placeholder[~converted_ok].to_numpy()
+
+    # พยายามแปลงเป็น numeric dtype ถ้าทุกค่าที่ไม่ใช่ placeholder/failed แปลงได้
+    if failed_idx.empty:
+        with contextlib.suppress(Exception):
+            out = pd.to_numeric(out, errors="coerce")
+
+    affected = ok_count + placeholders_found
+    return out, CleaningResult(
+        operation="coerce_numeric",
+        rows_affected=affected,
+        column=str(series.name or ""),
+        description_th=(
+            f"แปลงคอลัมน์เป็นตัวเลข ({ok_count} ค่า) "
+            f"+ แทนที่ placeholder {placeholders_found} ค่าด้วย NaN"
+        ),
+    )
+
+
+def convert_buddhist_era(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
+    """แปลงปีพุทธศักราช (พ.ศ.) → คริสต์ศักราช (ค.ศ.) ในคอลัมน์ตัวเลขหรือวันที่ (v0.8).
+
+    ตรวจหาค่าในช่วง 2440–2599 (พ.ศ. ที่พบบ่อย) แล้วลบ 543 เพื่อแปลงเป็น ค.ศ.
+    ค่าที่อยู่นอกช่วงนี้จะไม่ถูกแตะ (เป็น ค.ศ. อยู่แล้ว)
+
+    รองรับทั้ง:
+      - คอลัมน์ numeric (เช่น ปีเกิด 2530 → 1987)
+      - คอลัมน์ string ที่มีปี (เช่น '2567-01-15' → '2024-01-15')
+    """
+    notna = series.notna()
+    if not notna.any():
+        return series, CleaningResult(
+            operation="convert_buddhist_era", rows_affected=0, column=str(series.name or "")
+        )
+
+    _BE_MIN = 2440
+    _BE_MAX = 2599
+    _BE_OFFSET = 543
+
+    # กรณี 1: numeric column — แปลงเฉพาะค่าในช่วง พ.ศ.
+    numeric = pd.to_numeric(series, errors="coerce")
+    be_mask = numeric.notna() & (numeric >= _BE_MIN) & (numeric <= _BE_MAX)
+    be_count = int(be_mask.sum())
+
+    if be_count > 0:
+        out = series.astype(object)
+        converted = numeric - _BE_OFFSET
+        out.loc[be_mask] = converted[be_mask].to_numpy()
+        # พยายามแปลงกลับเป็น numeric
+        with contextlib.suppress(Exception):
+            out = pd.to_numeric(out, errors="coerce")
+        return out, CleaningResult(
+            operation="convert_buddhist_era",
+            rows_affected=be_count,
+            column=str(series.name or ""),
+            description_th=f"แปลงปี พ.ศ. → ค.ศ. (ลบ 543) จำนวน {be_count} ค่า",
+        )
+
+    # กรณี 2: string column ที่มีปี พ.ศ. ฝังอยู่ (เช่น '2567-01-15')
+    str_vals = series[notna].astype(str)
+    # หา ปี 4 หลัก ในช่วง พ.ศ.
+    year_pattern = re.compile(r"\b(24\d{2}|25\d{2})\b")
+
+    def _replace_year(text: str) -> str:
+        def _sub(m):
+            return str(int(m.group(1)) - _BE_OFFSET)
+
+        return year_pattern.sub(_sub, text)
+
+    converted = str_vals.map(_replace_year)
+    changed = converted.to_numpy() != str_vals.to_numpy()
+    affected = int(changed.sum())
+
+    if affected == 0:
+        return series, CleaningResult(
+            operation="convert_buddhist_era", rows_affected=0, column=str(series.name or "")
+        )
+
+    out = series.astype(object)
+    changed_idx = str_vals[changed].index
+    out.loc[changed_idx] = converted[changed].to_numpy()
+
+    return out, CleaningResult(
+        operation="convert_buddhist_era",
+        rows_affected=affected,
+        column=str(series.name or ""),
+        description_th=f"แปลงปี พ.ศ. → ค.ศ. ในข้อความ จำนวน {affected} ค่า",
+    )
+
+
+# ชื่อเดือนไทย → เลขเดือน (สำหรับ normalize_dates)
+_THAI_MONTH_MAP = {
+    "มกราคม": "01",
+    "ม.ค.": "01",
+    "มกรา": "01",
+    "กุมภาพันธ์": "02",
+    "ก.พ.": "02",
+    "กุมภา": "02",
+    "มีนาคม": "03",
+    "มี.ค.": "03",
+    "มีนา": "03",
+    "เมษายน": "04",
+    "เม.ย.": "04",
+    "เมษา": "04",
+    "พฤษภาคม": "05",
+    "พ.ค.": "05",
+    "พฤษภ": "05",
+    "มิถุนายน": "06",
+    "มิ.ย.": "06",
+    "มิถุน": "06",
+    "กรกฎาคม": "07",
+    "ก.ค.": "07",
+    "กรกฎา": "07",
+    "สิงหาคม": "08",
+    "ส.ค.": "08",
+    "สิงหา": "08",
+    "กันยายน": "09",
+    "ก.ย.": "09",
+    "กันยา": "09",
+    "ตุลาคม": "10",
+    "ต.ค.": "10",
+    "ตุลา": "10",
+    "พฤศจิกายน": "11",
+    "พ.ย.": "11",
+    "พฤศจิ": "11",
+    "ธันวาคม": "12",
+    "ธ.ค.": "12",
+    "ธันวา": "12",
+}
+_THAI_MONTH_RE = re.compile(
+    r"(\d{1,2})\s+(" + "|".join(_THAI_MONTH_MAP.keys()) + r")\s+(\d{2,4})",
+    re.IGNORECASE,
+)
+
+
+def normalize_dates(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
+    """แปลงวันที่ที่มีหลายรูปแบบ (รวม Thai month names + พ.ศ.) → ISO มาตรฐาน — v0.8.
+
+    ขั้นตอน:
+      1. แปลง Thai month names → เลขเดือน ("15 มกราคม 2567" → "15/01/2567")
+      2. แปลง พ.ศ. → ค.ศ. ใน string วันที่ ("2567" → "2024")
+      3. ลอง parse เป็น datetime
+    คืน Series ที่เป็น datetime แล้ว (ถ้า parse ได้) หรือ string ที่แปลงแล้ว
+    """
+    notna = series.notna()
+    if not notna.any():
+        return series, CleaningResult(
+            operation="normalize_dates", rows_affected=0, column=str(series.name or "")
+        )
+
+    str_vals = series[notna].astype(str)
+
+    # 1. แปลง Thai month names → เลขเดือน
+    def _replace_thai_month(text: str) -> str:
+        def _sub(m):
+            day = m.group(1).zfill(2)
+            month = _THAI_MONTH_MAP.get(m.group(2), m.group(2))
+            year = m.group(3)
+            return f"{day}/{month}/{year}"
+
+        return _THAI_MONTH_RE.sub(_sub, text)
+
+    converted = str_vals.map(_replace_thai_month)
+
+    # 2. แปลง พ.ศ. → ค.ศ. ในปี (4 หลัก ในช่วง 2440-2599)
+    year_re = re.compile(r"\b(24\d{2}|25\d{2})\b")
+
+    def _replace_be_year(text: str) -> str:
+        def _sub(m):
+            return str(int(m.group(1)) - 543)
+
+        return year_re.sub(_sub, text)
+
+    converted = converted.map(_replace_be_year)
+
+    # 3. เปรียบเทียบก่อน/หลัง
+    changed = converted.to_numpy() != str_vals.to_numpy()
+    affected = int(changed.sum())
+
+    if affected == 0:
+        return series, CleaningResult(
+            operation="normalize_dates", rows_affected=0, column=str(series.name or "")
+        )
+
+    out = series.astype(object)
+    changed_idx = str_vals[changed].index
+    out.loc[changed_idx] = converted[changed].to_numpy()
+
+    return out, CleaningResult(
+        operation="normalize_dates",
+        rows_affected=affected,
+        column=str(series.name or ""),
+        description_th=f"แปลงรูปแบบวันที่ {affected} ค่า (Thai month → ISO, พ.ศ. → ค.ศ.)",
+    )
+
+
+def remove_duplicate_rows(df: pd.DataFrame) -> tuple[pd.DataFrame, CleaningResult]:
+    """ตรวจหาและลบแถวที่ซ้ำกันทั้งหมด (v0.8).
+
+    คืน DataFrame ที่ลบ duplicate แล้ว + CleaningResult บอกจำนวนที่ลบ
+    """
+    dup_count = int(df.duplicated().sum())
+    if dup_count == 0:
+        return df, CleaningResult(
+            operation="remove_duplicate_rows",
+            rows_affected=0,
+            column="(entire df)",
+            description_th="ไม่พบแถวซ้ำ",
+        )
+    cleaned = df.drop_duplicates().reset_index(drop=True)
+    return cleaned, CleaningResult(
+        operation="remove_duplicate_rows",
+        rows_affected=dup_count,
+        column="(entire df)",
+        description_th=f"ลบแถวซ้ำ {dup_count} แถว",
+    )
+
+
+def handle_missing_values(
+    series: pd.Series, strategy: str = "flag"
+) -> tuple[pd.Series, CleaningResult]:
+    """จัดการค่าว่างในคอลัมน์ — แทนที่หรือ flag ตาม strategy (v0.8).
+
+    strategy:
+      - 'flag'    : แทน NaN ด้วย 'ไม่ระบุ' (text) หรือ 0 (numeric) — ทุกค่ายังใช้งานได้
+      - 'drop'    : ลบแถวที่ NaN (เฉพาะคอลัมน์นี้)
+      - 'median'  : แทนด้วย median (numeric only)
+      - 'mode'    : แทนด้วย mode (ทุกประเภท)
+      - 'unknown' : แทนด้วย 'unknown' (text/categorical)
+    """
+    missing = int(series.isna().sum())
+    if missing == 0:
+        return series, CleaningResult(
+            operation="handle_missing_values",
+            rows_affected=0,
+            column=str(series.name or ""),
+            description_th="ไม่มีค่าว่าง",
+        )
+
+    col_name = str(series.name or "")
+    out = series
+
+    if strategy == "drop":
+        out = series.dropna()
+        desc = f"ลบ {missing} แถวที่ว่างในคอลัมน์ '{col_name}'"
+    elif strategy == "median" and pd.api.types.is_numeric_dtype(series):
+        med = series.median()
+        out = series.fillna(med)
+        desc = f"แทน {missing} ค่าว่างด้วย median ({med})"
+    elif strategy == "mode":
+        mode_val = series.mode().iloc[0] if not series.mode().empty else None
+        if mode_val is not None:
+            out = series.fillna(mode_val)
+            desc = f"แทน {missing} ค่าว่างด้วย mode ({mode_val})"
+        else:
+            desc = f"ไม่สามารถหา mode ของคอลัมน์ '{col_name}' ได้"
+    elif strategy == "unknown":
+        out = series.fillna("unknown")
+        desc = f"แทน {missing} ค่าว่างด้วย 'unknown'"
+    else:  # 'flag' (default)
+        if pd.api.types.is_numeric_dtype(series):
+            out = series.fillna(0)
+            desc = f"แทน {missing} ค่าว่างด้วย 0 (numeric)"
+        else:
+            out = series.fillna("ไม่ระบุ")
+            desc = f"แทน {missing} ค่าว่างด้วย 'ไม่ระบุ'"
+
+    return out, CleaningResult(
+        operation="handle_missing_values",
+        rows_affected=missing,
+        column=col_name,
+        description_th=desc,
+    )
+
+
+# ----------------------------------------------------------------------------
 # ตัวประกอบหลายการดำเนินการ
 # ----------------------------------------------------------------------------
 # ทะเบียนชื่อ operation -> ฟังก์ชัน (เรียงตามลำดับการทำงานที่ปลอดภัย)
@@ -471,6 +848,9 @@ _OPERATIONS: dict[str, Callable[[pd.Series], tuple[pd.Series, CleaningResult]]] 
     "phone": normalize_phone_numbers,
     "pythainlp_normalize": pythainlp_normalize,
     "keyboard_layout": fix_keyboard_layout,
+    "coerce_numeric": coerce_numeric_column,
+    "buddhist_era": convert_buddhist_era,
+    "normalize_dates": normalize_dates,
 }
 
 # การดำเนินการที่ต้องใช้ pythainlp (ติดตั้งผ่าน thaieda[thai]) — ใช้ตัดสินใจ skip ใน default pipeline
@@ -558,6 +938,11 @@ __all__ = [
     "normalize_phone_numbers",
     "pythainlp_normalize",
     "fix_keyboard_layout",
+    "coerce_numeric_column",
+    "convert_buddhist_era",
+    "normalize_dates",
+    "remove_duplicate_rows",
+    "handle_missing_values",
     "clean_thai_text",
     "available_operations",
     "DEFAULT_OPERATIONS",

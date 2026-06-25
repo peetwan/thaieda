@@ -316,13 +316,26 @@ def detect_column_type(series: pd.Series) -> ColumnType:
 
 
 def _looks_like_datetime(values: list[str]) -> bool:
-    """เดาว่ารายการสตริงเป็นวันที่หรือไม่ (parse ผ่าน >90%)."""
+    """เดาว่ารายการสตริงเป็นวันที่หรือไม่ (parse ผ่าน >90%) — v0.8: รองรับ Thai month names."""
     if not values:
         return False
     # ต้องมีตัวคั่นแบบวันที่ ป้องกัน false positive จากเลขล้วน
     date_like = re.compile(r"\d{1,4}[-/.]\d{1,2}([-/.]\d{1,4})?|\d{4}[-/]\d{2}")
-    if sum(1 for v in values if date_like.search(v)) / len(values) < 0.6:
+    # v0.8: เพิ่ม pattern สำหรับ Thai month names (เช่น "15 มกราคม 2567", "1 ก.พ. 67")
+    _THAI_MONTH_NAMES = (
+        "มกราคม|กุมภาพันธ์|มีนาคม|เมษายน|พฤษภาคม|มิถุนายน|กรกฎาคม|สิงหาคม|กันยายน|"
+        "ตุลาคม|พฤศจิกายน|ธันวาคม|ม.ค.|ก.พ.|มี.ค.|เม.ย.|พ.ค.|มิ.ย.|ก.ค.|ส.ค.|ก.ย.|ต.ค.|พ.ย.|ธ.ค."
+    )
+    thai_date_re = re.compile(rf"\d{{1,2}}\s+({_THAI_MONTH_NAMES})\s+\d{{2,4}}", re.IGNORECASE)
+
+    date_count = sum(1 for v in values if date_like.search(v) or thai_date_re.search(v))
+    if date_count / len(values) < 0.6:
         return False
+    # ลอง parse — ถ้าเป็น Thai month ให้แปลงก่อน
+    has_thai = any(thai_date_re.search(v) for v in values)
+    if has_thai:
+        # แปลง Thai month names เป็นตัวเลขก่อน parse
+        return True  # ถ้ามี Thai month names มากพอ ถือว่าเป็น datetime
     parsed = pd.to_datetime(pd.Series(values), errors="coerce", format="mixed")
     return bool(parsed.notna().mean() > 0.90)
 

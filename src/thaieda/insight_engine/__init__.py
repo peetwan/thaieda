@@ -37,13 +37,17 @@ from thaieda.schema import _normalize_key_series
 # ----------------------------------------------------------------------------
 _W_PATTERN = 0.5  # น้ำหนักคะแนน pattern
 _W_EFFECT = 0.5  # น้ำหนักขนาดผล (effect size)
-_MIN_SEGMENT = 30  # แถวขั้นต่ำต่อกลุ่ม (กลุ่มเล็กกว่านี้ไม่น่าเชื่อถือ)
+_MIN_SEGMENT = 30  # แถวขั้นต่ำต่อกลุ่ม (กลุ่มเล็กกว่านี้ไม่น่าเชื่อถือ) — จะปรับตามขนาดข้อมูลใน discover_insights
 _SIGNIFICANCE_ALPHA = 0.01  # เข้มกว่า 0.05 เพื่อกัน false positive (multiple comparisons)
 _MAX_BREAKDOWNS = 20  # cap จำนวน breakdown candidate (กันระเบิดบนตารางกว้าง)
 _MAX_BOOLEAN_BREAKDOWNS = 2  # cap จำนวน boolean breakdown (2 ค่า) — กัน insight ที่ครอบผล
 _MAX_MEASURES = 20  # cap จำนวน measure candidate
 _DOMINANCE_THRESHOLD = 1.5  # อัตราส่วน top/second ที่ถือว่า "outstanding"
 _SHARE_THRESHOLD = 0.5  # สัดส่วนที่ถือว่า "attribution"
+# v0.8: เกณฑ์ correlation ที่ถือว่า "strong" (สำหรับ pattern ใหม่)
+_CORRELATION_THRESHOLD = 0.7  # |r| >= 0.7 ถือว่า strong correlation
+# v0.8: z-score ที่ถือว่าเป็น outlier ในการตรวจ anomaly pattern
+_OUTLIER_Z_THRESHOLD = 3.0
 
 # cardinality ของ breakdown ที่ใช้ได้ (น้อยไป=ไม่มีอะไรให้เทียบ, มากไป=ไม่ใช่หมวดหมู่)
 _MIN_BREAKDOWN_CARD = 2
@@ -605,6 +609,8 @@ def _detect_trend(series: pd.Series, agg: str) -> dict | None:
     up = tau > 0
     first_val = float(y[0])
     last_val = float(y[-1])
+    # เก็บ bucket series เต็มสำหรับกราฟ (v0.8 — กัน trend chart แสดงแค่ 2 จุด)
+    all_buckets = [[str(idx), round(float(val), 2)] for idx, val in ordered.items()]
     return {
         "pattern": "trend",
         "pattern_score": max(0.0, min(1.0, 1.0 - p_value)),
@@ -622,6 +628,7 @@ def _detect_trend(series: pd.Series, agg: str) -> dict | None:
             "last_bucket": str(ordered.index[-1]),
             "first_value": round(first_val, 2),
             "last_value": round(last_val, 2),
+            "all_buckets": all_buckets,
         },
     }
 
@@ -762,6 +769,26 @@ def _gate_and_score(
         for rank, c in enumerate(lst):
             c["novelty"] = 1.0 if rank == 0 else _NOVELTY_PENALTY
 
+    # --- v0.8: cross-pattern novelty — ถ้าหลาย pattern ชี้ไปที่ breakdown × measure × top_segment
+    #     เดียวกัน (เช่น outlier 1000 ทำให้ outstanding+comparison+attribution พูดเรื่องเดียวกัน)
+    #     เก็บเฉพาะอันดับสูงสุดเต็มคะแนน ที่เหลือโดน penalty หนักขึ้น ---
+    cross_groups: dict[tuple, list[dict]] = {}
+    for c in kept:
+        # ใช้ breakdown × measure × top_segment (ไม่รวม pattern) — กันซ้ำข้าม pattern
+        measure_key = c.get("measure") or "__count__"
+        cgkey = (c["breakdown"], measure_key, c["top_segment"])
+        cross_groups.setdefault(cgkey, []).append(c)
+    for lst in cross_groups.values():
+        if len(lst) <= 1:
+            continue
+        lst.sort(key=lambda c: -c["base"])
+        # อันดับ 0 = เต็มคะแนน, อันดับ 1 = penalty หนัก, อันดับ 2+ = penalty หนักกว่า
+        for rank, c in enumerate(lst):
+            if rank == 0:
+                continue  # ไม่แตะอันดับ 1
+            # ทับ novelty เดิมด้วยค่าที่หนักกว่า (ขนาดเล็กกว่า)
+            c["novelty"] = min(c.get("novelty", 1.0), _NOVELTY_PENALTY ** (rank + 1))
+
     # --- final score ---
     for c in kept:
         triv = _triviality_penalty(c["pattern"], c["n_segments"], c["top_size"], total_n)
@@ -830,16 +857,53 @@ def _build_text(c: dict) -> tuple[str, str, str]:
         return title, desc, rec
 
     # trend
-    up = ev["direction"] == "up"
-    dir_th = "เพิ่มขึ้น" if up else "ลดลง"
-    freq = f" ({c['breakdown_freq_th']})" if c.get("breakdown_freq_th") else ""
-    title = f"{agg_th} {mlabel} {dir_th}ตาม '{breakdown}'"
-    desc = (
-        f"{agg_th} {mlabel} {dir_th}อย่างมีนัยสำคัญตาม '{breakdown}'{freq} "
-        f"(τ={ev['tau']:.2f}, จาก {ev['first_value']:,.1f} เป็น {ev['last_value']:,.1f})"
-    )
-    rec = f"พบแนวโน้ม{dir_th}ตาม '{breakdown}' — พิจารณาวางแผน/พยากรณ์โดยคำนึงถึงทิศทางนี้"
-    return title, desc, rec
+    if pattern == "trend":
+        up = ev["direction"] == "up"
+        dir_th = "เพิ่มขึ้น" if up else "ลดลง"
+        freq = f" ({c['breakdown_freq_th']})" if c.get("breakdown_freq_th") else ""
+        title = f"{agg_th} {mlabel} {dir_th}ตาม '{breakdown}'"
+        desc = (
+            f"{agg_th} {mlabel} {dir_th}อย่างมีนัยสำคัญตาม '{breakdown}'{freq} "
+            f"(τ={ev['tau']:.2f}, จาก {ev['first_value']:,.1f} เป็น {ev['last_value']:,.1f})"
+        )
+        rec = f"พบแนวโน้ม{dir_th}ตาม '{breakdown}' — พิจารณาวางแผน/พยากรณ์โดยคำนึงถึงทิศทางนี้"
+        return title, desc, rec
+
+    # v0.8: correlation
+    if pattern == "correlation":
+        col_a = ev["col_a"]
+        col_b = ev["col_b"]
+        r = ev["correlation"]
+        direction = ev["direction"]
+        dir_th = "เป็นบวก" if direction == "positive" else "เป็นลบ"
+        title = f"'{col_a}' และ '{col_b}' มีความสัมพันธ์กันสูง (r={r:.2f})"
+        desc = (
+            f"คอลัมน์ '{col_a}' และ '{col_b}' มีความสัมพันธ์{dir_th}ที่ strong "
+            f"(r={r:.3f}, n={ev['n']:,}) — ค่าเคลื่อนไหวไปด้วยกัน"
+        )
+        rec = (
+            "คอลัมน์ทั้งสองสัมพันธ์กันสูง — อาจวัดสิ่งเดียวกัน พิจารณาใช้คอลัมน์ใดคอลัมน์หนึ่ง "
+            "หรือรวมเป็น feature เดียวเพื่อกัน multicollinearity"
+        )
+        return title, desc, rec
+
+    # v0.8: outlier
+    if pattern == "outlier":
+        col = ev["column"]
+        title = (
+            f"พบ outlier {ev['outlier_count']} แถวในคอลัมน์ '{col}' "
+            f"(z-score ≥ {_OUTLIER_Z_THRESHOLD})"
+        )
+        desc = (
+            f"คอลัมน์ '{col}' มี {ev['outlier_count']} ค่าที่เป็น outlier "
+            f"({ev['percentage']:.1f}% ของข้อมูล, max z-score={ev['max_z_score']:.1f}, "
+            f"mean={ev['mean']:,.1f}, std={ev['std']:,.1f})"
+        )
+        rec = (
+            f"ตรวจสอบ outlier ในคอลัมน์ '{col}' — อาจเป็นค่าผิดปกติจริงหรือการกรอกผิด "
+            "พิจารณา clip/transform ก่อนนำไปวิเคราะห์หรือสร้างโมเดล"
+        )
+        return title, desc, rec
 
 
 def _to_card(c: dict) -> InsightCard:
@@ -875,6 +939,7 @@ def discover_insights(
       1. ระบุ candidate breakdowns (categorical 2-50 unique + datetime bucketed)
       2. ระบุ candidate measures (numeric ที่ความแปรปรวน > 0, ไม่ใช่ ID)
       3. สร้าง perspectives (breakdown × measure × agg) แล้วตรวจ 4 รูปแบบ
+         + v0.8: correlation (numeric × numeric) + outlier (row-level)
       4. Two-phase: ให้คะแนนบน sample → คำนวณตัวเลขจริงบนข้อมูลเต็มสำหรับ top-N
       5. จัดอันดับด้วย interestingness pipeline (gate → score → penalize → rank)
 
@@ -883,7 +948,8 @@ def discover_insights(
         column_types: ประเภทคอลัมน์ (จาก detect_all).
         top_n: จำนวน InsightCard สูงสุดที่คืน.
         sample_size: จำนวนแถวสูงสุดในเฟสให้คะแนน (สุ่มถ้าข้อมูลใหญ่กว่านี้).
-        min_segment: จำนวนแถวขั้นต่ำต่อกลุ่ม.
+        min_segment: จำนวนแถวขั้นต่ำต่อกลุ่ม — v0.8: ถ้าเป็น _MIN_SEGMENT (30)
+            จะปรับเป็น adaptive ตามขนาดข้อมูล (max(5, total_n // 20)).
         progress: callback(ข้อความ) สำหรับแสดงความคืบหน้า.
 
     Returns:
@@ -895,15 +961,26 @@ def discover_insights(
 
     st = _scipy_stats()
 
+    # v0.8: adaptive min_segment — ถ้าผู้ใช้ไม่ระบุ (ใช้ default _MIN_SEGMENT) ให้ปรับตามขนาด
+    total_n = len(df)
+    if min_segment == _MIN_SEGMENT and total_n < _MIN_SEGMENT * 10:
+        # ข้อมูลเล็ก: ลดเกณฑ์เป็น max(5, total_n // 20) กันข้ามทุกกลุ่ม
+        adaptive_min = max(5, total_n // 20)
+        if adaptive_min < min_segment:
+            notes.append(
+                f"ปรับ min_segment จาก {min_segment} เป็น {adaptive_min} "
+                f"(เหมาะกับขนาดข้อมูล {total_n:,} แถว)"
+            )
+            min_segment = adaptive_min
+
     _emit(progress, "เลือกคอลัมน์ผสมสำหรับวิเคราะห์...")
     breakdowns = _select_breakdowns(df, column_types, notes)
     measures = _select_measures(df, column_types, notes)
-    if not breakdowns:
-        notes.append("ไม่พบคอลัมน์หมวดหมู่/วันที่ที่ใช้จัดกลุ่มได้ — ข้ามการค้นหาข้อค้นพบคอลัมน์ผสม")
+    if not breakdowns and not measures:
+        notes.append("ไม่พบคอลัมน์หมวดหมู่/วันที่/ตัวเลขที่ใช้วิเคราะห์ได้ — ข้ามการค้นหาข้อค้นพบ")
         return InsightEngineResult(total=0, cards=[], notes=notes)
 
     # --- two-phase: สุ่มตัวอย่างสำหรับเฟสให้คะแนน (ถ้าข้อมูลใหญ่) ---
-    total_n = len(df)
     sampled = total_n > sample_size
     score_df = df.sample(n=sample_size, random_state=42) if sampled else df
     if sampled:
@@ -913,12 +990,20 @@ def discover_insights(
         )
 
     _emit(progress, "ให้คะแนนมุมมองการวิเคราะห์...")
-    # บน sample ลดเกณฑ์ขนาดกลุ่มตามสัดส่วน (กลุ่มที่ใหญ่พอบนข้อมูลเต็มจะเล็กลงตามสัดส่วนใน sample)
+    # บน sample ลดเกณฑ์ขนาดกลุ่มตามสัดส่วน
     if sampled:
         score_min_segment = max(2, int(min_segment * len(score_df) / total_n))
     else:
         score_min_segment = min_segment
     candidates = _collect_candidates(score_df, breakdowns, measures, score_min_segment, st)
+
+    # v0.8: เพิ่ม correlation + outlier candidates
+    _emit(progress, "ตรวจสอบความสัมพันธ์และ outlier...")
+    corr_candidates = _detect_strong_correlations(score_df, measures)
+    candidates.extend(corr_candidates)
+    outlier_candidates = _detect_outlier_insights(score_df, measures, column_types)
+    candidates.extend(outlier_candidates)
+
     ranked = _gate_and_score(candidates, _SIGNIFICANCE_ALPHA, len(score_df), notes)
 
     selected = ranked[:top_n]
@@ -930,6 +1015,123 @@ def discover_insights(
 
     cards = [_to_card(c) for c in selected]
     return InsightEngineResult(total=len(cards), cards=cards, notes=notes)
+
+
+# ----------------------------------------------------------------------------
+# v0.8: pattern ใหม่ — correlation + outlier
+# ----------------------------------------------------------------------------
+def _detect_strong_correlations(df: pd.DataFrame, measures: dict[str, dict]) -> list[dict]:
+    """ตรวจหาความสัมพันธ์ที่ strong (|r| >= 0.7) ระหว่างคู่คอลัมน์ตัวเลข — v0.8.
+
+    คืน list ของ candidate dict ที่มี pattern="correlation"
+    จำกัดที่ top 10 คู่เพื่อกันการคำนวณบานปลาย
+    """
+    measure_cols = [m for m in measures if m in df.columns]
+    if len(measure_cols) < 2:
+        return []
+
+    numeric = df[measure_cols].apply(pd.to_numeric, errors="coerce").dropna()
+    if len(numeric) < 10:
+        return []
+
+    corr_matrix = numeric.corr(numeric_only=True)
+    candidates: list[dict] = []
+
+    # ดึงคู่ที่ |r| >= threshold (ข้ามแนวทแยงและคู่ซ้ำ)
+    seen: set[tuple[str, str]] = set()
+    for i, col_a in enumerate(measure_cols):
+        for col_b in measure_cols[i + 1 :]:
+            pair = tuple(sorted([col_a, col_b]))
+            if pair in seen:
+                continue
+            seen.add(pair)
+            r = float(corr_matrix.get(col_a, {}).get(col_b, 0.0))
+            if pd.isna(r):
+                continue
+            if abs(r) < _CORRELATION_THRESHOLD:
+                continue
+            direction = "positive" if r > 0 else "negative"
+            candidates.append(
+                {
+                    "pattern": "correlation",
+                    "pattern_score": min(1.0, abs(r)),
+                    "effect_norm": min(1.0, abs(r)),
+                    "p_value": None,
+                    "top_segment": col_b,
+                    "n_segments": 2,
+                    "top_size": len(numeric),
+                    "breakdown": col_a,
+                    "breakdown_freq_th": "",
+                    "measure": col_b,
+                    "agg": "correlation",
+                    "evidence": {
+                        "col_a": col_a,
+                        "col_b": col_b,
+                        "correlation": round(r, 3),
+                        "direction": direction,
+                        "n": len(numeric),
+                    },
+                }
+            )
+            if len(candidates) >= 10:
+                return candidates
+    return candidates
+
+
+def _detect_outlier_insights(
+    df: pd.DataFrame,
+    measures: dict[str, dict],
+    column_types: dict[str, ColumnType],
+) -> list[dict]:
+    """ตรวจหา outlier ในคอลัมน์ตัวเลข — แถวที่ z-score > 3 — v0.8.
+
+    คืน candidate ที่มี pattern="outlier" สำหรับคอลัมน์ที่มี outlier มากพอ
+    """
+    candidates: list[dict] = []
+    for measure in measures:
+        if measure not in df.columns:
+            continue
+        numeric = pd.to_numeric(df[measure], errors="coerce").dropna()
+        if len(numeric) < 20:
+            continue
+        mean = float(numeric.mean())
+        std = float(numeric.std())
+        if std == 0:
+            continue
+        z_scores = (numeric - mean) / std
+        outliers = z_scores.abs() >= _OUTLIER_Z_THRESHOLD
+        outlier_count = int(outliers.sum())
+        if outlier_count == 0:
+            continue
+        pct = outlier_count / len(numeric) * 100.0
+        # มี outlier อย่างน้อย 1% หรือ 5 แถว ถึงจะน่าสนใจ
+        if outlier_count < 5 and pct < 1.0:
+            continue
+        max_z = float(z_scores.abs().max())
+        candidates.append(
+            {
+                "pattern": "outlier",
+                "pattern_score": min(1.0, max_z / 6.0),
+                "effect_norm": min(1.0, max_z / 6.0),
+                "p_value": None,
+                "top_segment": measure,
+                "n_segments": 1,
+                "top_size": outlier_count,
+                "breakdown": measure,
+                "breakdown_freq_th": "",
+                "measure": measure,
+                "agg": "outlier",
+                "evidence": {
+                    "column": measure,
+                    "outlier_count": outlier_count,
+                    "percentage": round(pct, 1),
+                    "max_z_score": round(max_z, 2),
+                    "mean": round(mean, 2),
+                    "std": round(std, 2),
+                },
+            }
+        )
+    return candidates
 
 
 def _recompute_full(
@@ -949,6 +1151,34 @@ def _recompute_full(
     key_cache: dict[str, pd.Series | None] = {}
     out: list[dict] = []
     for c in selected:
+        # v0.8: correlation/outlier ไม่ใช้ breakdown → recompute บนข้อมูลเต็มโดยตรง
+        if c["pattern"] == "correlation":
+            rec = _detect_strong_correlations(df, measures)
+            match = next(
+                (r for r in rec
+                 if r["evidence"]["col_a"] == c["evidence"]["col_a"]
+                 and r["evidence"]["col_b"] == c["evidence"]["col_b"]),
+                None,
+            )
+            if match is not None:
+                match["score"] = c["score"]
+                out.append(match)
+            else:
+                out.append(c)
+            continue
+        if c["pattern"] == "outlier":
+            rec = _detect_outlier_insights(df, measures, {})
+            match = next(
+                (r for r in rec if r["evidence"]["column"] == c["evidence"]["column"]),
+                None,
+            )
+            if match is not None:
+                match["score"] = c["score"]
+                out.append(match)
+            else:
+                out.append(c)
+            continue
+
         bd = bd_map.get(c["breakdown"])
         if bd is None:
             out.append(c)

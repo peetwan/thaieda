@@ -25,10 +25,12 @@ _EXT_TO_FORMAT: dict[str, str] = {
     ".json": "json",
     ".jsonl": "jsonl",
     ".ndjson": "jsonl",
+    ".xlsx": "excel",
+    ".xls": "excel",
 }
 
 # format ที่รองรับ
-_VALID_FORMATS: frozenset[str] = frozenset({"csv", "json", "jsonl"})
+_VALID_FORMATS: frozenset[str] = frozenset({"csv", "json", "jsonl", "excel"})
 
 
 def _can_decode(raw: bytes, encoding: str) -> bool:
@@ -153,15 +155,27 @@ def _read_json_any(path: Path, encoding: str) -> pd.DataFrame:
         return _read_json_lines(path, encoding)
 
 
+def _read_excel(path: Path) -> pd.DataFrame:
+    """อ่านไฟล์ Excel (.xlsx/.xls) — v0.8 (ต้องติดตั้ง openpyxl)."""
+    try:
+        return pd.read_excel(path, engine="openpyxl")
+    except ImportError as exc:
+        raise ImportError(
+            "Excel support requires pip install openpyxl (หรือ pip install thaieda[excel])"
+        ) from exc
+
+
 def _read_with_format(path: Path, fmt: str, encoding: str) -> pd.DataFrame:
-    """อ่านไฟล์ตาม format ที่ระบุ (csv/json/jsonl)."""
+    """อ่านไฟล์ตาม format ที่ระบุ (csv/json/jsonl/excel)."""
     if fmt == "csv":
         return _read_csv(path, encoding)
     if fmt == "jsonl":
         return _read_json_lines(path, encoding)
     if fmt == "json":
         return _read_json_any(path, encoding)
-    raise ValueError(f"format ไม่รองรับ: {fmt!r} — รองรับเฉพาะ auto, csv, json, jsonl")
+    if fmt == "excel":
+        return _read_excel(path)
+    raise ValueError(f"format ไม่รองรับ: {fmt!r} — รองรับเฉพาะ auto, csv, json, jsonl, excel")
 
 
 def read_data(path: str | Path, format: str = "auto", encoding: str = "auto") -> pd.DataFrame:
@@ -184,7 +198,7 @@ def read_data(path: str | Path, format: str = "auto", encoding: str = "auto") ->
         raise FileNotFoundError(f"ไม่พบไฟล์: {p}")
 
     if format != "auto" and format not in _VALID_FORMATS:
-        raise ValueError(f"format ไม่รองรับ: {format!r} — รองรับเฉพาะ auto, csv, json, jsonl")
+        raise ValueError(f"format ไม่รองรับ: {format!r} — รองรับเฉพาะ auto, csv, json, jsonl, excel")
 
     enc = detect_encoding(p) if encoding == "auto" else encoding
     auto_format = format == "auto"

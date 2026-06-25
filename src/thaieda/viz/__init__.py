@@ -1245,10 +1245,10 @@ def create_insight_chart(
         )
 
     if pattern == "trend":
-        # trend ใช้ first/last value + n_buckets — สร้าง segments จาก evidence
-        # ถ้าไม่มี top_segments ให้สร้างจาก first/last
-        segments = evidence.get("top_segments", [])
+        # v0.8: ใช้ all_buckets จาก evidence แทนการสร้างจาก first/last แค่ 2 จุด
+        segments = evidence.get("all_buckets", [])
         if not segments:
+            # fallback เก่า: สร้างจาก first/last ถ้าไม่มี all_buckets
             first_v = evidence.get("first_value", 0)
             last_v = evidence.get("last_value", 0)
             segments = [
