@@ -14,13 +14,60 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 from thaieda import __version__
+from thaieda.i18n import label
 
 # ตัวเลือก format ที่รองรับสำหรับการอ่านไฟล์
 _FORMAT_CHOICES = ["auto", "csv", "json", "jsonl"]
+
+# ขนาดไฟล์ที่ถือว่า "ใหญ่" (10MB) — แสดงจำนวนแถวหลังอ่าน และแนะนำ flag เพื่อความเร็ว
+_LARGE_FILE_BYTES = 10 * 1024 * 1024
+
+# ----------------------------------------------------------------------------
+# helper: จัดรูปแบบ output บนเทอร์มินัล (สี + หัวข้อ box-drawing)
+# ----------------------------------------------------------------------------
+_ANSI = {
+    "reset": "\033[0m",
+    "bold": "\033[1m",
+    "dim": "\033[2m",
+    "critical": "\033[91m",
+    "warning": "\033[93m",
+    "info": "\033[96m",
+    "ok": "\033[92m",
+}
+
+
+def _supports_color() -> bool:
+    """ใช้สีก็ต่อเมื่อ stdout เป็น tty และไม่ได้ตั้ง NO_COLOR (มาตรฐาน no-color.org)."""
+    return sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
+
+
+def _paint(text: str, style: str, color: bool) -> str:
+    """ใส่สี ANSI ให้ข้อความถ้า color=True — ไม่งั้นคืนข้อความเดิม (กัน escape code รั่วใส่ไฟล์/pipe)."""
+    if not color or style not in _ANSI:
+        return text
+    return f"{_ANSI[style]}{text}{_ANSI['reset']}"
+
+
+def _section(title: str, color: bool) -> str:
+    """หัวข้อส่วนแบบ box-drawing — '━━━ title ━━━'."""
+    bar = _paint("━━━", "dim", color)
+    return f"\n{bar} {_paint(title, 'bold', color)} {bar}"
+
+
+def _make_progress(quiet: bool, color: bool):
+    """สร้าง callback แสดงความคืบหน้าทีละขั้น (flush ทันทีเพื่อให้เห็นบนไฟล์ใหญ่). quiet -> None."""
+    if quiet:
+        return None
+
+    def cb(message: str) -> None:
+        print(f"  {_paint('…', 'dim', color)} {message}", flush=True)
+
+    return cb
 
 
 def _add_io_args(parser: argparse.ArgumentParser) -> None:
@@ -76,6 +123,16 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_profile.add_argument("--json", default=None, help="ส่งออกข้อมูลเป็น JSON ไปยังพาธที่ระบุด้วย")
     p_profile.add_argument("--no-charts", action="store_true", help="ไม่สร้างกราฟ (เร็วขึ้น)")
+    p_profile.add_argument(
+        "--sample",
+        type=int,
+        default=None,
+        metavar="N",
+        help="สุ่มตัวอย่าง N แถวก่อนวิเคราะห์ (เหมาะกับไฟล์ใหญ่ — ค่าเริ่มต้น: ใช้ข้อมูลทั้งหมด)",
+    )
+    p_profile.add_argument(
+        "--quiet", action="store_true", help="แสดงผลแบบย่อ (พิมพ์เฉพาะพาธไฟล์ผลลัพธ์)"
+    )
     _add_io_args(p_profile)
 
     # ----- run (single-command pipeline) -----
@@ -114,6 +171,16 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_run.add_argument("--json", default=None, help="ส่งออกข้อมูลเป็น JSON ไปยังพาธที่ระบุด้วย")
     p_run.add_argument("--no-charts", action="store_true", help="ไม่สร้างกราฟ (เร็วขึ้น)")
+    p_run.add_argument(
+        "--sample",
+        type=int,
+        default=None,
+        metavar="N",
+        help="สุ่มตัวอย่าง N แถวก่อนประมวลผล (เหมาะกับไฟล์ใหญ่ — ค่าเริ่มต้น: ใช้ข้อมูลทั้งหมด)",
+    )
+    p_run.add_argument(
+        "--quiet", action="store_true", help="แสดงผลแบบย่อ (พิมพ์เฉพาะพาธไฟล์ผลลัพธ์)"
+    )
     _add_io_args(p_run)
 
     # ----- clean -----
@@ -141,17 +208,23 @@ def _build_parser() -> argparse.ArgumentParser:
 # ----------------------------------------------------------------------------
 # helper: อ่านไฟล์ + จัดการ error เป็นภาษาไทย
 # ----------------------------------------------------------------------------
-def _read_input(args: argparse.Namespace):
+def _read_input(args: argparse.Namespace, quiet: bool = False, color: bool = False):
     """อ่านไฟล์ input ผ่าน thaieda.io.read_data — คืน (df, exit_code).
 
     ถ้าอ่านสำเร็จคืน (DataFrame, 0). ถ้าผิดพลาดคืน (None, exit_code) พร้อมพิมพ์ error เป็นภาษาไทย
+    บนไฟล์ใหญ่ (>10MB) จะแสดงจำนวนแถวหลังอ่านเพื่อบอกว่าไม่ได้ค้าง
     """
+    from thaieda.i18n import label
     from thaieda.io import read_data
 
     input_path = Path(args.input)
     if not input_path.is_file():
         print(f"error: ไม่พบไฟล์ {input_path}", file=sys.stderr)
         return None, 2
+
+    lang = getattr(args, "lang", "th")
+    if not quiet:
+        print(f"  {_paint('…', 'dim', color)} {label('prog_read', lang)}", flush=True)
 
     try:
         df = read_data(input_path, format=args.format, encoding=args.encoding)
@@ -170,7 +243,52 @@ def _read_input(args: argparse.Namespace):
         print("error: ไฟล์ว่างเปล่า (ไม่มีข้อมูล)", file=sys.stderr)
         return None, 1
 
+    # ไฟล์ใหญ่ -> บอกจำนวนแถว/คอลัมน์ทันที (ผู้ใช้จะได้รู้ว่ากำลังทำงาน ไม่ใช่ค้าง)
+    if not quiet:
+        try:
+            is_large = input_path.stat().st_size > _LARGE_FILE_BYTES
+        except OSError:
+            is_large = False
+        if is_large:
+            print(f"    {len(df):,} แถว × {len(df.columns)} คอลัมน์", flush=True)
+
     return df, 0
+
+
+def _maybe_sample(df, sample, quiet: bool, color: bool):
+    """สุ่มตัวอย่าง sample แถวถ้าระบุและน้อยกว่าจำนวนแถวจริง — คืน DataFrame (อาจถูกสุ่ม)."""
+    if sample is None or sample <= 0 or sample >= len(df):
+        return df
+    total = len(df)
+    sampled = df.sample(n=sample, random_state=42).reset_index(drop=True)
+    if not quiet:
+        print(
+            _paint(f"  ⚠ สุ่มตัวอย่าง {sample:,} จาก {total:,} แถว", "warning", color),
+            flush=True,
+        )
+    return sampled
+
+
+def _maybe_large_file_hint(input_path: Path, args: argparse.Namespace, quiet: bool) -> None:
+    """ไฟล์ใหญ่ + ยังไม่ได้เปิด flag เร่งความเร็ว -> แนะนำ flag (Improve 3)."""
+    if quiet:
+        return
+    try:
+        size = input_path.stat().st_size
+    except OSError:
+        return
+    if size <= _LARGE_FILE_BYTES:
+        return
+    tips: list[str] = []
+    if not getattr(args, "no_charts", False):
+        tips.append("--no-charts")
+    if not getattr(args, "no_timeseries", False):
+        tips.append("--no-timeseries")
+    if getattr(args, "sample", None) is None:
+        tips.append("--sample 10000")
+    if tips:
+        mb = size / (1024 * 1024)
+        print(f"  ℹ ไฟล์ใหญ่ ({mb:.0f}MB) — เพื่อความเร็วลองใช้: {' '.join(tips)}", flush=True)
 
 
 # ----------------------------------------------------------------------------
@@ -179,7 +297,10 @@ def _read_input(args: argparse.Namespace):
 def _run_profile(args: argparse.Namespace) -> int:
     from thaieda.report import ProfileReport
 
-    df, code = _read_input(args)
+    quiet = args.quiet
+    color = _supports_color()
+
+    df, code = _read_input(args, quiet=quiet, color=color)
     if df is None:
         return code
 
@@ -190,6 +311,9 @@ def _run_profile(args: argparse.Namespace) -> int:
     input_path = Path(args.input)
     output_path = args.output or str(input_path.with_suffix(".thaieda.html"))
 
+    _maybe_large_file_hint(input_path, args, quiet)
+    df = _maybe_sample(df, args.sample, quiet, color)
+
     report = ProfileReport(
         df,
         lang=args.lang,
@@ -198,38 +322,74 @@ def _run_profile(args: argparse.Namespace) -> int:
         target_column=args.target,
         clean=args.clean,
         timeseries=not args.no_timeseries,
+        progress=_make_progress(quiet, color),
     )
     report.run()
+    if not quiet:
+        print(f"  {_paint('…', 'dim', color)} {label('prog_report', args.lang)}", flush=True)
     report.to_html(output_path)
 
     if args.json:
         report.to_json(args.json)
 
-    _print_summary(report, input_path, output_path, args.json)
+    if quiet:
+        _print_quiet(output_path, args.json, None)
+    else:
+        _print_summary(report, input_path, output_path, args.json, color)
     return 0
 
 
-def _print_summary(report, input_path: Path, output_path: str, json_path: str | None) -> None:
-    overview = report.overview
-    issues = report.quality_issues
-    sev_counts: dict[str, int] = {"critical": 0, "warning": 0, "info": 0}
-    for i in issues:
-        sev_counts[i.severity] = sev_counts.get(i.severity, 0) + 1
+def _print_quiet(html_path: str, json_path: str | None, cleaned_path: str | None) -> None:
+    """โหมด --quiet: พิมพ์เฉพาะพาธไฟล์ผลลัพธ์ (อย่างละบรรทัด)."""
+    print(html_path)
+    if json_path:
+        print(json_path)
+    if cleaned_path:
+        print(cleaned_path)
 
-    print(f"✓ วิเคราะห์ไฟล์: {input_path}")
+
+def _severity_counts(issues) -> dict[str, int]:
+    counts = {"critical": 0, "warning": 0, "info": 0}
+    for i in issues:
+        counts[i.severity] = counts.get(i.severity, 0) + 1
+    return counts
+
+
+def _print_summary_table(report, color: bool) -> None:
+    """ตารางสรุปท้ายรายงาน — ประเภทคอลัมน์ / ปัญหา / ความผิดปกติ / ข้อค้นพบ (Improve 2)."""
+    from thaieda.i18n import label as L
+
+    overview = report.overview
+    sev = _severity_counts(report.quality_issues)
+    types = ", ".join(
+        f"{t} {cnt}" for t, cnt in sorted(overview["type_counts"].items(), key=lambda x: -x[1])
+    )
+    crit = _paint(f"วิกฤต {sev['critical']}", "critical", color)
+    warn = _paint(f"เตือน {sev['warning']}", "warning", color)
+    info = _paint(f"ข้อมูล {sev['info']}", "info", color)
+    rows = [
+        (L("column_types", "th"), types),
+        (L("quality_issues", "th"), f"{len(report.quality_issues)} ({crit}, {warn}, {info})"),
+        (L("anomalies", "th"), str(len(report.anomalies))),
+    ]
+    insights = report.insights
+    if insights is not None:
+        rows.append((L("auto_insights", "th"), str(insights.total_insights)))
+    print(_section(L("summary_table", "th"), color))
+    width = max(len(k) for k, _ in rows)
+    for k, v in rows:
+        print(f"  {k.ljust(width)}  {v}")
+
+
+def _print_summary(
+    report, input_path: Path, output_path: str, json_path: str | None, color: bool
+) -> None:
+    overview = report.overview
+    print(_section(f"วิเคราะห์ไฟล์: {input_path}", color))
     print(
         f"  แถว: {overview['rows']:,} | คอลัมน์: {overview['columns']} | "
         f"เซลล์ว่าง: {overview['missing_pct']}%"
     )
-    print("  ประเภทคอลัมน์:")
-    for t, cnt in sorted(overview["type_counts"].items(), key=lambda x: -x[1]):
-        print(f"    - {t}: {cnt}")
-    print(
-        f"  ปัญหาคุณภาพที่พบ: {len(issues)} "
-        f"(วิกฤต {sev_counts['critical']}, เตือน {sev_counts['warning']}, "
-        f"ข้อมูล {sev_counts['info']})"
-    )
-    print(f"  ความผิดปกติที่พบ: {len(report.anomalies)}")
     if report.cleaning_diff:
         total = sum(c.rows_affected for c in report.cleaning_diff)
         print(f"  ทำความสะอาดแล้ว: {len(report.cleaning_diff)} การดำเนินการ (รวม {total:,} เซลล์)")
@@ -238,10 +398,11 @@ def _print_summary(report, input_path: Path, output_path: str, json_path: str | 
     _print_timeseries_highlights(report)
     _print_insight_highlights(report)
     for note in report.notes:
-        print(f"  ⚠ {note}")
-    print(f"✓ บันทึกรายงาน HTML: {output_path}")
+        print(_paint(f"  ⚠ {note}", "warning", color))
+    _print_summary_table(report, color)
+    print(_paint(f"✓ บันทึกรายงาน HTML: {output_path}", "ok", color))
     if json_path:
-        print(f"✓ บันทึก JSON: {json_path}")
+        print(_paint(f"✓ บันทึก JSON: {json_path}", "ok", color))
 
 
 def _print_timeseries_highlights(report) -> None:
@@ -284,7 +445,10 @@ def _print_insight_highlights(report) -> None:
 def _run_run(args: argparse.Namespace) -> int:
     from thaieda.report import ProfileReport
 
-    df, code = _read_input(args)
+    quiet = args.quiet
+    color = _supports_color()
+
+    df, code = _read_input(args, quiet=quiet, color=color)
     if df is None:
         return code
 
@@ -296,6 +460,9 @@ def _run_run(args: argparse.Namespace) -> int:
     output_path = args.output or str(input_path.with_suffix(".thaieda.html"))
     do_clean = not args.no_clean
 
+    _maybe_large_file_hint(input_path, args, quiet)
+    df = _maybe_sample(df, args.sample, quiet, color)
+
     report = ProfileReport(
         df,
         lang=args.lang,
@@ -304,8 +471,11 @@ def _run_run(args: argparse.Namespace) -> int:
         target_column=args.target,
         clean=do_clean,
         timeseries=not args.no_timeseries,
+        progress=_make_progress(quiet, color),
     )
     report.run()
+    if not quiet:
+        print(f"  {_paint('…', 'dim', color)} {label('prog_report', args.lang)}", flush=True)
     report.to_html(output_path)
 
     if args.json:
@@ -324,7 +494,10 @@ def _run_run(args: argparse.Namespace) -> int:
                 report.df[col] = report.df[col].astype(str)
         report.df.to_csv(cleaned_path, index=False, encoding="utf-8")
 
-    _print_run_summary(report, input_path, output_path, cleaned_path, args.json)
+    if quiet:
+        _print_quiet(output_path, args.json, cleaned_path)
+    else:
+        _print_run_summary(report, input_path, output_path, cleaned_path, args.json, color)
     return 0
 
 
@@ -334,16 +507,13 @@ def _print_run_summary(
     html_path: str,
     cleaned_path: str | None,
     json_path: str | None,
+    color: bool,
 ) -> None:
     overview = report.overview
-    print(f"✓ ประมวลผลไฟล์: {input_path}")
+    print(_section(f"ประมวลผลไฟล์: {input_path}", color))
     print(
         f"  แถว: {overview['rows']:,} | คอลัมน์: {overview['columns']} | "
         f"เซลล์ว่าง: {overview['missing_pct']}%"
-    )
-    print(
-        f"  ปัญหาคุณภาพ: {len(report.quality_issues)} | "
-        f"ความผิดปกติ: {len(report.anomalies)}"
     )
     if report.cleaning_diff:
         total = sum(c.rows_affected for c in report.cleaning_diff)
@@ -351,12 +521,13 @@ def _print_run_summary(
     _print_timeseries_highlights(report)
     _print_insight_highlights(report)
     for note in report.notes:
-        print(f"  ⚠ {note}")
-    print(f"✓ บันทึกรายงาน HTML: {html_path}")
+        print(_paint(f"  ⚠ {note}", "warning", color))
+    _print_summary_table(report, color)
+    print(_paint(f"✓ บันทึกรายงาน HTML: {html_path}", "ok", color))
     if json_path:
-        print(f"✓ บันทึก JSON: {json_path}")
+        print(_paint(f"✓ บันทึก JSON: {json_path}", "ok", color))
     if cleaned_path:
-        print(f"✓ บันทึกข้อมูลที่สะอาดแล้ว: {cleaned_path}")
+        print(_paint(f"✓ บันทึกข้อมูลที่สะอาดแล้ว: {cleaned_path}", "ok", color))
 
 
 # ----------------------------------------------------------------------------
@@ -368,7 +539,7 @@ def _run_clean(args: argparse.Namespace) -> int:
     from thaieda.clean import clean_thai_text
     from thaieda.detect import ColumnType, detect_column_type, normalize_phone_number
 
-    df, code = _read_input(args)
+    df, code = _read_input(args, color=_supports_color())
     if df is None:
         return code
 
