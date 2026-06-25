@@ -15,10 +15,15 @@ src/thaieda/
   quality/    Thai data quality checks
   anomaly/    anomaly detection (numeric + text + Thai-specific)
   clean/      data cleaning functions
+  ner/        Thai NER (v0.2)
+  analysis/   target variable analysis (v0.2)
+  insight/    auto insight summary (v0.3) + distribution/correlation (v0.4)
+  timeseries/ timeseries analysis (v0.4)
+  schema/     multi-file schema discovery — PK/FK + relationship matching (v0.5)
   viz/        visualization + Thai font
-  report/     HTML report (Jinja2)
+  report/     HTML report (Jinja2) + DatasetReport (v0.5)
   i18n/       TH/EN labels
-  llm/        placeholder v0.3
+  llm/        placeholder (v0.6+)
 tests/        pytest
 research/     research notes (cron-generated, NOT source code)
 ```

@@ -47,6 +47,7 @@ thaieda run data.csv -o report.html
 
 | Version | Highlights |
 |---------|-----------|
+| **v0.5** | Multi-file schema discovery, ER diagram, relationship validation, orphan detection |
 | **v0.4** | Timeseries analysis (trend/seasonality/STL/ACF/gaps), distribution & correlation insights |
 | **v0.3** | Single-command pipeline, JSON input, auto encoding detection, auto insights, cleaning diff |
 | **v0.2** | Thai NER, pythainlp normalize, auto chart selection, unified anomaly API, target analysis |
@@ -174,6 +175,15 @@ pip install "thaieda[thai,ner,viz,ml,stats,timeseries,detect]"
 - **Distribution insights** — skewness, kurtosis, bimodal detection for numeric columns
 - **Correlation & duplicates** — highly correlated column pairs, duplicate rows, numbers stored as text
 
+### Multi-File Schema Discovery (v0.5)
+
+- **Auto relationship detection** — scan a directory of CSV/JSON files and discover how tables connect via primary/foreign keys
+- **Value validation** — confirms relationships with real data overlap (not just column name matching); detects orphan records
+- **ER diagram** — generates a Mermaid.js ER diagram showing all tables, columns, and relationships
+- **Thai-aware key normalization** — normalizes Thai numerals, zero-width spaces, and float artifacts before comparing keys
+- **Combined report** — single HTML report covering all files + relationships + orphan findings
+- **Orphan detection** — flags foreign-key values with no matching primary key (a data quality issue)
+
 ### Visualization
 
 - **Auto chart selection** — picks chart type based on data type automatically
@@ -200,6 +210,12 @@ pip install "thaieda[thai,ner,viz,ml,stats,timeseries,detect]"
 ```bash
 # Full pipeline: clean → analyze → report + cleaned file
 thaieda run data.csv -o report.html --cleaned-output cleaned.csv
+
+# Multi-file: analyze a whole directory (auto-discovers relationships)
+thaieda dataset data-folder/ -o schema-report.html
+
+# Multi-file: explicit file list
+thaieda dataset orders.csv customers.csv products.csv -o schema-report.html
 
 # With target column analysis
 thaieda run data.csv -o report.html --target price
@@ -261,6 +277,33 @@ for col, r in results.items():
 r = analyze_timeseries(series, engine="auto")  # "auto" | "statsmodels" | "basic"
 ```
 
+### Multi-File Schema Discovery
+
+```python
+from thaieda import profile_dataset, DatasetReport
+
+# Analyze a directory of related files — discovers relationships automatically
+dataset = profile_dataset("data-folder/")
+print(f"Tables: {len(dataset.tables)}, Relationships: {len(dataset.relationships)}")
+
+# View discovered relationships
+for rel in dataset.relationships:
+    print(f"  {rel.from_table}.{rel.from_column} → {rel.to_table}.{rel.to_column}  "
+          f"[{rel.cardinality}]  overlap={rel.overlap_ratio:.1%}  orphans={rel.orphan_count}")
+    print(f"  {rel.description_th}")
+
+# Check for orphan records (FK values with no matching PK)
+for finding in dataset.orphan_findings:
+    print(f"  ⚠ {finding}")
+
+# Generate ER diagram (Mermaid text)
+print(dataset.to_mermaid())
+
+# Render combined HTML report with ER diagram
+report = DatasetReport(dataset, lang="th")
+report.to_html("schema-report.html")
+```
+
 ---
 
 ## Architecture
@@ -278,10 +321,11 @@ thaieda/
   analysis/    # Target variable analysis: Pearson/ANOVA/Chi-square (v0.2)
   insight/     # Auto insight summary in Thai (v0.3) + distribution/correlation (v0.4)
   timeseries/  # Timeseries analysis: trend/seasonality/STL/ACF/gaps (v0.4)
+  schema/      # Multi-file schema discovery: PK/FK detection + relationship matching (v0.5)
   viz/         # Visualization + auto chart + Thai font (+ timeseries plots v0.4)
-  report/      # HTML report generation (Jinja2)
+  report/      # HTML report generation (Jinja2) + DatasetReport (v0.5)
   i18n/        # Bilingual labels (Thai/English)
-  llm/         # LLM Q&A (v0.5+)
+  llm/         # LLM Q&A (v0.6+)
 ```
 
 **Design principles:**
@@ -300,8 +344,9 @@ thaieda/
 | **v0.2** | Thai NER, pythainlp normalize, auto chart, unified anomaly API, target analysis | ✅ Done |
 | **v0.3** | Single-command pipeline, JSON input, auto encoding, auto insights, cleaning diff | ✅ Done |
 | **v0.4** | Timeseries analysis, distribution & correlation insights | ✅ Done |
-| **v0.5** | LLM Q&A (litellm + Ollama local), Thai explanations | 📋 Planned |
-| **v0.6** | Interactive dashboard (Streamlit/FastAPI), Thai UI | 📋 Planned |
+| **v0.5** | Multi-file schema discovery, ER diagram, relationship validation, orphan detection | ✅ Done |
+| **v0.6** | LLM Q&A (litellm + Ollama local), Thai explanations | 📋 Planned |
+| **v0.7** | Interactive dashboard (Streamlit/FastAPI), Thai UI | 📋 Planned |
 
 ---
 
