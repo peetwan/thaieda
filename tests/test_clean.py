@@ -11,11 +11,13 @@ import pytest
 from thaieda.clean import (
     CleaningResult,
     clean_thai_text,
+    fix_keyboard_layout,
     fix_repeated_chars,
     fix_tone_mark_stacking,
     normalize_encoding,
     normalize_thai_numerals,
     normalize_unicode,
+    pythainlp_normalize,
     remove_zero_width_chars,
     strip_whitespace,
 )
@@ -29,6 +31,17 @@ def _ftfy_installed() -> bool:
     except ImportError:
         return False
     return True
+
+
+def _pythainlp_installed() -> bool:
+    import importlib.util
+
+    return importlib.util.find_spec("pythainlp") is not None
+
+
+requires_pythainlp = pytest.mark.skipif(
+    not _pythainlp_installed(), reason="pythainlp not installed"
+)
 
 
 # ------------------------------------------------------------- zero-width
@@ -208,3 +221,92 @@ def test_clean_then_anomaly_free():
     after_names = {i.check_name for i in after}
     assert "encoding_mojibake" not in after_names
     assert "excessive_repetition" not in after_names
+
+
+# ------------------------------------------------------ pythainlp_normalize
+@requires_pythainlp
+def test_pythainlp_normalize_fixes_spelling():
+    # 'เเปลก' (สระเอสองตัว) -> 'แปลก', 'นานาาา' (สระซ้ำ) -> 'นานา'
+    s = pd.Series(["เเปลก", "นานาาา", "ปกติ"])
+    cleaned, result = pythainlp_normalize(s)
+    assert cleaned.iloc[0] == "แปลก"
+    assert cleaned.iloc[1] == "นานา"
+    assert result.operation == "pythainlp_normalize"
+    assert result.rows_affected == 2
+
+
+@requires_pythainlp
+def test_pythainlp_normalize_no_change_returns_zero():
+    s = pd.Series(["สวัสดีครับ", "ขอบคุณ"])
+    cleaned, result = pythainlp_normalize(s)
+    assert cleaned.iloc[0] == "สวัสดีครับ"
+    assert result.rows_affected == 0
+
+
+def test_pythainlp_normalize_without_pythainlp_raises(monkeypatch):
+    # ไม่มี pythainlp -> ต้อง fail loudly (ไม่ silent fallback)
+    monkeypatch.setitem(sys.modules, "pythainlp", None)
+    monkeypatch.setitem(sys.modules, "pythainlp.util", None)
+    s = pd.Series(["x"])
+    with pytest.raises(ImportError):
+        pythainlp_normalize(s)
+
+
+# ------------------------------------------------------ fix_keyboard_layout
+@requires_pythainlp
+def test_fix_keyboard_layout_fixes_mistyped():
+    from pythainlp.util import thai_to_eng
+
+    mistyped = thai_to_eng("ขอบคุณมาก")  # ลืมสลับแป้น -> ได้ตัวอักษรอังกฤษ
+    s = pd.Series([mistyped, "hello", "ปกติ"])
+    cleaned, result = fix_keyboard_layout(s)
+    assert cleaned.iloc[0] == "ขอบคุณมาก"
+    assert cleaned.iloc[1] == "hello"  # ภาษาอังกฤษจริงต้องไม่ถูกแตะ
+    assert result.rows_affected == 1
+    assert result.operation == "fix_keyboard_layout"
+
+
+@requires_pythainlp
+def test_fix_keyboard_layout_leaves_english_alone():
+    s = pd.Series(["python", "data", "the quick brown"])
+    cleaned, result = fix_keyboard_layout(s)
+    assert result.rows_affected == 0
+    assert list(cleaned) == ["python", "data", "the quick brown"]
+
+
+def test_fix_keyboard_layout_without_pythainlp_raises(monkeypatch):
+    monkeypatch.setitem(sys.modules, "pythainlp", None)
+    monkeypatch.setitem(sys.modules, "pythainlp.tokenize", None)
+    monkeypatch.setitem(sys.modules, "pythainlp.util", None)
+    s = pd.Series(["x"])
+    with pytest.raises(ImportError):
+        fix_keyboard_layout(s)
+
+
+# ------------------------------------------------------ default pipeline integration
+@requires_pythainlp
+def test_default_operations_include_pythainlp_ops():
+    from thaieda.clean import DEFAULT_OPERATIONS
+
+    assert "pythainlp_normalize" in DEFAULT_OPERATIONS
+    assert "keyboard_layout" in DEFAULT_OPERATIONS
+
+
+def test_clean_thai_text_default_skips_pythainlp_when_absent(monkeypatch):
+    # default pipeline ต้องข้าม pythainlp ops อย่างสุภาพเมื่อไม่ได้ติดตั้ง (ไม่ crash)
+    monkeypatch.setitem(sys.modules, "pythainlp", None)
+    s = pd.Series(["๑๒๓"])
+    cleaned, results = clean_thai_text(s)
+    ops = {r.operation for r in results}
+    assert "pythainlp_normalize" not in ops
+    assert "fix_keyboard_layout" not in ops
+    assert cleaned.iloc[0] == "123"  # ขั้นตอนอื่นยังทำงานปกติ
+
+
+def test_clean_thai_text_explicit_pythainlp_op_fails_loudly(monkeypatch):
+    # ผู้ใช้ระบุ op ที่ต้องใช้ pythainlp เอง -> ต้อง fail loudly ไม่ skip เงียบ ๆ
+    monkeypatch.setitem(sys.modules, "pythainlp", None)
+    monkeypatch.setitem(sys.modules, "pythainlp.util", None)
+    s = pd.Series(["x"])
+    with pytest.raises(ImportError):
+        clean_thai_text(s, operations=["pythainlp_normalize"])

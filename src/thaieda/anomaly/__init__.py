@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from thaieda.detect import ColumnType, detect_all
+from thaieda.detect import ColumnType, detect_all, detect_column_type
 
 # ----------------------------------------------------------------------------
 # ค่าคงที่
@@ -1112,7 +1112,7 @@ _THAI_TYPES = {ColumnType.THAI_TEXT, ColumnType.MIXED_TEXT}
 _CATEGORICAL_TYPES = {ColumnType.CATEGORICAL, ColumnType.ID}
 
 
-def detect_anomalies(
+def _detect_anomalies_frame(
     df: pd.DataFrame,
     column_types: dict[str, ColumnType] | None = None,
     tokenizer=None,
@@ -1165,8 +1165,148 @@ def detect_anomalies(
     return issues
 
 
+# ----------------------------------------------------------------------------
+# (g) Unified single-column API (แรงบันดาลใจจาก PyCaret) — ฟังก์ชันเดียว เลือกวิธีด้วย method
+# ----------------------------------------------------------------------------
+@dataclass
+class AnomalySummary:
+    """สรุปการตรวจ outlier ของคอลัมน์เดียวแบบรวม (จากหลายวิธีถ้า method='auto')."""
+
+    column: str
+    method: str
+    total_anomalies: int
+    anomaly_rate: float  # ร้อยละ
+    issues: list[AnomalyIssue] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "column": self.column,
+            "method": self.method,
+            "total_anomalies": self.total_anomalies,
+            "anomaly_rate": round(self.anomaly_rate, 2),
+            "issues": [i.to_dict() for i in self.issues],
+        }
+
+
+# วิธีเชิงสถิติที่ระบุชื่อได้โดยตรง: ชื่อ method -> (ป้ายแสดงผล, ฟังก์ชันสร้าง mask)
+_STAT_METHODS = {
+    "zscore": ("z_score", _zscore_mask),
+    "mad": ("modified_z_score (MAD)", _mad_mask),
+    "iqr": ("IQR", _iqr_mask),
+}
+_VALID_METHODS = ("auto", "zscore", "mad", "iqr", "iforest", "lof")
+
+
+def _stat_issue(series: pd.Series, method_key: str) -> AnomalyIssue | None:
+    """รัน outlier เชิงสถิติด้วยวิธีที่ระบุ (zscore/mad/iqr) บนคอลัมน์ตัวเลข."""
+    label, mask_fn = _STAT_METHODS[method_key]
+    valid, valid_positions, _ = _numeric_valid(series)
+    if valid.size < _MIN_NUMERIC_SAMPLE:
+        return None
+    out_mask = mask_fn(valid)
+    if out_mask is None or not bool(out_mask.any()):
+        return None
+    outlier_positions = valid_positions[out_mask]
+    outlier_values = valid[out_mask]
+    count = int(outlier_positions.size)
+    return AnomalyIssue(
+        check_name=f"numeric_outliers_{method_key}",
+        severity="warning",
+        column=_col_name(series),
+        anomaly_type="statistical",
+        count=count,
+        percentage=_pct(count, int(valid.size)),
+        description=f"{count} numeric outlier(s) detected using the {label} method.",
+        description_th=f"พบค่าผิดปกติเชิงตัวเลข {count} ค่า ด้วยวิธี {label}",
+        examples=[_fmt_number(float(v)) for v in outlier_values[:_MAX_INDICES]],
+        suggestion="Inspect these values; they may be data-entry errors or genuine extremes.",
+        suggestion_th="ตรวจสอบค่าเหล่านี้ — อาจเป็นการกรอกผิดหรือค่าสุดขั้วจริง",
+        indices=[int(p) for p in outlier_positions[:_MAX_INDICES]],
+    )
+
+
+def _auto_series_issues(series: pd.Series) -> tuple[str, list[AnomalyIssue]]:
+    """เลือกวิธีตรวจ outlier ของคอลัมน์อัตโนมัติตามประเภท/ขนาดข้อมูล — คืน (ป้ายวิธี, รายการ issue)."""
+    ctype = detect_column_type(series)
+
+    if ctype == ColumnType.NUMERIC:
+        issues = [i for i in (detect_numeric_outliers(series),) if i is not None]
+        # ข้อมูลใหญ่พอ (>100 แถว) + มี scikit-learn -> เสริมวิธี ML
+        if sklearn_available():
+            for fn in (detect_isolation_forest, detect_lof):
+                issue = fn(series)
+                if issue is not None:
+                    issues.append(issue)
+            return "auto:statistical+ml", issues
+        return "auto:statistical", issues
+
+    if ctype in _TEXT_TYPES:
+        # การตรวจข้อความ (ความยาว/mojibake/ซ้ำ) ไม่ต้องใช้ tokenizer
+        issues = list(detect_text_anomalies(series, None))
+        if ctype in _THAI_TYPES:
+            issues.extend(detect_thai_text_anomalies(series))
+        return "auto:text", issues
+
+    if ctype in _CATEGORICAL_TYPES:
+        return "auto:categorical", list(detect_categorical_anomalies(series))
+
+    return "auto:none", []
+
+
+def _detect_anomalies_series(
+    series: pd.Series, method: str = "auto", **kwargs
+) -> AnomalySummary | None:
+    """ตรวจ outlier ของคอลัมน์เดียวแบบรวม — คืน AnomalySummary หรือ None ถ้าไม่พบ/ใช้ไม่ได้."""
+    if method not in _VALID_METHODS:
+        raise ValueError(
+            f"Unknown anomaly method {method!r}. Expected one of: {', '.join(_VALID_METHODS)}."
+        )
+    col = _col_name(series)
+
+    if method == "auto":
+        used, issues = _auto_series_issues(series)
+    elif method in _STAT_METHODS:
+        used, issues = method, [i for i in (_stat_issue(series, method),) if i is not None]
+    elif method == "iforest":
+        used, issues = method, [i for i in (detect_isolation_forest(series),) if i is not None]
+    else:  # "lof"
+        used, issues = method, [i for i in (detect_lof(series),) if i is not None]
+
+    if not issues:
+        return None
+
+    # total_anomalies/rate ใช้ค่าสูงสุดในบรรดา issue (ไม่บวกรวมเพื่อเลี่ยงการนับซ้ำข้ามวิธี)
+    total = max(i.count for i in issues)
+    rate = max(i.percentage for i in issues)
+    return AnomalySummary(
+        column=col, method=used, total_anomalies=total, anomaly_rate=rate, issues=issues
+    )
+
+
+def detect_anomalies(data, *args, **kwargs):
+    """ตรวจความผิดปกติ — รับได้ทั้ง Series (API รวมแบบคอลัมน์เดียว) และ DataFrame (ทั้งตาราง).
+
+    * ``detect_anomalies(series, method="auto")`` -> ``AnomalySummary | None``
+        method = "auto" (เลือกตามชนิด/ขนาด), "zscore", "mad", "iqr",
+        "iforest" (Isolation Forest), "lof" (Local Outlier Factor).
+    * ``detect_anomalies(df, column_types=None, tokenizer=None)`` -> ``list[AnomalyIssue]``
+        ตรวจทุกคอลัมน์ คืนรายการ AnomalyIssue เรียงตามความรุนแรง (พฤติกรรมเดิม).
+    """
+    if isinstance(data, pd.Series):
+        return _detect_anomalies_series(data, *args, **kwargs)
+    return _detect_anomalies_frame(data, *args, **kwargs)
+
+
+def detect_anomalies_all(
+    df: pd.DataFrame, method: str = "auto"
+) -> dict[str, AnomalySummary | None]:
+    """ตรวจ outlier ทุกคอลัมน์ด้วย API รวม — คืน dict {ชื่อคอลัมน์: AnomalySummary | None}."""
+    return {str(col): _detect_anomalies_series(df[col], method=method) for col in df.columns}
+
+
 __all__ = [
     "AnomalyIssue",
+    "AnomalySummary",
     "detect_numeric_outliers",
     "detect_isolation_forest",
     "detect_lof",
@@ -1176,5 +1316,6 @@ __all__ = [
     "detect_categorical_anomalies",
     "detect_column_anomalies",
     "detect_anomalies",
+    "detect_anomalies_all",
     "sklearn_available",
 ]

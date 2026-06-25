@@ -85,9 +85,11 @@ LABELS: dict[str, dict[str, str]] = {
         "th": "การกระจายและสหสัมพันธ์",
     },
     "correlation_heatmap": {"en": "Correlation Heatmap", "th": "แผนภาพความร้อนสหสัมพันธ์"},
+    "scatter_matrix": {"en": "Scatter Matrix", "th": "แผนภาพการกระจายแบบเมทริกซ์"},
     "boxplot": {"en": "Box Plot", "th": "แผนภาพกล่อง"},
     "violinplot": {"en": "Violin Plot", "th": "แผนภาพไวโอลิน"},
     "distribution": {"en": "Distribution", "th": "การแจกแจง"},
+    "value_counts": {"en": "Value Counts", "th": "ความถี่ของค่า"},
     "missing_data": {"en": "Missing Data", "th": "ข้อมูลที่ขาดหาย"},
     "missing_matrix": {"en": "Missing Value Matrix", "th": "เมทริกซ์ค่าที่ขาดหาย"},
     "missing_heatmap": {"en": "Nullity Correlation", "th": "สหสัมพันธ์การขาดหาย"},
@@ -109,6 +111,23 @@ LABELS: dict[str, dict[str, str]] = {
         "en": "For deeper numeric/categorical profiling, see ydata-profiling.",
         "th": "สำหรับการวิเคราะห์ตัวเลข/หมวดหมู่เชิงลึก แนะนำ ydata-profiling",
     },
+    # --- named entities (NER) ---
+    "named_entities": {"en": "Named Entities (NER)", "th": "ชื่อเฉพาะ (NER)"},
+    "no_entities": {"en": "No named entities detected.", "th": "ไม่พบชื่อเฉพาะ"},
+    "entity_type": {"en": "Entity Type", "th": "ประเภทชื่อเฉพาะ"},
+    "top_entities": {"en": "Top Entities", "th": "ชื่อเฉพาะที่พบบ่อย"},
+    "ner_engine": {"en": "NER Engine", "th": "เครื่องมือ NER"},
+    "total_entities": {"en": "Total Entities", "th": "ชื่อเฉพาะทั้งหมด"},
+    # --- target analysis ---
+    "target_analysis": {"en": "Target Analysis", "th": "การวิเคราะห์ตัวแปรเป้าหมาย"},
+    "target_column": {"en": "Target Column", "th": "คอลัมน์เป้าหมาย"},
+    "association": {"en": "Association", "th": "ความสัมพันธ์"},
+    "assoc_correlation": {"en": "Correlation (Pearson)", "th": "สหสัมพันธ์ (Pearson)"},
+    "assoc_chi_square": {"en": "Chi-square", "th": "ไคสแควร์"},
+    "assoc_anova": {"en": "ANOVA (F-test)", "th": "ANOVA (F-test)"},
+    "score": {"en": "Score", "th": "คะแนน"},
+    "p_value": {"en": "p-value", "th": "ค่า p"},
+    "no_target": {"en": "No target column specified.", "th": "ไม่ได้ระบุคอลัมน์เป้าหมาย"},
 }
 
 

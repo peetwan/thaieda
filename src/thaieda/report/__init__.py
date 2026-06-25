@@ -12,10 +12,12 @@ from typing import Any
 import pandas as pd
 
 from thaieda import __version__
+from thaieda.analysis import TargetAssociation, analyze_target
 from thaieda.anomaly import AnomalyIssue, detect_anomalies
 from thaieda.clean import CleaningResult, clean_thai_text
 from thaieda.detect import ColumnType, detect_all
 from thaieda.i18n import label
+from thaieda.ner import NERResult, extract_entities, ner_available
 from thaieda.quality import QualityIssue, run_quality_checks
 from thaieda.report._template import REPORT_TEMPLATE
 from thaieda.text import TextMetrics, text_metrics
@@ -44,14 +46,18 @@ class ProfileReport:
         tokenizer_engine: str = "auto",
         max_sample: int = 5000,
         make_charts: bool = True,
+        target_column: str | None = None,
     ) -> None:
         if not isinstance(df, pd.DataFrame):
             raise TypeError("ProfileReport expects a pandas DataFrame.")
+        if target_column is not None and target_column not in df.columns:
+            raise KeyError(f"target_column {target_column!r} not found in DataFrame.")
         self.df = df
         self.lang = lang
         self.tokenizer_engine = tokenizer_engine
         self.max_sample = max_sample
         self.make_charts = make_charts
+        self.target_column = target_column
 
         self._ran = False
         self._column_types: dict[str, ColumnType] = {}
@@ -59,9 +65,11 @@ class ProfileReport:
         self._anomalies: list[AnomalyIssue] = []
         self._cleaning: list[CleaningResult] = []
         self._text_metrics: dict[str, TextMetrics] = {}
+        self._ner: dict[str, NERResult] = {}
+        self._target_associations: list[TargetAssociation] = []
         self._overview: dict[str, Any] = {}
         self._charts: dict[str, dict[str, str]] = {}
-        # กราฟระดับชุดข้อมูล (correlation/box/violin/missing/distribution) จาก auto_visualize
+        # กราฟระดับชุดข้อมูล (correlation/scatter/box/violin/missing) จาก auto_select_charts
         self._dataset_charts: dict[str, str] = {}
         self._basic_stats: dict[str, dict[str, Any]] = {}
         self._notes: list[str] = []
@@ -88,6 +96,12 @@ class ProfileReport:
         # ความผิดปกติ (statistical/text/encoding/categorical) — text checks ต้องมี tokenizer
         self._anomalies = detect_anomalies(self.df, self._column_types, tokenizer)
         self._note_if_ml_skipped()
+
+        # Named entities (NER) — เฉพาะคอลัมน์ข้อความไทย และเมื่อมี NER engine ที่ใช้ได้
+        self._compute_ner(thai_cols, tokenizer)
+
+        # การวิเคราะห์ตัวแปรเป้าหมาย (target analysis) — เมื่อผู้ใช้ระบุ target_column
+        self._compute_target_analysis()
 
         # คำแนะนำการทำความสะอาด (dry-run — ไม่แก้ข้อมูลจริง)
         self._cleaning = self._compute_cleaning_suggestions()
@@ -126,16 +140,47 @@ class ProfileReport:
             )
 
     def _build_dataset_charts(self) -> None:
-        """สร้างกราฟระดับชุดข้อมูลด้วย auto_visualize (เลือกกราฟที่เหมาะกับข้อมูลให้อัตโนมัติ)."""
-        from thaieda.viz import auto_visualize, get_thai_font_path
+        """สร้างกราฟระดับชุดข้อมูลด้วย auto_select_charts (เลือกกราฟที่เหมาะกับข้อมูลให้อัตโนมัติ).
+
+        ส่ง text_columns=[] เพราะกราฟต่อคอลัมน์ข้อความ (word cloud/top tokens/length) สร้างแยกใน
+        _build_charts แล้ว — ที่นี่จึงเอาเฉพาะกราฟตัวเลข/ค่าว่าง/หมวดหมู่ (รวม scatter matrix)
+        """
+        from thaieda.viz import auto_select_charts, get_thai_font_path
 
         try:
-            self._dataset_charts = auto_visualize(
-                self.df, self._column_types, font_path=get_thai_font_path()
+            self._dataset_charts = auto_select_charts(
+                self.df, tokenizer=None, font_path=get_thai_font_path(), text_columns=[]
             )
         except Exception as exc:  # noqa: BLE001 — กราฟพังไม่ควรล้มทั้งรายงาน
             self._notes.append(f"dataset charts failed: {exc}")
             self._dataset_charts = {}
+
+    def _compute_ner(self, thai_cols: list[str], tokenizer) -> None:
+        """สกัด named entities จากคอลัมน์ข้อความไทย — ทำเฉพาะเมื่อมี NER engine ที่ใช้ได้.
+
+        ไม่บังคับ: ถ้าไม่มี backend (เช่น python-crfsuite/transformers) จะข้ามเงียบ ๆ
+        เพราะ NER เป็น optional (thaieda[ner]) ไม่ใช่ส่วนหลักของรายงาน
+        """
+        if not thai_cols or not ner_available():
+            return
+        for col in thai_cols:
+            try:
+                result = extract_entities(self.df[col], tokenizer, max_sample=self.max_sample)
+            except Exception as exc:  # noqa: BLE001 — NER พังไม่ควรล้มทั้งรายงาน
+                self._notes.append(f"NER failed for '{col}': {exc}")
+                continue
+            if result.total_entities > 0:
+                self._ner[col] = result
+
+    def _compute_target_analysis(self) -> None:
+        """วิเคราะห์ความสัมพันธ์ของทุกคอลัมน์กับ target column (ถ้าระบุ)."""
+        if self.target_column is None:
+            return
+        try:
+            self._target_associations = analyze_target(self.df, self.target_column)
+        except Exception as exc:  # noqa: BLE001 — การวิเคราะห์ target พังไม่ควรล้มทั้งรายงาน
+            self._notes.append(f"target analysis failed: {exc}")
+            self._target_associations = []
 
     def _compute_cleaning_suggestions(self) -> list[CleaningResult]:
         """ลองทำความสะอาดคอลัมน์ข้อความแบบ dry-run และเก็บเฉพาะการดำเนินการที่มีผล (>0 แถว)."""
@@ -304,6 +349,16 @@ class ProfileReport:
         self._ensure_ran()
         return self._notes
 
+    @property
+    def ner(self) -> dict[str, NERResult]:
+        self._ensure_ran()
+        return self._ner
+
+    @property
+    def target_associations(self) -> list[TargetAssociation]:
+        self._ensure_ran()
+        return self._target_associations
+
     # --------------------------------------------------------------- export
     def to_dict(self) -> dict[str, Any]:
         """ส่งออกข้อมูลแบบมีโครงสร้าง (ไม่รวมรูป base64 เพื่อให้กระชับ)."""
@@ -319,7 +374,7 @@ class ProfileReport:
                 entry["text_metrics"] = self._text_metrics[name].to_dict()
             columns[name] = entry
 
-        return {
+        result = {
             "thaieda_version": __version__,
             "overview": self._overview,
             "column_types": {k: v.value for k, v in self._column_types.items()},
@@ -329,6 +384,14 @@ class ProfileReport:
             "columns": columns,
             "notes": self._notes,
         }
+        if self._ner:
+            result["ner"] = {col: r.to_dict() for col, r in self._ner.items()}
+        if self.target_column is not None:
+            result["target_analysis"] = {
+                "target_column": self.target_column,
+                "associations": [a.to_dict() for a in self._target_associations],
+            }
+        return result
 
     def to_json(self, path: str | None = None, indent: int = 2) -> str:
         """ส่งออกเป็น JSON string (เขียนไฟล์ด้วยถ้าระบุ path)."""
@@ -382,6 +445,7 @@ class ProfileReport:
         dc = self._dataset_charts
         dist_charts = {
             "correlation_heatmap": dc.get("correlation_heatmap", ""),
+            "scatter_matrix": dc.get("scatter_matrix", ""),
             "boxplot": dc.get("boxplot", ""),
             "violinplot": dc.get("violinplot", ""),
         }
@@ -389,6 +453,22 @@ class ProfileReport:
             "missing_matrix": dc.get("missing_matrix", ""),
             "missing_heatmap": dc.get("missing_heatmap", ""),
         }
+
+        # named entities — แนบ label ของประเภทไว้ใช้ในเทมเพลต
+        ner_sections = [
+            {"column": col, "result": result.to_dict()} for col, result in self._ner.items()
+        ]
+
+        # target analysis — แนบ label ของชนิดความสัมพันธ์
+        target_section = None
+        if self.target_column is not None:
+            target_section = {
+                "target_column": self.target_column,
+                "associations": [
+                    {**a.to_dict(), "type_label": L(f"assoc_{a.association_type}")}
+                    for a in self._target_associations
+                ],
+            }
 
         context = {
             "lang": lang,
@@ -405,6 +485,8 @@ class ProfileReport:
             "has_dist_charts": any(dist_charts.values()),
             "missing_charts": missing_charts,
             "has_missing_charts": any(missing_charts.values()),
+            "ner_sections": ner_sections,
+            "target_section": target_section,
         }
         return template.render(**context)
 
@@ -437,6 +519,7 @@ class ProfileReport:
             "metrics": metrics.to_dict() if metrics is not None else None,
             "charts": self._charts.get(name, {}),
             "dist_chart": self._dataset_charts.get(f"distribution::{name}", ""),
+            "valuecounts_chart": self._dataset_charts.get(f"valuecounts::{name}", ""),
             "basic_stats": basic_pairs,
             "top_values": stats.get("top_values"),
         }
@@ -447,10 +530,18 @@ def profile(
     lang: str = "th",
     tokenizer_engine: str = "auto",
     make_charts: bool = True,
+    target_column: str | None = None,
 ) -> ProfileReport:
-    """สร้าง ProfileReport และรันการวิเคราะห์ทันที — ฟังก์ชันอำนวยความสะดวกหลัก."""
+    """สร้าง ProfileReport และรันการวิเคราะห์ทันที — ฟังก์ชันอำนวยความสะดวกหลัก.
+
+    ระบุ target_column เพื่อเพิ่มส่วน "การวิเคราะห์ตัวแปรเป้าหมาย" (ความสัมพันธ์ของทุกคอลัมน์กับเป้าหมาย)
+    """
     report = ProfileReport(
-        df, lang=lang, tokenizer_engine=tokenizer_engine, make_charts=make_charts
+        df,
+        lang=lang,
+        tokenizer_engine=tokenizer_engine,
+        make_charts=make_charts,
+        target_column=target_column,
     )
     report.run()
     return report

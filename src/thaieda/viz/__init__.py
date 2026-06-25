@@ -538,6 +538,88 @@ def create_missing_heatmap(df: pd.DataFrame, font_path: str | None = None) -> st
     return _fig_to_base64(fig)
 
 
+# จำนวนคอลัมน์ตัวเลขสูงสุดที่นำมาวาด scatter matrix (เกินนี้กราฟอ่านไม่ออก)
+_MAX_SCATTER_COLS = 5
+
+
+def create_scatter_matrix(df: pd.DataFrame, font_path: str | None = None) -> str:
+    """scatter matrix (pairwise) ของคอลัมน์ตัวเลข — เส้นทแยงเป็นฮิสโทแกรม คืนค่าเป็น base64 PNG.
+
+    คืนสตริงว่างถ้ามีคอลัมน์ตัวเลขน้อยกว่า 2 คอลัมน์ หรือไม่มีแถวที่ครบทุกคอลัมน์
+    จำกัดที่ 5 คอลัมน์แรก (_MAX_SCATTER_COLS) เพื่อให้กราฟยังอ่านได้
+    """
+    setup_matplotlib_thai_font()
+    prop = _font_prop(font_path)
+    numeric = _numeric_frame(df)
+    if numeric.shape[1] < 2:
+        return ""
+
+    cols = list(numeric.columns)[:_MAX_SCATTER_COLS]
+    data = numeric[cols].dropna()
+    if len(data) < 2:
+        return ""
+    n = len(cols)
+    labels = _wrap_labels([str(c) for c in cols])
+
+    fig, axes = plt.subplots(
+        n, n, figsize=(2.2 * n + 1, 2.2 * n + 1), facecolor=_DARK_BG, squeeze=False
+    )
+    for i in range(n):
+        for j in range(n):
+            ax = axes[i][j]
+            ax.set_facecolor(_DARK_BG)
+            if i == j:
+                ax.hist(data[cols[i]].to_numpy(dtype="float64"), bins=20, color=_ACCENT, alpha=0.85)
+            else:
+                ax.scatter(
+                    data[cols[j]].to_numpy(dtype="float64"),
+                    data[cols[i]].to_numpy(dtype="float64"),
+                    s=8,
+                    color=_ACCENT,
+                    alpha=0.5,
+                    edgecolors="none",
+                )
+            _style_dark_axes(ax)
+            ax.tick_params(labelsize=7)
+            if i == n - 1:
+                ax.set_xlabel(labels[j], color=_DARK_FG, fontproperties=prop, fontsize=9)
+            if j == 0:
+                ax.set_ylabel(labels[i], color=_DARK_FG, fontproperties=prop, fontsize=9)
+    fig.suptitle("Scatter matrix", color=_DARK_FG, fontproperties=prop, fontsize=12)
+    return _fig_to_base64(fig)
+
+
+def create_category_bar(
+    series: pd.Series, title: str = "", font_path: str | None = None, top_n: int = 20
+) -> str:
+    """กราฟแท่งแนวนอนของความถี่ค่าหมวดหมู่ (value counts) คืนค่าเป็น base64 PNG.
+
+    คืนสตริงว่างถ้าคอลัมน์ไม่มีค่าที่ไม่ว่าง
+    """
+    setup_matplotlib_thai_font()
+    prop = _font_prop(font_path)
+    non_null = series.dropna().astype(str)
+    if non_null.empty:
+        return ""
+    vc = non_null.value_counts().head(top_n)
+    if vc.empty:
+        return ""
+
+    cats = [str(k) for k in vc.index][::-1]
+    counts = [int(v) for v in vc.to_numpy()][::-1]
+    fig, ax = plt.subplots(figsize=(7, max(3.0, 0.35 * len(cats) + 1)), facecolor=_DARK_BG)
+    ax.set_facecolor(_DARK_BG)
+    positions = range(len(cats))
+    ax.barh(list(positions), counts, color=_ACCENT, alpha=0.9)
+    ax.set_yticks(list(positions))
+    ax.set_yticklabels(_wrap_labels(cats, limit=24), fontproperties=prop, color=_DARK_FG)
+    if title:
+        ax.set_title(title, color=_DARK_FG, fontproperties=prop, fontsize=12)
+    ax.set_xlabel("count", color=_DARK_FG, fontproperties=prop)
+    _style_dark_axes(ax)
+    return _fig_to_base64(fig)
+
+
 # ประเภทคอลัมน์ที่ถือเป็นข้อความ (ใช้สร้างฮิสโทแกรมความยาว) — เก็บเป็น string เทียบกับ ColumnType.value
 _TEXTUAL_TYPE_VALUES = {"thai_text", "english_text", "mixed_text"}
 
@@ -606,6 +688,117 @@ def auto_visualize(
     return charts
 
 
+def _top_tokens_from_series(series: pd.Series, tokenizer: Tokenizer, top_n: int = 20):
+    """นับคำที่พบบ่อยจากคอลัมน์ข้อความ (ตัดคำด้วย tokenizer, ทิ้ง token ที่เป็นเครื่องหมายล้วน)."""
+    from collections import Counter
+
+    counter: Counter[str] = Counter()
+    for value in series.head(2000):
+        for tok in tokenizer.tokenize(value):
+            t = tok.strip()
+            if t and any(c.isalnum() for c in t):
+                counter[t] += 1
+    return counter.most_common(top_n)
+
+
+def auto_select_charts(
+    df: pd.DataFrame,
+    tokenizer: Tokenizer | None = None,
+    font_path: str | None = None,
+    text_columns: list[str] | None = None,
+) -> dict[str, str]:
+    """เลือก chart type อัตโนมัติตามชนิดข้อมูล — คืน dict {ชื่อกราฟ: base64 PNG}.
+
+    ตรรกะการเลือก:
+      - ตัวเลข × ตัวเลข (>=2 คอลัมน์) : correlation heatmap + scatter matrix
+      - การแจกแจงตัวเลข (>=1 คอลัมน์)  : box plot + violin plot + ฮิสโทแกรมต่อคอลัมน์
+      - มีค่าว่าง                      : missing matrix (+ missing heatmap ถ้าหลายคอลัมน์)
+      - คอลัมน์ข้อความ                 : ฮิสโทแกรมความยาว + (ถ้ามี tokenizer) top tokens + word cloud
+      - คอลัมน์หมวดหมู่                : กราฟแท่งความถี่ค่า (value counts)
+
+    text_columns: ถ้าไม่ระบุ จะตรวจหาคอลัมน์ข้อความเองด้วยโมดูล detect
+    กราฟใดที่สร้างไม่ได้ (ข้อมูลไม่พอ) จะถูกข้าม ไม่ใส่ใน dict
+    """
+    from thaieda.detect import ColumnType, detect_all
+
+    if font_path is None:
+        font_path = get_thai_font_path()
+
+    types = detect_all(df)
+    charts: dict[str, str] = {}
+    numeric = _numeric_frame(df)
+
+    # --- ตัวเลข × ตัวเลข ---
+    if numeric.shape[1] >= 2:
+        for name, fn in (
+            ("correlation_heatmap", create_correlation_heatmap),
+            ("scatter_matrix", create_scatter_matrix),
+        ):
+            img = fn(df, font_path=font_path)
+            if img:
+                charts[name] = img
+
+    # --- การแจกแจงตัวเลข ---
+    if numeric.shape[1] >= 1:
+        for name, fn in (("boxplot", create_boxplot), ("violinplot", create_violinplot)):
+            img = fn(df, font_path=font_path)
+            if img:
+                charts[name] = img
+        for col in numeric.columns:
+            img = create_distribution_histogram(df[col], title=str(col), font_path=font_path)
+            if img:
+                charts[f"distribution::{col}"] = img
+
+    # --- ค่าว่าง ---
+    if int(df.isna().sum().sum()) > 0:
+        img = create_missing_matrix(df, font_path=font_path)
+        if img:
+            charts["missing_matrix"] = img
+        cols_with_missing = [c for c in df.columns if int(df[c].isna().sum()) > 0]
+        if len(cols_with_missing) > 1:
+            img = create_missing_heatmap(df, font_path=font_path)
+            if img:
+                charts["missing_heatmap"] = img
+
+    # --- คอลัมน์ข้อความ ---
+    text_types = {ColumnType.THAI_TEXT, ColumnType.MIXED_TEXT, ColumnType.ENGLISH_TEXT}
+    if text_columns is None:
+        text_columns = [str(c) for c in df.columns if types.get(str(c)) in text_types]
+    for col in text_columns:
+        if col not in df.columns:
+            continue
+        non_null = df[col].dropna().astype(str)
+        if non_null.empty:
+            continue
+        lengths = [len(s) for s in non_null]
+        if lengths:
+            img = create_length_histogram(lengths, title=str(col), font_path=font_path)
+            if img:
+                charts[f"length_hist::{col}"] = img
+        if tokenizer is not None:
+            top = _top_tokens_from_series(non_null, tokenizer)
+            if top:
+                charts[f"top_tokens::{col}"] = create_top_tokens_chart(top, font_path=font_path)
+            try:
+                joined = " ".join(non_null.head(2000))
+                if joined.strip():
+                    charts[f"wordcloud::{col}"] = create_wordcloud(
+                        joined, tokenizer, font_path=font_path
+                    )
+            except ImportError:
+                # ไม่มี wordcloud (optional extra) — ข้ามเงียบ ๆ
+                pass
+
+    # --- คอลัมน์หมวดหมู่ ---
+    for col in df.columns:
+        if types.get(str(col)) in (ColumnType.CATEGORICAL, ColumnType.ID):
+            img = create_category_bar(df[col], title=str(col), font_path=font_path)
+            if img:
+                charts[f"valuecounts::{col}"] = img
+
+    return charts
+
+
 __all__ = [
     "get_thai_font_path",
     "setup_matplotlib_thai_font",
@@ -618,5 +811,8 @@ __all__ = [
     "create_distribution_histogram",
     "create_missing_matrix",
     "create_missing_heatmap",
+    "create_scatter_matrix",
+    "create_category_bar",
     "auto_visualize",
+    "auto_select_charts",
 ]

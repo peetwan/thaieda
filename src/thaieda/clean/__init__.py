@@ -269,6 +269,128 @@ def fix_tone_mark_stacking(series: pd.Series) -> tuple[pd.Series, CleaningResult
 
 
 # ----------------------------------------------------------------------------
+# การทำความสะอาดที่ใช้ pythainlp (optional dependency [thai])
+# ----------------------------------------------------------------------------
+_PYTHAINLP_INSTALL_HINT = (
+    "ต้องติดตั้ง pip install thaieda[thai] (แพ็กเกจ 'pythainlp') ก่อนใช้งานฟังก์ชันนี้"
+)
+
+
+def _pythainlp_available() -> bool:
+    """ตรวจว่าติดตั้ง pythainlp ไหม โดยไม่ import เนื้อหนัก ๆ (ใช้ตัดสินใจ skip ใน default pipeline)."""
+    import importlib.util
+
+    return importlib.util.find_spec("pythainlp") is not None
+
+
+def pythainlp_normalize(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
+    """Normalize ข้อความไทยด้วย pythainlp.util.normalize().
+
+    normalize() ของ pythainlp รวมหลายกฎการจัดระเบียบไว้ในขั้นตอนเดียว:
+      * remove_zw — ลบ zero-width spaces
+      * remove_dup_spaces — ยุบช่องว่างซ้ำ
+      * remove_spaces_before_marks — ลบช่องว่างหน้าวรรณยุกต์/สระ
+      * remove_repeat_vowels — ลบสระ/เครื่องหมายที่ซ้ำ (เช่น 'นานาาา' → 'นานา')
+      * remove_dangling — ลบอักขระลอยที่ขึ้นต้นผิด (เช่น 'เเปลก' → 'แปลก')
+
+    เหมาะกับการจัดข้อความไทยให้เป็นรูปสะกดมาตรฐานในขั้นตอนเดียว (เสริม/แทนการเรียกทีละกฎ)
+
+    Raises:
+        ImportError: ถ้าไม่ได้ติดตั้ง pythainlp (ติดตั้งผ่าน thaieda[thai]).
+    """
+    try:
+        from pythainlp.util import normalize  # lazy import — optional dependency [thai]
+    except ImportError as exc:
+        raise ImportError(f"pythainlp_normalize {_PYTHAINLP_INSTALL_HINT}.") from exc
+
+    return _apply_str_transform(
+        series,
+        normalize,
+        operation="pythainlp_normalize",
+        description_th="จัดระเบียบข้อความไทยด้วย pythainlp.normalize (ลบ zw/ช่องว่างซ้ำ/สระซ้ำ ฯลฯ)",
+    )
+
+
+# จำนวน token ที่เป็นคำไทยจริงขั้นต่ำ และสัดส่วนขั้นต่ำ เพื่อยอมรับการแก้ keyboard layout
+# (กัน false positive: ข้อความอังกฤษจริงที่แปลงแล้วได้คำไทยมั่ว ๆ)
+_KEYBOARD_MIN_KNOWN = 1
+_KEYBOARD_MIN_RATIO = 0.67
+_KEYBOARD_MIN_THAI_CHARS = 3
+
+# แคช dictionary คำไทย (โหลดครั้งเดียว) — None = ยังไม่โหลด
+_THAI_WORDS_CACHE: frozenset[str] | None = None
+
+
+def _thai_words() -> frozenset[str]:
+    """คืนชุดคำไทยจาก pythainlp (แคชไว้) — ใช้ตรวจว่าผลการแก้ layout เป็นคำจริงไหม."""
+    global _THAI_WORDS_CACHE
+    if _THAI_WORDS_CACHE is None:
+        from pythainlp.corpus.common import thai_words
+
+        _THAI_WORDS_CACHE = frozenset(thai_words())
+    return _THAI_WORDS_CACHE
+
+
+def _count_thai_chars(text: str) -> int:
+    """นับจำนวนอักขระไทย (ช่วง U+0E00–U+0E7F) ในข้อความ."""
+    return sum(1 for ch in text if "฀" <= ch <= "๿")
+
+
+def _make_keyboard_fixer() -> Callable[[str], str]:
+    """สร้างฟังก์ชันแก้ keyboard layout (eng_to_thai) แบบระมัดระวัง — โหลด pythainlp ครั้งเดียว.
+
+    หลักการตัดสิน: แปลง Latin → Thai ด้วย eng_to_thai แล้ว "ยอมรับ" ก็ต่อเมื่อ
+    ผลลัพธ์ตัดคำแล้วเป็นคำไทยจริง (อยู่ใน dictionary) เป็นสัดส่วนสูงพอ — เพื่อกัน
+    การแปลงข้อความอังกฤษจริง (เช่น 'hello') เป็นภาษาไทยมั่ว ๆ
+    """
+    from pythainlp.tokenize import word_tokenize
+    from pythainlp.util import eng_to_thai
+
+    thai_words = _thai_words()
+
+    def fix(text: str) -> str:
+        letters = [c for c in text if c.isalpha()]
+        # ต้องมีตัวอักษร และต้องเป็น ASCII ล้วน (ผู้พิมพ์ลืมสลับเป็นแป้นไทย)
+        if not letters or any(ord(c) > 127 for c in letters):
+            return text
+        converted = eng_to_thai(text)
+        if _count_thai_chars(converted) < _KEYBOARD_MIN_THAI_CHARS:
+            return text
+        tokens = [t for t in word_tokenize(converted) if t.strip()]
+        if not tokens:
+            return text
+        known = sum(1 for t in tokens if t in thai_words)
+        if known >= _KEYBOARD_MIN_KNOWN and (known / len(tokens)) >= _KEYBOARD_MIN_RATIO:
+            return converted
+        return text
+
+    return fix
+
+
+def fix_keyboard_layout(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
+    """ตรวจและแก้การพิมพ์ผิด keyboard layout — พิมพ์อังกฤษทั้งที่ตั้งใจพิมพ์ไทย.
+
+    เช่น พิมพ์ 'l;ylfu' (ลืมสลับแป้น) แทน 'สวัสดี' — ฟังก์ชันนี้จะแปลงกลับด้วย
+    pythainlp.util.eng_to_thai เฉพาะเซลล์ที่แปลงแล้วได้ "คำไทยจริง" เท่านั้น
+    (ข้อความอังกฤษจริงจะไม่ถูกแตะต้อง)
+
+    Raises:
+        ImportError: ถ้าไม่ได้ติดตั้ง pythainlp (ติดตั้งผ่าน thaieda[thai]).
+    """
+    try:
+        fixer = _make_keyboard_fixer()
+    except ImportError as exc:
+        raise ImportError(f"fix_keyboard_layout {_PYTHAINLP_INSTALL_HINT}.") from exc
+
+    return _apply_str_transform(
+        series,
+        fixer,
+        operation="fix_keyboard_layout",
+        description_th="แก้การพิมพ์ผิด keyboard layout (พิมพ์อังกฤษทั้งที่ตั้งใจพิมพ์ไทย เช่น 'l;ylfu' → 'สวัสดี')",
+    )
+
+
+# ----------------------------------------------------------------------------
 # ตัวประกอบหลายการดำเนินการ
 # ----------------------------------------------------------------------------
 # ทะเบียนชื่อ operation -> ฟังก์ชัน (เรียงตามลำดับการทำงานที่ปลอดภัย)
@@ -280,9 +402,15 @@ _OPERATIONS: dict[str, Callable[[pd.Series], tuple[pd.Series, CleaningResult]]] 
     "tonemarks": fix_tone_mark_stacking,
     "repeat": fix_repeated_chars,
     "numerals": normalize_thai_numerals,
+    "pythainlp_normalize": pythainlp_normalize,
+    "keyboard_layout": fix_keyboard_layout,
 }
 
+# การดำเนินการที่ต้องใช้ pythainlp (ติดตั้งผ่าน thaieda[thai]) — ใช้ตัดสินใจ skip ใน default pipeline
+_PYTHAINLP_OPERATIONS = frozenset({"pythainlp_normalize", "keyboard_layout"})
+
 # ลำดับการทำความสะอาดเริ่มต้น (ทั้งหมด): แก้ encoding ก่อน แล้วค่อยลบ/ยุบ/normalize
+# จบด้วยขั้นตอนที่ใช้ pythainlp (normalize + แก้ keyboard layout) ถ้าติดตั้งไว้
 DEFAULT_OPERATIONS: tuple[str, ...] = (
     "encoding",
     "zwspace",
@@ -291,6 +419,8 @@ DEFAULT_OPERATIONS: tuple[str, ...] = (
     "tonemarks",
     "repeat",
     "numerals",
+    "pythainlp_normalize",
+    "keyboard_layout",
 )
 
 
@@ -308,13 +438,19 @@ def clean_thai_text(
     Raises:
         ValueError: เมื่อระบุชื่อ operation ที่ไม่รู้จัก.
     """
+    # ติดตามว่า op ใด "ถูกเพิ่มอัตโนมัติ" (จาก default/all) เทียบกับ "ผู้ใช้ระบุเอง"
+    # op ที่ใช้ pythainlp และถูกเพิ่มอัตโนมัติจะถูก skip เงียบ ๆ ถ้าไม่ได้ติดตั้ง pythainlp
+    # แต่ถ้าผู้ใช้ระบุเอง จะปล่อยให้ฟังก์ชัน fail loudly (ตามหลักการ no silent fallback)
+    op_names: list[str] = []
+    auto_added: set[str] = set()
     if operations is None:
-        op_names: list[str] = list(DEFAULT_OPERATIONS)
+        op_names = list(DEFAULT_OPERATIONS)
+        auto_added = set(DEFAULT_OPERATIONS)
     else:
-        op_names = []
         for name in operations:
             if name == "all":
                 op_names.extend(DEFAULT_OPERATIONS)
+                auto_added.update(DEFAULT_OPERATIONS)
             else:
                 op_names.append(name)
 
@@ -324,6 +460,10 @@ def clean_thai_text(
             f"Unknown cleaning operation(s): {', '.join(unknown)}. "
             f"Available: {', '.join(_OPERATIONS)}, all."
         )
+
+    # default/all pipeline: ถ้าไม่มี pythainlp ให้ข้ามขั้นตอนที่ต้องใช้มัน (degrade อย่างสุภาพ)
+    if auto_added & _PYTHAINLP_OPERATIONS and not _pythainlp_available():
+        op_names = [n for n in op_names if not (n in _PYTHAINLP_OPERATIONS and n in auto_added)]
 
     current = series
     results: list[CleaningResult] = []
@@ -347,6 +487,8 @@ __all__ = [
     "normalize_unicode",
     "fix_repeated_chars",
     "fix_tone_mark_stacking",
+    "pythainlp_normalize",
+    "fix_keyboard_layout",
     "clean_thai_text",
     "available_operations",
     "DEFAULT_OPERATIONS",
