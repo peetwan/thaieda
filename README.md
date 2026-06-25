@@ -33,11 +33,7 @@ result = thaieda.run(df)          # that's it — full EDA in one line
 result.to_html("report.html")     # self-contained HTML report
 ```
 
-Want everything (Thai tokenizer, NER, ML, Excel, stats, LLM)?
-
-```bash
-pip install "thaieda[all]"
-```
+`pip install thaieda` ติดตั้งทุกอย่างเลย — Thai tokenizer, NER, ML, Excel, stats, encoding detection ไม่ต้องใส่ extras
 
 ---
 
@@ -180,27 +176,21 @@ for card in result.cards:
 ## Installation
 
 ```bash
-# Basic — works immediately
+# ติดตั้งทุกอย่างในคำสั่งเดียว
 pip install thaieda
-
-# Everything in one command
-pip install "thaieda[all]"
-
-# Or pick what you need
-pip install "thaieda[thai]"        # Thai tokenizer
-pip install "thaieda[ner]"         # Thai NER
-pip install "thaieda[ml]"          # ML anomaly detection
-pip install "thaieda[timeseries]"  # STL decomposition
-pip install "thaieda[excel]"       # Excel support
-pip install "thaieda[stats]"       # p-values (scipy)
-
-# LLM providers (all optional, lazy-imported)
-pip install openai                 # OpenAI GPT
-pip install anthropic              # Anthropic Claude
-pip install ollama                 # Ollama local LLM
 ```
 
-**Requirements:** Python 3.10+, pandas, numpy, matplotlib, Jinja2
+ไม่ต้องใส่ extras — `pip install thaieda` ติดตั้งทั้งหมดเลย: Thai tokenizer, NER, ML anomaly detection, timeseries, Excel, stats, encoding detection
+
+LLM providers ยังเป็น optional (lazy-imported — ไม่ต้องติดตั้งถ้าไม่ใช้):
+
+```bash
+pip install openai       # OpenAI GPT
+pip install anthropic    # Anthropic Claude
+pip install ollama       # Ollama local LLM (หรือใช้ HTTP fallback ไม่ต้องติดตั้ง)
+```
+
+**Requirements:** Python 3.10+
 
 ---
 
