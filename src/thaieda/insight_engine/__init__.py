@@ -257,7 +257,7 @@ def _benjamini_hochberg(pvals: list[float], alpha: float) -> list[bool]:
 # ----------------------------------------------------------------------------
 # helper: เตรียม breakdown key (normalize หมวดหมู่ / bucket datetime)
 # ----------------------------------------------------------------------------
-@dataclass
+@dataclass(frozen=True)
 class _Breakdown:
     """ข้อมูล breakdown candidate หนึ่งตัว."""
 

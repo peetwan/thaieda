@@ -5,7 +5,7 @@
 [![PyPI](https://img.shields.io/pypi/v/thaieda.svg)](https://pypi.org/project/thaieda/)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-yellow.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Tests: 577 passed](https://img.shields.io/badge/tests-577%20passed-brightgreen.svg)]()
+[![Tests: 612 passed](https://img.shields.io/badge/tests-612%20passed-brightgreen.svg)]()
 [![Code Style: ruff](https://img.shields.io/badge/code%20style-ruff-261230.svg)](https://docs.astral.sh/ruff/)
 
 ---
@@ -84,6 +84,12 @@ EDAResult
   .anomalies        → anomaly findings
   .llm_response     → LLM analysis (if enabled)
   ._repr_html_()    → Jupyter rich display
+
+run_folder("data/")  → FolderResult
+  .to_html("dir/")      → individual HTML per file
+  .to_master_html()     → single master HTML with sidebar
+  .summary()            → text summary
+  ._repr_html_()        → Jupyter rich display
 ```
 
 ---
@@ -109,6 +115,38 @@ print(result.insights)
 # In Jupyter: just display the result
 result  # renders HTML report inline
 ```
+
+### Folder Mode — Analyze Every File at Once
+
+```python
+import thaieda
+
+# One line — analyzes every CSV/Excel/JSON in the folder
+results = thaieda.run_folder("data/")
+
+# Print summary
+print(results.summary())
+# ThaiEDA FolderResult — data/
+#   Files: 5 (✅ 5 / ❌ 0)
+#   ✅ customers.csv — 10,000 rows × 8 cols, 15 insights
+#   ✅ orders.csv    — 50,000 rows × 12 cols, 28 insights
+#   ...
+
+# Save individual HTML reports
+results.to_html("reports/")
+
+# Generate a single master HTML with sidebar navigation
+results.to_master_html("master-report.html")
+```
+
+**`run_folder()` features:**
+- Auto-scans for CSV, Excel (.xlsx/.xls), JSON, JSONL, TSV
+- `recursive=True` to include subfolders
+- `output_dir=` to specify where HTML goes
+- Error isolation — one broken file doesn't crash the rest
+- `progress=` callback for progress tracking
+- All `run()` kwargs supported (`lang`, `clean`, `llm`, etc.)
+- **`to_master_html()`** — combines all reports into one page with sidebar nav + summary table
 
 ### With LLM Analysis (Privacy-Safe)
 
@@ -250,6 +288,7 @@ pip install ollama       # Ollama local LLM (หรือใช้ HTTP fallback
 | Module | What It Does |
 |--------|-------------|
 | `run()` / `EDA()` | One-liner API — full pipeline in one call |
+| `run_folder()` | Analyze every CSV/Excel/JSON in a folder + master HTML |
 | `compare()` | Side-by-side dataset comparison with drift detection |
 | `io/` | Auto-read CSV/JSON/JSONL/Excel + encoding detection |
 | `detect/` | Column type detection + Thai month names + address parsing |
@@ -269,10 +308,11 @@ pip install ollama       # Ollama local LLM (หรือใช้ HTTP fallback
 ## Testing
 
 ```bash
-pytest tests/ -v                    # all tests (577 passed)
+pytest tests/ -v                    # all tests (612 passed)
 pytest tests/test_thai_id.py        # ID card validation
 pytest tests/test_thai_address.py   # address parsing
 pytest tests/test_compare.py        # dataset comparison
+pytest tests/test_run_folder.py     # folder mode + master HTML
 pytest tests/test_llm.py            # LLM + privacy modes
 ruff check src/ tests/              # lint
 ruff format src/ tests/             # format
