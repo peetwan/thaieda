@@ -3,7 +3,7 @@
 Exploratory data analysis that speaks Thai.
 """
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 __all__ = [
     "profile",
     "ProfileReport",
@@ -20,6 +20,12 @@ __all__ = [
     "read_data",
     "detect_encoding",
     "detect_format",
+    "profile_dataset",
+    "DatasetProfile",
+    "Relationship",
+    "KeyCandidate",
+    "TableProfile",
+    "DatasetReport",
     "__version__",
 ]
 
@@ -60,4 +66,18 @@ def __getattr__(name: str):
         import thaieda.io as _io
 
         return getattr(_io, name)
+    if name in (
+        "profile_dataset",
+        "DatasetProfile",
+        "Relationship",
+        "KeyCandidate",
+        "TableProfile",
+    ):
+        import thaieda.schema as _schema
+
+        return getattr(_schema, name)
+    if name == "DatasetReport":
+        from thaieda.report._dataset import DatasetReport
+
+        return DatasetReport
     raise AttributeError(f"module 'thaieda' has no attribute {name!r}")
