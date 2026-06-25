@@ -58,3 +58,4 @@ data-example/
 
 # Git worktrees ภายใน (สำหรับงาน agent)
 _worktrees/.env
+_worktrees/
