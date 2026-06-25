@@ -1,0 +1,60 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+wheels/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# OS
+Thumbs.db
+desktop.ini
+
+# Secrets — ห้าม commit เด็ดขาด
+.env
+.env.*
+*.pem
+*.key
+secret*
+credentials*
+
+# Generated reports (output จากการรัน)
+*.thaieda.html
+*.cleaned.csv
+reports_output/
+
+# Test/example data — ห้าม commit (ไฟล์ใหญ่ ใช้ทดสอบเท่านั้น)
+data-example/
+
+# Git worktrees ภายใน (สำหรับงาน agent)
+_worktrees/

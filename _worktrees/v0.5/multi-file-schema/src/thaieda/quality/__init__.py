@@ -13,7 +13,6 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 from thaieda.detect import ColumnType, script_ratio
-from thaieda.quality._thai_id import validate_thai_id, validate_thai_id_column
 
 # ----------------------------------------------------------------------------
 # ค่าคงที่
@@ -103,55 +102,31 @@ def _visible_repr(text: str) -> str:
 # (a) Buddhist Era detection
 # ----------------------------------------------------------------------------
 def check_buddhist_era(series: pd.Series, column: str) -> QualityIssue | None:
-    """ตรวจหาเลขปี พ.ศ. (2440–2599) ที่อาจปนกับ ค.ศ. ในคอลัมน์ตัวเลข/วันที่ — v0.8 vectorized."""
+    """ตรวจหาเลขปี พ.ศ. (2440–2599) ที่อาจปนกับ ค.ศ. ในคอลัมน์ตัวเลข/วันที่."""
     values = _non_null_str(series)
     if len(values) == 0:
         return None
 
     be_examples: list[str] = []
     ce_seen = False
+    be_count = 0
     year_re = re.compile(r"\b(\d{4})\b")
 
-    # v0.8: vectorize — ใช้ .str.extractall แทนการวนลูป
-    try:
-        # แปลงเป็น string Series แล้ว extractall
-        s = pd.Series(values)
-        extracted = s.str.extractall(year_re)
-        if extracted.empty:
-            return None
-        years = pd.to_numeric(extracted[0], errors="coerce").dropna()
-        be_match_mask = (years >= _BE_MIN) & (years <= _BE_MAX)
-        ce_match_mask = (years >= 1900) & (years <= 2100)
-        ce_seen = bool(ce_match_mask.any())
-        if not be_match_mask.any():
-            return None
-        # นับ "rows ที่มี พ.ศ. อย่างน้อย 1 ค่า" ไม่ใช่ "จำนวน match" — กัน percentage >100%
-        be_year_vals = years[be_match_mask].unique()
-        be_rows_mask = s.apply(lambda v: any(str(int(y)) in v for y in be_year_vals))
-        be_count = int(be_rows_mask.sum())
-        if be_count == 0:
-            return None
-        # หา examples — ดึง rows ที่มี พ.ศ.
-        for v in values:
-            if any(str(int(y)) in v for y in be_year_vals[:5]) and len(be_examples) < 5:
+    for v in values:
+        found_be = False
+        for m in year_re.finditer(v):
+            year = int(m.group(1))
+            if _BE_MIN <= year <= _BE_MAX:
+                found_be = True
+            elif 1900 <= year <= 2100:
+                ce_seen = True
+        if found_be:
+            be_count += 1
+            if len(be_examples) < 5:
                 be_examples.append(v)
-    except Exception:  # noqa: BLE001 — fallback ถ้า extractall พัง
-        # วิธีเดิม (row-by-row) เป็น fallback
-        be_count = 0
-        for v in values:
-            found_be = False
-            for m in year_re.finditer(v):
-                year = int(m.group(1))
-                if _BE_MIN <= year <= _BE_MAX:
-                    found_be = True
-                elif 1900 <= year <= 2100:
-                    ce_seen = True
-            if found_be:
-                be_count += 1
-                if len(be_examples) < 5:
-                    be_examples.append(v)
-        if be_count == 0:
-            return None
+
+    if be_count == 0:
+        return None
 
     total = len(values)
     # critical ถ้าปนกัน (ทั้ง พ.ศ. และ ค.ศ.), warning ถ้าเป็น พ.ศ. ล้วน
@@ -525,96 +500,8 @@ def run_quality_checks(df: pd.DataFrame, column_types: dict[str, ColumnType]) ->
             if (issue := check_script_composition(series, col_name, expected_thai)) is not None:
                 issues.append(issue)
 
-        # v0.8: placeholder/dash แทน NaN
-        if (ctype in _TEXT_TYPES or series.dtype == object) and (
-            issue := check_placeholder_values(series, col_name)
-        ) is not None:
-            issues.append(issue)
-
-        # v0.8: constant column (zero variance) — flag เพื่อให้ user รู้ว่าไม่มีประโยชน์
-        if (issue := check_constant_column(series, col_name)) is not None:
-            issues.append(issue)
-
     issues.sort(key=lambda i: (SEVERITY_ORDER.get(i.severity, 99), -i.percentage))
     return issues
-
-
-# ------------------------------------------------------------------------------
-# v0.8: placeholder/dash แทน NaN + constant column
-# ------------------------------------------------------------------------------
-_PLACEHOLDER_SET = frozenset(
-    {
-        "-",
-        "--",
-        "---",
-        "na",
-        "n/a",
-        "N/A",
-        "NA",
-        "null",
-        "NULL",
-        "None",
-        "none",
-        "nan",
-        "NaN",
-        "ไม่ระบุ",
-        "ไม่มี",
-        "?",
-        "ไม่ทราบ",
-    }
-)
-
-
-def check_placeholder_values(series: pd.Series, column: str) -> QualityIssue | None:
-    """ตรวจหาค่าที่ใช้แทน NaN ('-', 'N/A', 'ไม่มี') ในคอลัมน์ — v0.8."""
-    values = _non_null_str(series)
-    if len(values) == 0:
-        return None
-    # vectorized: ใช้ .isin()
-    s = pd.Series(values)
-    placeholder_mask = s.str.strip().isin(_PLACEHOLDER_SET)
-    count = int(placeholder_mask.sum())
-    if count == 0:
-        return None
-    examples = s[placeholder_mask].unique()[:5].tolist()
-    total = len(values)
-    return QualityIssue(
-        column=column,
-        check_name="placeholder_values",
-        severity="warning",
-        count=count,
-        percentage=round(count / total * 100.0, 1) if total else 0.0,
-        description=f"Found {count} placeholder values ('-', 'N/A', 'ไม่มี') that should be NaN",
-        description_th=f"พบ {count} ค่าที่ใช้แทน NaN ('-', 'N/A', 'ไม่มี') — ควรแปลงเป็น NaN",
-        examples=examples,
-        suggestion="Replace placeholder values with NaN before analysis",
-        suggestion_th=(
-            "แทนที่ค่า placeholder ด้วย NaN ก่อนวิเคราะห์ (ใช้ coerce_numeric_column หรือ replace)"
-        ),
-    )
-
-
-def check_constant_column(series: pd.Series, column: str) -> QualityIssue | None:
-    """ตรวจหาคอลัมน์ที่ค่าเดียวทั้งหมด (zero variance) — v0.8."""
-    non_null = series.dropna()
-    if len(non_null) == 0:
-        return None
-    nunique = int(non_null.nunique())
-    if nunique > 1:
-        return None
-    val = non_null.iloc[0]
-    return QualityIssue(
-        column=column,
-        check_name="constant_column",
-        severity="info",
-        count=len(non_null),
-        percentage=100.0,
-        description=f"Column has only one unique value: {val!r} — no information for analysis",
-        description_th=f"คอลัมน์มีค่าเดียวคือ {val!r} — ไม่มีประโยชน์สำหรับการวิเคราะห์",
-        examples=[str(val)],
-        suggestion="Consider dropping this column — it has no variance",
-        suggestion_th="พิจารณาลบคอลัมน์นี้ — ไม่มีความแปรปรวน",
-    )
 
 
 def normalize_thai_digits(text: str) -> str:
@@ -622,27 +509,14 @@ def normalize_thai_digits(text: str) -> str:
     return text.translate(_THAI_TO_ARABIC)
 
 
-from thaieda.quality._score import (  # noqa: E402 — import หลัง QualityIssue เพื่อเลี่ยง circular import
-    QualityBreakdown,
-    QualityScoreResult,
-    compute_quality_score,
-)
-
 __all__ = [
     "QualityIssue",
-    "QualityBreakdown",
-    "QualityScoreResult",
     "check_buddhist_era",
     "check_thai_numerals",
     "check_zero_width",
     "check_script_composition",
     "check_normalization",
     "check_whitespace",
-    "check_placeholder_values",
-    "check_constant_column",
     "run_quality_checks",
     "normalize_thai_digits",
-    "compute_quality_score",
-    "validate_thai_id",
-    "validate_thai_id_column",
 ]

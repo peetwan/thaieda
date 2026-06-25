@@ -120,6 +120,28 @@ class EDAResult:
         """ส่งออกเป็น JSON — เรียก ``report.to_json()`` ให้โดยอัตโนมัติ."""
         return self.report.to_json(path, indent=indent)
 
+    # ------------------------------------------------------------------
+    # Jupyter rich display — แสดง report ใน notebook ได้เลย ไม่ต้องเปิด browser
+    # ------------------------------------------------------------------
+    def _repr_html_(self) -> str:
+        """แสดง HTML report ใน Jupyter notebook โดยอัตโนมัติ.
+
+        เมื่อพิมพ์ ``result`` ใน cell สุดท้ายของ Jupyter จะแสดง HTML report
+        แบบย่อ (overview + quality + insights) โดยไม่ต้องเรียก ``to_html()``
+        """
+        return self.report.to_html()
+
+    def _repr_pretty_(self, pp, cycle: bool) -> None:
+        """แสดงสรุปแบบ text ใน IPython REPL."""
+        overview = self.report.overview
+        pp.text(f"ThaiEDA EDAResult({overview['rows']:,} rows × {overview['columns']} cols)")
+        pp.text(f"  Quality issues: {len(self.report.quality_issues)}")
+        if self.report.insights:
+            pp.text(f"  Insights: {self.report.insights.total_insights}")
+        if self.llm_response:
+            pp.text(f"  LLM: ✓ ({len(self.llm_response)} chars)")
+        pp.text("  → call .to_html('report.html') to save full report")
+
 
 # ----------------------------------------------------------------------------
 # run() — one-liner API หลัก
