@@ -124,6 +124,18 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="ข้ามการวิเคราะห์อนุกรมเวลา (เร็วขึ้นบนข้อมูลที่ไม่ใช่ timeseries)",
     )
+    p_profile.add_argument(
+        "--no-insights",
+        action="store_true",
+        help="ข้ามการค้นหาข้อค้นพบจากการผสมคอลัมน์ (cross-column insights)",
+    )
+    p_profile.add_argument(
+        "--insights-top",
+        type=int,
+        default=8,
+        metavar="N",
+        help="จำนวนข้อค้นพบจากการผสมคอลัมน์สูงสุดที่แสดง (เริ่มต้น: 8)",
+    )
     p_profile.add_argument("--json", default=None, help="ส่งออกข้อมูลเป็น JSON ไปยังพาธที่ระบุด้วย")
     p_profile.add_argument("--no-charts", action="store_true", help="ไม่สร้างกราฟ (เร็วขึ้น)")
     p_profile.add_argument(
@@ -160,6 +172,18 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-timeseries",
         action="store_true",
         help="ข้ามการวิเคราะห์อนุกรมเวลา (เร็วขึ้นบนข้อมูลที่ไม่ใช่ timeseries)",
+    )
+    p_run.add_argument(
+        "--no-insights",
+        action="store_true",
+        help="ข้ามการค้นหาข้อค้นพบจากการผสมคอลัมน์ (cross-column insights)",
+    )
+    p_run.add_argument(
+        "--insights-top",
+        type=int,
+        default=8,
+        metavar="N",
+        help="จำนวนข้อค้นพบจากการผสมคอลัมน์สูงสุดที่แสดง (เริ่มต้น: 8)",
     )
     p_run.add_argument(
         "--lang", choices=["th", "en"], default="th", help="ภาษาของรายงาน (เริ่มต้น: th)"
@@ -350,6 +374,8 @@ def _run_profile(args: argparse.Namespace) -> int:
         target_column=args.target,
         clean=args.clean,
         timeseries=not args.no_timeseries,
+        insights_engine=not args.no_insights,
+        insights_top=args.insights_top,
         progress=_make_progress(quiet, color),
     )
     report.run()
@@ -424,6 +450,7 @@ def _print_summary(
     else:
         print(f"  คำแนะนำการทำความสะอาด: {len(report.cleaning_suggestions)}")
     _print_timeseries_highlights(report)
+    _print_business_highlights(report)
     _print_insight_highlights(report)
     for note in report.notes:
         print(_paint(f"  ⚠ {note}", "warning", color))
@@ -450,6 +477,16 @@ def _print_timeseries_highlights(report) -> None:
         if r.anomalies:
             bits.append(f"spike {len(r.anomalies)} จุด")
         print(f"    • {col}: {', '.join(bits)}")
+
+
+def _print_business_highlights(report) -> None:
+    """พิมพ์ข้อค้นพบจากการผสมคอลัมน์ (cross-column insights) เด่น ๆ สูงสุด 5 ข้อ."""
+    engine = report.insight_engine
+    if engine is None or engine.total == 0:
+        return
+    print(f"  ข้อค้นพบคอลัมน์ผสม: {engine.total}")
+    for card in engine.cards[:5]:
+        print(f"    • {card.title_th}")
 
 
 def _print_insight_highlights(report) -> None:
@@ -504,6 +541,8 @@ def _run_run(args: argparse.Namespace) -> int:
         target_column=args.target,
         clean=do_clean,
         timeseries=not args.no_timeseries,
+        insights_engine=not args.no_insights,
+        insights_top=args.insights_top,
         progress=_make_progress(quiet, color),
     )
     report.run()
@@ -552,6 +591,7 @@ def _print_run_summary(
         total = sum(c.rows_affected for c in report.cleaning_diff)
         print(f"  ทำความสะอาดแล้ว: {len(report.cleaning_diff)} การดำเนินการ (รวม {total:,} เซลล์)")
     _print_timeseries_highlights(report)
+    _print_business_highlights(report)
     _print_insight_highlights(report)
     for note in report.notes:
         print(_paint(f"  ⚠ {note}", "warning", color))

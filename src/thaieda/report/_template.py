@@ -86,6 +86,10 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
   .insight .rec { margin-top: 8px; font-size: 13px; }
   .insight .rec .lbl { color: var(--accent); font-weight: 600; }
   .insight .cat { float: right; }
+  /* --- v0.6: cross-column insight evidence mini-table --- */
+  .evtable { width: auto; margin: 8px 0 4px; }
+  .evtable th, .evtable td { padding: 4px 14px 4px 0; border-bottom: none; font-size: 13px; }
+  .evtable th { color: var(--muted); }
   .sevcount { display: inline-flex; gap: 8px; margin-left: 8px; }
   /* --- v0.4.1: sticky section navigation --- */
   .nav { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; gap: 6px;
@@ -157,6 +161,7 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
   <nav class="nav">
     <a href="#overview">{{ L('overview') }}</a>
     {% if insight_section %}<a href="#insights">{{ L('auto_insights') }}</a>{% endif %}
+    {% if business_section %}<a href="#business-insights">{{ L('business_insights') }}</a>{% endif %}
     <a href="#quality">{{ L('quality_issues') }}</a>
     <a href="#anomalies">{{ L('anomalies') }}</a>
     {% if target_section %}<a href="#target">{{ L('target_analysis') }}</a>{% endif %}
@@ -207,6 +212,39 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
     </div>
     <div class="desc-th">{{ ins.description_th }}</div>
     <div class="rec"><span class="lbl">{{ L('recommendation') }}:</span> {{ ins.recommendation_th }}</div>
+  </div>
+  {% endfor %}
+  {% endif %}
+
+  <!-- ============ CROSS-COLUMN INSIGHTS (ENGINE, v0.6) ============ -->
+  {% if business_section %}
+  <h2 id="business-insights">{{ L('business_insights') }} <span class="ng">({{ business_section.total }})</span></h2>
+  {% for c in business_section.cards %}
+  <div class="issue insight info">
+    <div>
+      <span class="badge t-numeric">{{ c.pattern_label }}</span>
+      <b>{{ c.title_th }}</b>
+      <span class="cat ng">{{ L('breakdown') }}: <code>{{ c.perspective.breakdown }}</code>{% if c.perspective.measure %} · {{ L('measure') }}: <code>{{ c.perspective.measure }}</code>{% endif %} · {{ c.perspective.agg }}</span>
+    </div>
+    <div class="desc-th">{{ c.description_th }}</div>
+    {% if c.evidence.top_segments %}
+    <table class="evtable">
+      <tr><th>{{ L('segment') }}</th><th>{{ L('value') }}</th></tr>
+      {% for seg, val in c.evidence.top_segments %}
+      <tr><td>{{ seg }}</td><td class="ng">{{ "{:,}".format(val) }}</td></tr>
+      {% endfor %}
+    </table>
+    {% endif %}
+    {% if c.pattern == 'comparison' %}
+    <div class="meta">{{ L('lift') }}: <b>{{ c.evidence.lift_pct }}%</b> · {{ L('mean') }}: {{ "{:,}".format(c.evidence.top_mean) }} vs {{ "{:,}".format(c.evidence.rest_mean) }}{% if c.evidence.p_value is not none %} · {{ L('p_value') }}={{ c.evidence.p_value }}{% endif %} · n={{ "{:,}".format(c.evidence.n_top) }}/{{ "{:,}".format(c.evidence.n_rest) }}</div>
+    {% endif %}
+    {% if c.pattern == 'attribution' %}
+    <div class="meta">{{ L('share') }}: <b>{{ c.evidence.share }}%</b></div>
+    {% endif %}
+    {% if c.pattern == 'trend' %}
+    <div class="meta">τ={{ c.evidence.tau }}{% if c.evidence.p_value is not none %} · {{ L('p_value') }}={{ c.evidence.p_value }}{% endif %} · {{ c.evidence.first_bucket }} → {{ c.evidence.last_bucket }} ({{ "{:,}".format(c.evidence.first_value) }} → {{ "{:,}".format(c.evidence.last_value) }})</div>
+    {% endif %}
+    <div class="rec"><span class="lbl">{{ L('recommendation') }}:</span> {{ c.recommendation_th }}</div>
   </div>
   {% endfor %}
   {% endif %}

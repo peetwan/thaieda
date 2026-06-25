@@ -616,6 +616,7 @@ def generate_insights(
     cleaning_results: list[CleaningResult] | None = None,
     column_types: dict[str, ColumnType] | None = None,
     timeseries_results: dict[str, TimeseriesResult] | None = None,
+    extra_insights: list[Insight] | None = None,
 ) -> InsightSummary:
     """สร้างสรุปข้อมูลเชิงลึกอัตโนมัติเป็นภาษาไทย.
 
@@ -632,6 +633,8 @@ def generate_insights(
         cleaning_results: ผลการทำความสะอาด (ถ้ามี).
         column_types: ประเภทคอลัมน์ (จาก detect_all) — ใช้ตรวจ cardinality/การกระจาย/ชนิดข้อมูล.
         timeseries_results: ผลวิเคราะห์ timeseries ต่อคอลัมน์ (ถ้ามี).
+        extra_insights: Insight เพิ่มเติมจากภายนอก (เช่น cross-column insight engine v0.6)
+            ที่ถูกแปลงเป็น Insight แล้ว — จะถูกรวมและจัดเรียงร่วมกับข้อค้นพบอื่น.
 
     Returns:
         InsightSummary พร้อมรายการ Insight (เรียงวิกฤตก่อน) และบทสรุปผู้บริหารภาษาไทย.
@@ -658,6 +661,10 @@ def generate_insights(
     cleaning = _cleaning_insight(cleaning_results)
     if cleaning is not None:
         insights.append(cleaning)
+
+    # ข้อค้นพบจาก cross-column insight engine (v0.6) — แปลงเป็น Insight มาแล้วจากภายนอก
+    if extra_insights:
+        insights.extend(extra_insights)
 
     # เรียงตามความรุนแรง (วิกฤตก่อน) — เสถียร จึงรักษาลำดับการเพิ่มภายในระดับเดียวกัน
     insights.sort(key=lambda i: _SEVERITY_ORDER.get(i.severity, 99))
