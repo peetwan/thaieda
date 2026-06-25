@@ -13,6 +13,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
+import numpy as np
 import pandas as pd
 
 from thaieda.analysis import TargetAssociation
@@ -21,6 +22,7 @@ from thaieda.clean import CleaningResult
 from thaieda.detect import ColumnType
 from thaieda.quality import QualityIssue
 from thaieda.text import TextMetrics
+from thaieda.timeseries import TimeseriesResult
 
 # ลำดับความรุนแรง (วิกฤตก่อน) สำหรับการเรียง
 _SEVERITY_ORDER = {"critical": 0, "warning": 1, "info": 2}
@@ -93,6 +95,23 @@ _HIGH_CARDINALITY = 0.9
 _COMISSING_CORR = 0.9
 # เกณฑ์สหสัมพันธ์ Pearson ที่ถือว่า "แรง" สำหรับ target
 _STRONG_CORR = 0.5
+
+# จำนวนค่าขั้นต่ำที่ทำให้สถิติการกระจาย (skew/kurtosis/bimodal) มีความหมาย
+_MIN_DISTRIBUTION_SAMPLE = 20
+# เกณฑ์ความเบ้ (|skewness|) ที่ถือว่า "เบ้มาก" — ควรพิจารณา log/transform
+_SKEW_THRESHOLD = 1.0
+# เกณฑ์ความโด่งส่วนเกิน (excess kurtosis) ที่ถือว่า "หางหนัก" — มี outlier มาก
+_KURTOSIS_THRESHOLD = 7.0
+# เกณฑ์สหสัมพันธ์ |r| ระหว่างคู่คอลัมน์ตัวเลขที่ถือว่า "สูง" (อาจซ้ำซ้อนกัน)
+_HIGH_PAIR_CORR = 0.7
+# จำนวนคอลัมน์ตัวเลขสูงสุดที่นำมาตรวจคู่สหสัมพันธ์ (กัน O(n^2) บนตารางกว้าง)
+_MAX_CORR_COLS = 30
+# จำนวนคู่สหสัมพันธ์สูงสุดที่รายงาน (เรียงจากแรงสุด)
+_MAX_CORR_PAIRS = 8
+# สัดส่วนค่าที่เป็นตัวเลขในคอลัมน์หมวดหมู่ ที่ถือว่า "เก็บตัวเลขเป็นข้อความ"
+_TYPE_MISMATCH_RATIO = 0.8
+# สัดส่วนแถวซ้ำที่ถือว่ารุนแรง (ยกระดับเป็น warning)
+_DUP_WARN_RATIO = 0.01
 
 
 # ----------------------------------------------------------------------------
@@ -287,6 +306,243 @@ def _target_insights(target_associations: list[TargetAssociation]) -> list[Insig
 
 
 # ----------------------------------------------------------------------------
+# insight การกระจายของคอลัมน์ตัวเลข (skewness/kurtosis/bimodal)
+# ----------------------------------------------------------------------------
+def _is_bimodal(values: np.ndarray) -> bool:
+    """ตรวจแบบ heuristic ว่าการแจกแจงมี 2 จุดยอด (bimodal) หรือไม่.
+
+    วิธี: ทำฮิสโทแกรม -> ปรับเรียบเล็กน้อย -> นับจุดยอดเฉพาะที่ (local maxima) ที่เด่นพอ
+    แล้วตรวจว่าระหว่างจุดยอดสองอันที่สูงสุดมี "หุบเขา" ที่ลึกพอหรือไม่ (กัน false positive)
+    """
+    if values.size < 2 * _MIN_DISTRIBUTION_SAMPLE:
+        return False
+    hist, _ = np.histogram(values, bins=20)
+    if hist.max() == 0:
+        return False
+    # ปรับเรียบด้วยหน้าต่างกว้าง 3 เพื่อลด noise
+    smooth = np.convolve(hist.astype("float64"), np.ones(3) / 3.0, mode="same")
+    peak = float(smooth.max())
+    # จุดยอดเฉพาะที่ที่สูงอย่างน้อย 25% ของจุดยอดหลัก
+    peaks = [
+        i
+        for i in range(1, len(smooth) - 1)
+        if smooth[i] >= smooth[i - 1] and smooth[i] > smooth[i + 1] and smooth[i] >= 0.25 * peak
+    ]
+    if len(peaks) < 2:
+        return False
+    # เอาสองจุดยอดที่สูงสุด แล้วดูหุบเขาระหว่างกลาง
+    peaks.sort(key=lambda i: -smooth[i])
+    a, b = sorted(peaks[:2])
+    valley = float(smooth[a : b + 1].min())
+    lower_peak = min(smooth[a], smooth[b])
+    return valley < 0.6 * lower_peak
+
+
+def _distribution_insights(
+    df: pd.DataFrame, column_types: dict[str, ColumnType] | None
+) -> list[Insight]:
+    """วิเคราะห์การกระจายของคอลัมน์ตัวเลข — ความเบ้ (skew), หางหนัก (kurtosis), 2 กลุ่ม (bimodal)."""
+    if not column_types:
+        return []
+    out: list[Insight] = []
+    for col, ctype in column_types.items():
+        if ctype != ColumnType.NUMERIC or col not in df.columns:
+            continue
+        numeric = pd.to_numeric(df[col], errors="coerce").dropna()
+        if len(numeric) < _MIN_DISTRIBUTION_SAMPLE or numeric.nunique() <= 1:
+            continue
+
+        skew = float(numeric.skew())
+        if not math.isnan(skew) and abs(skew) > _SKEW_THRESHOLD:
+            direction = "ขวา (หางยาวด้านมาก)" if skew > 0 else "ซ้าย (หางยาวด้านน้อย)"
+            out.append(
+                Insight(
+                    "distribution",
+                    "warning",
+                    "การกระจายเบ้มาก",
+                    f"คอลัมน์ '{col}' มีการกระจายเบ้{direction} (skew={skew:.2f}) — "
+                    "ค่าเฉลี่ยอาจไม่สะท้อนค่ากลางที่แท้จริง",
+                    f"พิจารณาแปลง '{col}' ด้วย log/sqrt/Box-Cox ก่อนวิเคราะห์หรือสร้างโมเดล",
+                )
+            )
+
+        kurt = float(numeric.kurt())
+        if not math.isnan(kurt) and kurt > _KURTOSIS_THRESHOLD:
+            out.append(
+                Insight(
+                    "distribution",
+                    "info",
+                    "การกระจายหางหนัก (heavy tail)",
+                    f"คอลัมน์ '{col}' มีหางหนัก (kurtosis={kurt:.2f}) — มีค่าสุดโต่ง (outlier) มากกว่าปกติ",
+                    f"ตรวจสอบค่าสุดโต่งของ '{col}' และพิจารณาวิธีที่ทนต่อ outlier (median/robust stats)",
+                )
+            )
+
+        if _is_bimodal(numeric.to_numpy(dtype="float64")):
+            out.append(
+                Insight(
+                    "distribution",
+                    "info",
+                    "อาจมี 2 กลุ่มข้อมูล (bimodal)",
+                    f"คอลัมน์ '{col}' มีลักษณะการแจกแจงแบบ 2 จุดยอด — อาจมีกลุ่มย่อย 2 กลุ่มปนกัน",
+                    f"พิจารณาแยกวิเคราะห์ '{col}' ตามกลุ่ม หรือหาตัวแปรที่อธิบายการแบ่งกลุ่ม",
+                )
+            )
+    return out
+
+
+# ----------------------------------------------------------------------------
+# insight สหสัมพันธ์ระหว่างคู่คอลัมน์ตัวเลข (อาจซ้ำซ้อนกัน)
+# ----------------------------------------------------------------------------
+def _correlation_insights(df: pd.DataFrame) -> list[Insight]:
+    """คู่คอลัมน์ตัวเลขที่สหสัมพันธ์สูง (|r| > 0.7) — อาจซ้ำซ้อน (multicollinearity)."""
+    numeric = df.select_dtypes(include="number")
+    if numeric.shape[1] < 2:
+        return []
+    if numeric.shape[1] > _MAX_CORR_COLS:
+        numeric = numeric.iloc[:, :_MAX_CORR_COLS]
+
+    corr = numeric.corr(numeric_only=True)
+    cols = list(corr.columns)
+    pairs: list[tuple[str, str, float]] = []
+    for i in range(len(cols)):
+        for j in range(i + 1, len(cols)):
+            r = float(corr.iat[i, j])
+            if not math.isnan(r) and abs(r) > _HIGH_PAIR_CORR:
+                pairs.append((str(cols[i]), str(cols[j]), r))
+
+    # เรียงจากแรงสุด แล้วจำกัดจำนวนเพื่อไม่ให้รายงานรก
+    pairs.sort(key=lambda p: -abs(p[2]))
+    out: list[Insight] = []
+    for a, b, r in pairs[:_MAX_CORR_PAIRS]:
+        kind = "เชิงบวก" if r > 0 else "เชิงลบ"
+        out.append(
+            Insight(
+                "structure",
+                "info",
+                "คู่คอลัมน์สหสัมพันธ์สูง",
+                f"คอลัมน์ '{a}' และ '{b}' สหสัมพันธ์{kind}สูง (r={r:.2f}) — อาจให้ข้อมูลซ้ำซ้อนกัน",
+                f"ในการสร้างโมเดล พิจารณาเลือกใช้คอลัมน์ใดคอลัมน์หนึ่งระหว่าง '{a}' และ '{b}' "
+                "เพื่อลด multicollinearity",
+            )
+        )
+    return out
+
+
+# ----------------------------------------------------------------------------
+# insight แถวซ้ำ และคอลัมน์เก็บตัวเลขเป็นข้อความ
+# ----------------------------------------------------------------------------
+def _duplicate_row_insight(df: pd.DataFrame) -> Insight | None:
+    """แถวซ้ำทั้งแถว — บิดเบือนสถิติ/การกระจาย ควรพิจารณาลบ."""
+    if len(df) < 2:
+        return None
+    dup = int(df.duplicated().sum())
+    if dup <= 0:
+        return None
+    ratio = dup / len(df)
+    severity = "warning" if ratio >= _DUP_WARN_RATIO else "info"
+    return Insight(
+        "structure",
+        severity,
+        "พบแถวซ้ำ",
+        f"พบแถวที่ซ้ำกันทั้งแถว {dup:,} แถว ({ratio * 100:.1f}%) — อาจทำให้สถิติและการกระจายคลาดเคลื่อน",
+        "ตรวจสอบว่าเป็นการซ้ำที่ตั้งใจหรือข้อผิดพลาด แล้วพิจารณา drop_duplicates() ก่อนวิเคราะห์",
+    )
+
+
+def _type_mismatch_insights(
+    df: pd.DataFrame, column_types: dict[str, ColumnType] | None
+) -> list[Insight]:
+    """คอลัมน์หมวดหมู่ที่จริง ๆ เก็บ "ตัวเลขเป็นข้อความ" — ควรแปลงเป็น numeric ก่อนวิเคราะห์."""
+    if not column_types:
+        return []
+    out: list[Insight] = []
+    for col, ctype in column_types.items():
+        if ctype != ColumnType.CATEGORICAL or col not in df.columns:
+            continue
+        non_null = df[col].dropna().astype(str)
+        if len(non_null) < _MIN_DISTRIBUTION_SAMPLE:
+            continue
+        numeric_ratio = float(pd.to_numeric(non_null, errors="coerce").notna().mean())
+        if numeric_ratio >= _TYPE_MISMATCH_RATIO:
+            out.append(
+                Insight(
+                    "structure",
+                    "warning",
+                    "คอลัมน์เก็บตัวเลขเป็นข้อความ",
+                    f"คอลัมน์ '{col}' มีค่าที่เป็นตัวเลข {numeric_ratio * 100:.0f}% แต่ถูกเก็บเป็นข้อความ — "
+                    "การคำนวณทางสถิติจะไม่ทำงาน",
+                    f"แปลง '{col}' เป็นชนิดตัวเลขด้วย pd.to_numeric(..., errors='coerce') ก่อนวิเคราะห์",
+                )
+            )
+    return out
+
+
+# ----------------------------------------------------------------------------
+# insight จากการวิเคราะห์ timeseries
+# ----------------------------------------------------------------------------
+def _timeseries_insights(ts_results: dict[str, TimeseriesResult]) -> list[Insight]:
+    """แปลงผล timeseries analysis เป็น Insight (หมวด timeseries)."""
+    out: list[Insight] = []
+    for col, r in ts_results.items():
+        if not r.is_timeseries:
+            continue
+
+        if r.has_trend and r.trend_direction != "stable":
+            out.append(
+                Insight(
+                    "timeseries",
+                    "info",
+                    f"พบแนวโน้ม{r.trend_direction_th}ตามเวลา",
+                    f"คอลัมน์ '{col}' มีแนวโน้ม{r.trend_direction_th}อย่างต่อเนื่องตามเวลา",
+                    f"พิจารณาถอดแนวโน้ม (detrend) ของ '{col}' ก่อนวิเคราะห์ความสัมพันธ์/พยากรณ์",
+                )
+            )
+        if r.has_seasonality and r.seasonal_period > 0:
+            out.append(
+                Insight(
+                    "timeseries",
+                    "info",
+                    "พบรูปแบบตามฤดูกาล (seasonality)",
+                    f"คอลัมน์ '{col}' มีรูปแบบซ้ำเป็นรอบ {r.seasonal_period} จุด ({r.frequency_th})",
+                    f"ใช้โมเดลที่รองรับ seasonality (เช่น SARIMA/STL) ในการพยากรณ์ '{col}'",
+                )
+            )
+        if r.gap_count > 0:
+            out.append(
+                Insight(
+                    "timeseries",
+                    "warning",
+                    "ข้อมูลเวลาไม่ต่อเนื่อง (มีช่องว่าง)",
+                    f"คอลัมน์ '{col}' มีช่องว่างของเวลา {r.gap_count} ช่วง — ข้อมูลบางช่วงขาดหาย",
+                    f"เติมช่วงเวลาที่ขาด (resample/reindex) ของ '{col}' ก่อนวิเคราะห์อนุกรมเวลา",
+                )
+            )
+        if r.anomalies:
+            out.append(
+                Insight(
+                    "timeseries",
+                    "warning",
+                    "พบค่าผิดปกติเฉพาะช่วง (spike)",
+                    f"คอลัมน์ '{col}' มีค่าผิดปกติเฉพาะช่วง {len(r.anomalies)} จุด "
+                    "(spike/level shift จาก residual)",
+                    f"ตรวจสอบเหตุการณ์ในช่วงเวลาดังกล่าวของ '{col}' ว่าผิดปกติจริงหรือเป็นข้อมูลพิเศษ",
+                )
+            )
+        if not r.has_trend and not r.has_seasonality:
+            out.append(
+                Insight(
+                    "timeseries",
+                    "info",
+                    "ไม่พบแนวโน้มหรือ seasonality",
+                    f"คอลัมน์ '{col}' ไม่มีแนวโน้มหรือรูปแบบตามฤดูกาลชัดเจน — อาจเป็น random walk/ข้อมูลนิ่ง",
+                    f"การพยากรณ์ '{col}' อาจใช้วิธีพื้นฐาน (naive/mean) เป็นฐานเปรียบเทียบ",
+                )
+            )
+    return out
+
+
+# ----------------------------------------------------------------------------
 # executive summary
 # ----------------------------------------------------------------------------
 def _build_executive_summary(
@@ -294,8 +550,10 @@ def _build_executive_summary(
     insights: list[Insight],
     quality_issues: list[QualityIssue],
     anomaly_issues: list[AnomalyIssue],
+    timeseries_results: dict[str, TimeseriesResult] | None = None,
 ) -> str:
     """สร้างบทสรุปผู้บริหาร 2-3 ประโยค ที่ระบุปัญหาเด่นและคำตัดสินสุขภาพข้อมูลโดยรวม."""
+    timeseries_results = timeseries_results or {}
     rows, cols = df.shape
     parts: list[str] = [f"ชุดข้อมูลมี {rows:,} แถว × {cols} คอลัมน์"]
 
@@ -312,6 +570,20 @@ def _build_executive_summary(
     if anomaly_issues:
         cols_with = len({a.column for a in anomaly_issues})
         parts.append(f"พบความผิดปกติ {len(anomaly_issues)} จุดใน {cols_with} คอลัมน์")
+
+    # สรุปอนุกรมเวลา (timeseries) — ระบุคอลัมน์ที่มีแนวโน้ม/seasonality เด่น
+    if timeseries_results:
+        n_trend = sum(1 for r in timeseries_results.values() if r.has_trend)
+        n_season = sum(1 for r in timeseries_results.values() if r.has_seasonality)
+        seg = f"วิเคราะห์อนุกรมเวลา {len(timeseries_results)} คอลัมน์"
+        extra = []
+        if n_trend:
+            extra.append(f"มีแนวโน้ม {n_trend}")
+        if n_season:
+            extra.append(f"มี seasonality {n_season}")
+        if extra:
+            seg += f" ({', '.join(extra)})"
+        parts.append(seg)
 
     # ระบุหัวข้อวิกฤตเด่น ๆ ให้เป็นรูปธรรม (สูงสุด 3 ข้อ)
     if crit:
@@ -343,11 +615,12 @@ def generate_insights(
     target_associations: list[TargetAssociation] | None = None,
     cleaning_results: list[CleaningResult] | None = None,
     column_types: dict[str, ColumnType] | None = None,
+    timeseries_results: dict[str, TimeseriesResult] | None = None,
 ) -> InsightSummary:
     """สร้างสรุปข้อมูลเชิงลึกอัตโนมัติเป็นภาษาไทย.
 
-    รวบรวมผลจากทุกส่วน (คุณภาพ/ความผิดปกติ/ข้อความ/โครงสร้าง/เป้าหมาย/การทำความสะอาด)
-    แล้วตีความเป็นข้อค้นพบที่บอก "อะไรสำคัญ ควรทำอะไรต่อ" จัดเรียงตามความรุนแรง
+    รวบรวมผลจากทุกส่วน (คุณภาพ/ความผิดปกติ/ข้อความ/การกระจาย/โครงสร้าง/เป้าหมาย/อนุกรมเวลา/
+    การทำความสะอาด) แล้วตีความเป็นข้อค้นพบที่บอก "อะไรสำคัญ ควรทำอะไรต่อ" จัดเรียงตามความรุนแรง
     พร้อมบทสรุปผู้บริหารสั้น ๆ
 
     Args:
@@ -357,20 +630,30 @@ def generate_insights(
         text_metrics: สถิติข้อความต่อคอลัมน์ (จาก text_metrics).
         target_associations: ผลวิเคราะห์ target (ถ้ามี).
         cleaning_results: ผลการทำความสะอาด (ถ้ามี).
-        column_types: ประเภทคอลัมน์ (จาก detect_all) — ใช้ตรวจ cardinality ข้อความ.
+        column_types: ประเภทคอลัมน์ (จาก detect_all) — ใช้ตรวจ cardinality/การกระจาย/ชนิดข้อมูล.
+        timeseries_results: ผลวิเคราะห์ timeseries ต่อคอลัมน์ (ถ้ามี).
 
     Returns:
         InsightSummary พร้อมรายการ Insight (เรียงวิกฤตก่อน) และบทสรุปผู้บริหารภาษาไทย.
     """
     target_associations = target_associations or []
     cleaning_results = cleaning_results or []
+    timeseries_results = timeseries_results or {}
 
     insights: list[Insight] = []
     insights.extend(_insight_from_quality(i) for i in quality_issues)
     insights.extend(_insight_from_anomaly(a) for a in anomaly_issues)
     insights.extend(_high_cardinality_text_insights(df, column_types, text_metrics))
+    insights.extend(_distribution_insights(df, column_types))
+    insights.extend(_correlation_insights(df))
+    insights.extend(_type_mismatch_insights(df, column_types))
     insights.extend(_comissing_insights(df))
     insights.extend(_target_insights(target_associations))
+    insights.extend(_timeseries_insights(timeseries_results))
+
+    dup = _duplicate_row_insight(df)
+    if dup is not None:
+        insights.append(dup)
 
     cleaning = _cleaning_insight(cleaning_results)
     if cleaning is not None:
@@ -383,7 +666,9 @@ def generate_insights(
     warning_count = sum(1 for i in insights if i.severity == "warning")
     info_count = sum(1 for i in insights if i.severity == "info")
 
-    summary = _build_executive_summary(df, insights, quality_issues, anomaly_issues)
+    summary = _build_executive_summary(
+        df, insights, quality_issues, anomaly_issues, timeseries_results
+    )
 
     return InsightSummary(
         total_insights=len(insights),

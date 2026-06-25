@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "thaieda"
-version = "0.3.0"
+version = "0.4.0"
 description = "AutoEDA สำหรับข้อมูลภาษาไทย — Exploratory data analysis that speaks Thai"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -60,6 +60,8 @@ fix = ["ftfy>=6.0"]
 ml = ["scikit-learn>=1.3"]
 # Statistical target analysis (proper p-values for correlation/ANOVA/chi-square)
 stats = ["scipy>=1.11"]
+# Timeseries decomposition (STL trend/seasonal/residual via statsmodels)
+timeseries = ["statsmodels>=0.14"]
 # Thai Named Entity Recognition (pythainlp + a CRF backend for the 'thainer' engine)
 ner = ["pythainlp>=5.0", "python-crfsuite>=0.9"]
 # Fast fuzzy matching for categorical near-duplicates (faster than difflib)

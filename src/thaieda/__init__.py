@@ -3,7 +3,7 @@
 Exploratory data analysis that speaks Thai.
 """
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 __all__ = [
     "profile",
     "ProfileReport",
@@ -12,6 +12,11 @@ __all__ = [
     "generate_insights",
     "Insight",
     "InsightSummary",
+    "analyze_timeseries",
+    "analyze_dataframe_timeseries",
+    "detect_timeseries_columns",
+    "TimeseriesResult",
+    "TimeseriesComponent",
     "read_data",
     "detect_encoding",
     "detect_format",
@@ -41,6 +46,16 @@ def __getattr__(name: str):
         import thaieda.insight as _insight
 
         return getattr(_insight, name)
+    if name in (
+        "analyze_timeseries",
+        "analyze_dataframe_timeseries",
+        "detect_timeseries_columns",
+        "TimeseriesResult",
+        "TimeseriesComponent",
+    ):
+        import thaieda.timeseries as _timeseries
+
+        return getattr(_timeseries, name)
     if name in ("read_data", "detect_encoding", "detect_format"):
         import thaieda.io as _io
 
