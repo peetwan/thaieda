@@ -96,25 +96,36 @@ run_folder("data/")  → FolderResult
 
 ---
 
-## Version Highlights
+## What's New
 
-- **v1.1 — Folder reports:** `run_folder()` analyzes CSV/Excel/JSON/JSONL/TSV folders, `FolderResult.to_master_html()` builds one master HTML with sidebar navigation, and the internal `_Breakdown` result is frozen so report summaries are stable and hash-safe.
-- **v1.2 — Report redesign:** HTML reports now read like an executive briefing: executive summary, key findings, business translation, priority actions, plain-language explanations, and a narrative flow from "what happened" to "what to do next".
-- **v1.3 — Smart pre-analysis:** `_detect_language()` detects Thai/English/mixed/numeric data with confidence and per-column detail; `_detect_data_type()` classifies transaction/registry/survey/timeseries/mixed datasets before EDA; quality checks become language-aware so English-only data skips Thai-specific warnings automatically.
-- **v1.4 — Pipeline hardening (14-dataset audit):** 21 defects fixed from a full audit of 14 datasets (coffee-chain fixtures + public test data). Key improvements:
-  - **ID/FK semantics** — ID columns excluded from categorical anomaly checks (rare categories, fuzzy duplicates); `*_id` columns detected as ID/FK even with low unique ratio; Buddhist Era check no longer fires on ID columns; timeseries excludes ID/FK/code columns from measures.
-  - **Smarter type detection** — Thai low-cardinality text (e.g. `serve_type`, `payment_method`) classified as categorical instead of `thai_text`/`mixed_text`; text-named columns (e.g. `review`, `feedback`) preserved as text even with few unique values.
-  - **Cleaning safeguards** — `fix_repeated_chars` skips numeric/decimal strings (`1.00005` stays unchanged); `fix_keyboard_layout` requires Thai chars in the column before attempting layout conversion (`Floyd` stays English); `check_normalization` skips repeated-char spam on short code/category values (ticket numbers, cabin codes); `_apply_cleaning` now calls `remove_duplicate_rows` and `handle_missing_values` when `clean=True`.
-  - **Fewer false positives** — Fuzzy duplicate guard skips short near-identical labels (`INLAND ↔ ISLAND`); script mixing skipped on low-cardinality columns; numeric outliers on heavy-tail distributions (skew > 2.0) downgraded to info severity.
-  - **Better reporting** — `payment_method` no longer mistaken for amount column; `Unnamed: 0` index artifacts ignored; Titanic classified as registry/mixed instead of survey; conditional missing (e.g. `holiday_name`) annotated; duplicate insights on constant columns deduplicated; date-dimension tautologies (year/month/week) suppressed.
-  - **New quality checks** — Per-column missing value detection with severity thresholds (warning >5%, info 1–5%); CSV semicolon-delimiter warning when a single-column DataFrame has many `;` in values.
-- **v1.5 — Scale hardening (14-dataset QA round 2–3):** 10 defects fixed across 3 Claude Code batches ($35.78 total). All 14 public datasets now pass with 0 defects, every report <2 MB, every dataset <120 s. Key improvements:
-  - **Insight capping** — `generate_insights(max_insights=30)` keeps all critical insights, fills with warning, then info; `InsightSummary.total_generated` records the true count so the executive summary can say "พบ 679 ข้อ แสดงเฉพาะ 30" (was 679 → now 30 on aps-failure).
-  - **HTML bloat control** — dual chart budget (`_MAX_CHARTS_PER_REPORT=40` + `_MAX_CHART_BYTES=1.6 MB`); quality/anomaly tables capped at 50 rows with `<details>` collapse; column details switch to a summary table when >60 columns (bike-sharing 3.7 MB → 1.55 MB, aps-failure 2.3 MB → 0.48 MB).
-  - **Wide-table performance** — `insight_engine` samples 50% of breakdowns/measures when cols >100; `viz` skips correlation heatmap (>30 cols) and scatter matrix (>50 cols); quality/anomaly checks vectorized (aps-failure 171 cols × 16K rows: 491 s → **99.9 s**).
-  - **Tall-table performance** — anomaly/quality/outlier checks sample 50K rows when rows >100K; correlation computed on sample; timeseries decomposition skipped >200K rows (online-retail 541K rows: 397 s → **81 s**).
-  - **High-NA handling** — `handle_missing_values` flags >80% missing as `mostly_missing` (fill skipped, NaN preserved) and warns on >40% missing; <40% unchanged (beijing-pm25 pm2.5 now flagged instead of filled).
-  - **Template pagination** — Key Insights shows top-20 with collapsible `<details>` for the rest; count badges kept; context dict structure preserved.
+### Scale & Performance
+
+Tested across 14 public datasets — from 500 rows to 541K rows, 8 to 171 columns. Every report stays under 2 MB and finishes under 120 seconds.
+
+- **Insight capping** — reports surface the 30 most important findings instead of hundreds. Critical insights are always kept; warnings and info fill the rest. The executive summary shows the true count ("679 found, showing top 30").
+- **HTML bloat control** — dual chart budget (40 charts max, 1.6 MB max). Quality and anomaly tables collapse after 50 rows. Wide tables switch to a summary view past 60 columns.
+- **Wide-table fast path** — the insight engine samples breakdowns and measures when columns exceed 100. Correlation heatmaps and scatter matrices skip automatically on very wide data.
+- **Tall-table fast path** — anomaly, quality, and outlier checks sample 50K rows when data exceeds 100K. Correlation computes on a sample. Timeseries decomposition skips past 200K rows.
+
+### Data Quality & Cleaning
+
+- **High-NA handling** — columns over 80% missing are flagged as `mostly_missing` with NaN preserved. Columns over 40% get a warning to drop or impute with domain knowledge. Below 40% is unchanged.
+- **Smarter type detection** — Thai low-cardinality text is classified as categorical, not free text. Text-named columns like `review` and `feedback` stay text even with few unique values.
+- **Cleaning safeguards** — numeric strings like `1.00005` are left alone. Keyboard layout conversion only runs when Thai characters are present. Repeated-character spam on short codes is suppressed.
+- **ID/FK awareness** — ID columns are excluded from categorical anomaly checks. `*_id` columns are detected even with low unique ratio. Buddhist Era checks skip IDs. Timeseries excludes ID/FK/code columns from measures.
+
+### Reporting
+
+- **Executive briefing format** — reports flow from executive summary to key findings, business translation, priority actions, and plain-language explanations.
+- **Template pagination** — Key Insights shows the top 20 with a collapsible section for the rest. Count badges are preserved.
+- **Fewer false positives** — fuzzy duplicate guard skips short near-identical labels. Script mixing is skipped on low-cardinality columns. Outliers on heavy-tail distributions (skew > 2.0) are downgraded to info.
+- **Folder reports** — `run_folder()` analyzes CSV, Excel, JSON, JSONL, and TSV folders. `FolderResult.to_master_html()` builds one master HTML with sidebar navigation.
+
+### Smart Pre-Analysis
+
+- **Language detection** — Thai, English, mixed, and numeric data detected with confidence and per-column detail.
+- **Data type classification** — transaction, registry, survey, timeseries, and mixed datasets classified before EDA.
+- **Language-aware quality** — English-only data skips Thai-specific warnings automatically.
 
 ---
 
