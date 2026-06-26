@@ -87,3 +87,45 @@ Source: https://pyvis.readthedocs.io
 Source: https://medium.com/@stephanhausberg/graph-networks-visualization-with-pyvis-and-keyword-extraction-cd973d372e2c
 
 Source: https://infranodus.com/docs/network-visualization-software
+
+## 2026-06-27
+
+### Hexbin — แก้ overplotting ของ scatter plot เมื่อข้อมูลหนาแน่น
+
+Scatter plot ธรรมดาเริ่มไม่อ่านได้เมื่อจุดทับซ้อนกันมาก (>10k points) ส่งผลให้ density ดูเท่ากันหมด hexbin แก้ปัญหานี้โดยแบ่งพื้นที่เป็น hexagon grid แล้วระบายสีตามจำนวนจุดในแต่ละ cell (2D histogram) matplotlib มี `ax.hexbin(x, y, gridsize=50, cmap='inferno', bins='log')` built-in โดย `bins='log'` ช่วยให้เห็น hot spot ในข้อมูลที่กระจุกตัวสูง เหมาะกับ ThaiEDA เวลา plot ความสัมพันธ์ระหว่าง numeric column ที่มี row เยอะ (เช่น รายได้ vs อายุ ในข้อมูลสำมะโน) ควร auto-switch จาก scatter → hexbin เมื่อ n > threshold (เช่น 5,000) เพื่อหลีกเลี่ยง overplotting โดยไม่ต้อง sample
+
+Source: https://matplotlib.org/stable/gallery/statistics/hexbin_demo.html
+
+Source: https://blog.dailydoseofds.com/p/hexbin-plots-as-a-richer-alternative
+
+Source: https://levelup.gitconnected.com/mastering-hexbin-plotting-in-python-a-beginners-guide-3626e0389c37
+
+### Parallel coordinates — เปรียบเทียบ record เดียวข้ามหลาย numeric variable พร้อมกัน
+
+Parallel coordinates plot (PCP) วางแต่ละ variable บน vertical axis แยกกันแล้วลากเส้นเชื่อมค่าของแต่ละ record ข้าม axis ทั้งหมด ข้อดีคือเห็น cluster/outlier และ multivariate pattern ในมิติสูง (5+ variables) ได้ในภาพเดียวโดยไม่ต้อง plot คู่ทีละ pair เหมาะกับ ThaiEDA เวลาอยาก profile กลุ่ม row ที่คล้ายกัน หรือ detect outlier ที่ผิดปกติข้ามหลาย column พร้อมกัน plotly มี `px.parallel_coordinates` สวยและ interactive แต่ ThaiEDA ใช้ matplotlib อยู่ก็ได้ `pandas.plotting.parallel_coordinates` built-in ข้อควรระวัง: normalize scale ก่อน plot มิฉะนั้น variable ที่ range ใหญ่จะ dominate แกน
+
+Source: https://www.domo.com/learn/charts/parallel-coordinates-plot
+
+Source: https://plotly.com/python/parallel-coordinates-plot
+
+Source: https://www.neura.market/directories/chatgpt/blog/parallel-coordinates-plots-ultimate-guide-to-visualizing-high-dimensional-data-in-python
+
+### PandasAI — conversational EDA เปลี่ยน dataframe ให้ตอบคำถามภาษาธรรมดาได้
+
+PandasAI (23.6k stars) ห่อ LLM (OpenAI/HuggingFace/Groq) ไว้เหนือ pandas ให้ user ถามคำถามภาษาธรรมดาแล้ว library แปลงเป็น pandas code รันเอง ส่งคืนเป็น dataframe/chart/summary จุดที่น่าสนใจสำหรับ ThaiEDA คือแนวคิด "natural-language query layer" เหนือ profiling result — คือหลัยสร้าง report แล้ว user อาจอยากถามต่อ เช่น "column ไหน missing เยอะสุดและเกี่ยวข้องกับคอลัมน์อะไร" ปัจจุบัน ThaiEDA มี LLM analysis module (v0.9) อยู่แล้วแต่เน้น insight generation ไม่ใช่ interactive Q&A บทเรียน: ระวังความเสี่ยง code execution + hallucination — PandasAI review พบว่า query ซับซ้อนมักสร้าง code ผิด/คลุมเคลือเมื่อใกล้ลิมิต ควรใช้เป็น opt-in และ sandbox
+
+Source: https://github.com/sinaptik-ai/pandas-ai
+
+Source: https://medium.com/data-science-collective/testing-the-limits-of-pandasai-part-1-what-it-can-and-cant-do-to-help-data-scientists-6f0775314889
+
+Source: https://www.seaflux.tech/blogs/pandasai-conversational-ai-for-dataframes
+
+### Python Record Linkage Toolkit + Dedupe — entity resolution เกินกว่า fuzzy string match
+
+fuzzy string match (rapidfuzz/fuzzywuzzy) เปรียบเทียบ string คู่เดียว แต่ข้อมูลจริงมักต้อง match หลาย field พร้อมกัน (ชื่อ + ที่อยู่ + เบอร์โทร) เพื่อตัดสินว่าเป็น entity เดียวกัน Python Record Linkage Toolkit แก้ปัญหานี้ด้วย blocking/indexing (กรองคู่ candidate ก่อน เพื่อลด O(n²)) + multi-field comparison (Jarowinkler, Levenshtein, numeric, exact) + classifier สำหรับ match/non-match Dedupe อีกตัวใช้ active learning train classifier จากคู่ที่ user label สองตัวนี้เหมาะกับ ThaiEDA เวลา dedup ข้อมูลไทยที่ชื่อ/ที่อยู่สะกดไม่ตรงกัน และต้องการ threshold ที่เรียนรู้จากข้อมูลแทนค่าคงที่ ทางเลือกคือเพิ่ม `clean/_dedup_entity.py` ที่ใช้ rapidfuzz สำหรับ single-field แต่แนะนำ recordlinkage เมื่อ field > 1
+
+Source: https://pbpython.com/record-linking.html
+
+Source: https://github.com/J535D165/data-matching-software
+
+Source: https://recordlinkage.readthedocs.io
