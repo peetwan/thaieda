@@ -107,44 +107,47 @@ We ran all three on **6 representative datasets** (small/large/wide, Thai + non-
 
 ### Speed & report size
 
-| Dataset | Rows | Cols | ydata | ydata size | sweetviz | sv size | **ThaiEDA** | **EDA size** |
-|---------|-----:|-----:|-------:|-----------:|---------:|--------:|------------:|-------------:|
-| titanic | 891 | 12 | 5.3s | 1.95 MB | 3.3s | 0.92 MB | 8.2s | **0.82 MB** |
-| superstore | 10,800 | 21 | 9.3s | 5.16 MB | 5.4s | 1.49 MB | 26.0s | **1.50 MB** |
-| adult | 32,561 | 15 | 5.4s | 1.65 MB | 8.0s | 1.26 MB | 17.2s | **1.05 MB** |
-| dirty-thai-retail | 500 | 8 | 3.1s | 0.90 MB | 2.1s | 0.68 MB | 2.1s | **0.53 MB** |
-| wisesight | 26,737 | 2 | 2.6s | 0.68 MB | 0.8s | 0.50 MB | 18.8s | **0.42 MB** |
-| aps-failure | 16,000 | 171 | 99.8s | **71.2 MB** | 15.8s | 8.2 MB | 93.0s | **0.48 MB** |
+| Dataset | Rows | Cols | ydata | ydata size | sweetviz | sv size | Evidently | ev size | **ThaiEDA** | **EDA size** |
+|---------|-----:|-----:|-------:|-----------:|---------:|--------:|----------:|--------:|------------:|-------------:|
+| titanic | 891 | 12 | 5.3s | 1.95 MB | 3.3s | 0.92 MB | — | — | 8.2s | **0.82 MB** |
+| superstore | 10,800 | 21 | 9.3s | 5.16 MB | 5.4s | 1.49 MB | — | — | 26.0s | **1.50 MB** |
+| adult | 32,561 | 15 | 5.4s | 1.65 MB | 8.0s | 1.26 MB | — | — | 17.2s | **1.05 MB** |
+| dirty-thai-retail | 500 | 8 | 3.1s | 0.90 MB | 2.1s | 0.68 MB | — | — | 2.1s | **0.53 MB** |
+| wisesight | 26,737 | 2 | 2.6s | 0.68 MB | 0.8s | 0.50 MB | — | — | 18.8s | **0.42 MB** |
+| aps-failure | 16,000 | 171 | 99.8s | **71.2 MB** | 15.8s | 8.2 MB | — | — | 93.0s | **0.48 MB** |
+| synthetic | 2,000 | 12 | 45s | 7.2 MB | 3s | 0.9 MB | 1s | 3.7 MB | 16s | **1.5 MB** |
 
-### Quality benchmark — synthetic dataset with 10 known issues
+### Quality benchmark — 5 tools on synthetic dataset (10 known issues)
 
-We injected 10 known defects into a 2,000-row synthetic dataset (outliers, missing values, duplicates, constants, placeholders, Buddhist Era dates, Thai numerals, zero-width spaces, mojibake) and measured how many each tool detected. All tools processed identically: HTML output stripped to plain text, same keyword detection applied uniformly.
+We injected 10 known defects into a 2,000-row synthetic dataset and measured detection. All tools processed identically: HTML output stripped to plain text, same keyword detection applied uniformly.
 
-**Table A — General EDA quality** (6 issues all tools can reasonably detect)
+**Table A — General EDA quality** (6 issues all tools can detect)
 
-| Metric | ydata-profiling (default) | sweetviz | **ThaiEDA** |
-|--------|:-------------------------:|:--------:|:-----------:|
-| **GTR** — Ground-Truth Recall | 100% | 83% | **100%** |
-| **ITB** — Issue Type Breadth (11 categories) | 73% | 64% | **91%** |
-| **RC** — Report Completeness (10 sections) | 70% | 50% | **100%** |
-| Time | 45s | 3s | 16s |
-| HTML size | 7.2 MB | 0.9 MB | **1.5 MB** |
+| Metric | ydata (default) | sweetviz | Evidently | PyGWalker | **ThaiEDA** |
+|--------|:---:|:---:|:---:|:---:|:---:|
+| **GTR** — Ground-Truth Recall | 100% | 83% | 100% | 0%\* | **100%** |
+| **ITB** — Issue Type Breadth (11) | 73% | 64% | 91% | 0%\* | **91%** |
+| **RC** — Report Completeness (10) | 70% | 50% | 70% | 10% | **100%** |
+| Time | 45s | 3s | 1s | <1s | 16s |
+| HTML size | 7.2 MB | 0.9 MB | 3.7 MB | 2.9 MB | **1.5 MB** |
 
-On general EDA, ThaiEDA and ydata-profiling both achieve 100% recall. ThaiEDA wins on breadth (91% vs 73%) and report completeness (100% vs 70%), while producing a 5× smaller report. sweetviz misses constant column detection.
+\* PyGWalker is a visual exploration tool, not a report generator — its HTML contains a JS app shell with no extractable findings. Included for completeness, not as a quality comparison.
 
-**Table B — Thai-specific detection** (4 issues — competitors don't claim Thai support)
+On general EDA, ThaiEDA and Evidently both achieve 100% recall and 91% breadth. ThaiEDA wins on report completeness (100% vs 70%) while producing a 2× smaller report than Evidently and 5× smaller than ydata.
 
-| Thai issue | ydata | sweetviz | **ThaiEDA** |
-|-----------|:------:|:--------:|:-----------:|
-| Buddhist Era dates (พ.ศ.) | 25%* | 0% | **✅** |
-| Thai numerals (๑๒๓) | 0% | 0% | **✅** |
-| Zero-width spaces | 0% | 0% | **❌** |
-| Mojibake (TIS-620) | 0% | 0% | **✅** |
-| **Thai GTR** | **25%** | **0%** | **75%** |
+**Table B — Thai-specific detection** (4 Thai issues — competitors don't claim Thai support)
 
-\* ydata detected BE dates via generic encoding keywords, not Thai-specific recognition.
+| Thai issue | ydata | sweetviz | Evidently | **ThaiEDA** |
+|-----------|:------:|:--------:|:---------:|:-----------:|
+| Buddhist Era dates (พ.ศ.) | ✅\* | 0% | ✅\* | **✅** |
+| Thai numerals (๑๒๓) | 0% | 0% | ✅\* | **✅** |
+| Zero-width spaces | 0% | 0% | 0% | **❌** |
+| Mojibake (TIS-620) | 0% | 0% | ✅\* | **✅** |
+| **Thai GTR** | **25%** | **0%** | **100%\*** | **75%** |
 
-Competitors score 0% on Thai issues by design — they don't claim Thai language support. ThaiEDA's 75% (3/4) reflects its purpose-built Thai detection engine. The one miss (zero-width space in `category_text`) is a known gap being addressed.
+\* Evidently scores high on Thai keywords via generic matches ("encoding" appears in its CSS/JS framework), not Thai-specific recognition. ydata detected BE dates via generic encoding keywords. These are keyword-matching artifacts, not genuine Thai detection — competitors do not claim Thai language support.
+
+ThaiEDA's 75% (3/4) reflects purpose-built Thai detection. The one miss (zero-width space in `category_text`) is a known gap. Competitors score 0% on genuine Thai detection by design.
 
 ---
 

@@ -8,5 +8,15 @@
     "time": 3.29,
     "html_size": 961115,
     "text_size": 10884
+  },
+  "evidently": {
+    "time": 0.77,
+    "html_size": 3751300,
+    "text_size": 0
+  },
+  "pygwalker": {
+    "time": 0.09,
+    "html_size": 2947680,
+    "text_size": 0
   }
 }
