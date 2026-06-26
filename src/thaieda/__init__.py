@@ -33,9 +33,15 @@ import pandas as pd
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from thaieda.narrative import NarrativeResult
     from thaieda.report import ProfileReport
 
-__version__ = "1.5.0"
+try:
+    from importlib.metadata import version as _pkg_version
+
+    __version__ = _pkg_version("thaieda")
+except Exception:
+    __version__ = "2.0.0"
 __all__ = [
     "profile",
     "ProfileReport",
@@ -67,6 +73,11 @@ __all__ = [
     "EDAResult",
     "run_folder",
     "FolderResult",
+    "clean",
+    "CleaningReport",
+    "downcast_dtypes",
+    "generate_narrative",
+    "NarrativeResult",
     "__version__",
 ]
 
@@ -82,6 +93,7 @@ class EDAResult:
         report: ProfileReport ที่รันการวิเคราะห์ครบแล้ว (detect, quality, insights, viz).
         llm_response: ข้อความตอบกลับจาก LLM (ถ้าเรียกด้วย llm=True) มิฉะนั้น None.
         notes: รายการหมายเหตุ/คำเตือนที่เกิดระหว่างการวิเคราะห์.
+        narrative: บทสรุปอัตโนมัติแบบ template (NarrativeResult) — v2.0; ไม่ต้องใช้ LLM.
 
     ใช้ ``result.report`` เพื่อเข้าถึงข้อมูลทั้งหมด (overview, quality_issues,
     insights, anomaly, to_html, to_dict, ฯลฯ) หรือ ``result.cleaned_df`` เพื่อ
@@ -91,6 +103,7 @@ class EDAResult:
     report: ProfileReport
     llm_response: str | None = None
     notes: list[str] = field(default_factory=list)
+    narrative: NarrativeResult | None = None  # v2.0: template narrative (offline, no LLM)
 
     @property
     def cleaned_df(self) -> pd.DataFrame:
@@ -173,6 +186,7 @@ def run(
     model: str | None = None,
     llm_language: str | None = None,
     epsilon: float = 1.0,
+    narrative: bool = True,
 ) -> EDAResult:
     """วิเคราะห์ข้อมูลแบบครบวงจรในบรรทัดเดียว — detect → clean → quality → insights → viz → report.
 
@@ -204,9 +218,11 @@ def run(
         model: ชื่อโมเดล LLM (None = default ของ provider).
         llm_language: ภาษาของ LLM prompt — None = ใช้ค่าเดียวกับ ``lang``.
         epsilon: พารามิเตอร์ epsilon สำหรับ dp_noise (default: 1.0).
+        narrative: สร้างบทสรุปอัตโนมัติแบบ template (offline, ไม่ต้องใช้ LLM) — v2.0 (default: True).
 
     Returns:
-        EDAResult — มี ``.report`` (ProfileReport), ``.llm_response`` (ถ้า llm=True), ``.notes``
+        EDAResult — มี ``.report`` (ProfileReport), ``.llm_response`` (ถ้า llm=True),
+        ``.narrative`` (NarrativeResult), ``.notes``
 
     Raises:
         TypeError: ถ้า ``df`` ไม่ใช่ pandas DataFrame.
@@ -243,21 +259,73 @@ def run(
 
     notes: list[str] = list(report.notes)
 
+    # v2.0: บทสรุปอัตโนมัติแบบ template (offline, deterministic, ไม่ต้องใช้ LLM)
+    narrative_result = None
+    if narrative:
+        try:
+            narrative_result = _build_narrative(report, language=llm_language or lang)
+        except Exception as exc:  # noqa: BLE001 — narrative ไม่ควรทำให้ทั้ง run() พัง
+            notes.append(f"สร้าง narrative ไม่สำเร็จ: {exc}")
+
     llm_response: str | None = None
     if llm:
         from thaieda.llm import analyze_with_llm
 
-        llm_response = analyze_with_llm(
-            report.df,
-            privacy=privacy,
-            provider=provider,
-            model=model,
-            language=llm_language or lang,
-            insights=[i.to_dict() for i in report.insights.insights] if report.insights else None,
-            epsilon=epsilon,
-        )
+        try:
+            llm_response = analyze_with_llm(
+                report.df,
+                privacy=privacy,
+                provider=provider,
+                model=model,
+                language=llm_language or lang,
+                insights=(
+                    [i.to_dict() for i in report.insights.insights] if report.insights else None
+                ),
+                epsilon=epsilon,
+            )
+        except (RuntimeError, ImportError) as exc:
+            # v2.0: graceful degradation — ไม่มี API key / ไม่มี package → ใช้ template narrative แทน
+            if narrative_result is None:
+                narrative_result = _build_narrative(report, language=llm_language or lang)
+            llm_response = narrative_result.executive_summary_th
+            notes.append(
+                f"LLM ไม่พร้อมใช้งาน ({exc}) — ใช้บทสรุปแบบ template (narrative) แทน โดยไม่ต้องใช้ API key"
+            )
 
-    return EDAResult(report=report, llm_response=llm_response, notes=notes)
+    return EDAResult(
+        report=report,
+        llm_response=llm_response,
+        notes=notes,
+        narrative=narrative_result,
+    )
+
+
+def _build_narrative(report: ProfileReport, *, language: str):
+    """สร้าง NarrativeResult จาก ProfileReport — รวม insight engine + quality score."""
+    from thaieda.narrative import generate_narrative
+    from thaieda.quality._score import compute_quality_score
+
+    # เลือก insight ที่รวยที่สุด: cross-column cards ก่อน แล้วถอยไป insight summary
+    insights: list[Any] = []
+    if report.insight_engine is not None and report.insight_engine.cards:
+        insights = list(report.insight_engine.cards)
+    elif report.insights is not None:
+        insights = list(report.insights.insights)
+
+    quality_score = None
+    try:
+        ov = report.overview
+        quality_score = dict(
+            compute_quality_score(
+                report.quality_issues,
+                n_columns=int(ov.get("columns", 0)),
+                n_rows=int(ov.get("rows", 0)),
+            )
+        )
+    except Exception:  # noqa: BLE001 — quality score เป็นส่วนเสริม ไม่ควรทำให้ narrative พัง
+        quality_score = None
+
+    return generate_narrative(insights, quality_score=quality_score, language=language)
 
 
 # alias — thaieda.EDA(df) เทียบเท่า thaieda.run(df)
@@ -737,4 +805,21 @@ def __getattr__(name: str):
         from thaieda.report._dataset import DatasetReport
 
         return DatasetReport
+    if name == "clean":
+        # v2.0: subpackage ที่ callable — thaieda.clean(df) → clean(df)
+        import thaieda.clean as _clean_pkg
+
+        return _clean_pkg
+    if name == "CleaningReport":
+        from thaieda.clean import CleaningReport
+
+        return CleaningReport
+    if name == "downcast_dtypes":
+        from thaieda.io import downcast_dtypes
+
+        return downcast_dtypes
+    if name in ("generate_narrative", "NarrativeResult"):
+        import thaieda.narrative as _narrative
+
+        return getattr(_narrative, name)
     raise AttributeError(f"module 'thaieda' has no attribute {name!r}")

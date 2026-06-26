@@ -1285,9 +1285,15 @@ def _recompute_one(
     return det
 
 
+# v2.0: รูปแบบ insight ใหม่ — Simpson's paradox + target leakage
+from thaieda.insight_engine._leakage import detect_target_leakage
+from thaieda.insight_engine._paradox import detect_simpsons_paradox
+
 __all__ = [
     "Perspective",
     "InsightCard",
     "InsightEngineResult",
     "discover_insights",
+    "detect_simpsons_paradox",
+    "detect_target_leakage",
 ]

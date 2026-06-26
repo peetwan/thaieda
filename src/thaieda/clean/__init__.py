@@ -735,6 +735,96 @@ def coerce_numeric_column(series: pd.Series) -> tuple[pd.Series, CleaningResult]
     )
 
 
+# ----------------------------------------------------------------------------
+# v2.0: การแปลงคอลัมน์สกุลเงิน → ตัวเลขล้วน
+# ----------------------------------------------------------------------------
+# สัญลักษณ์สกุลเงินที่ตัดทิ้ง: ฿ $ € £ ¥ ₹ + อักษรย่อ (Rs, USD, THB, บาท ฯลฯ)
+_CURRENCY_SYMBOL_CHARS = "฿$€£¥₹"
+_CURRENCY_WORD_RE = re.compile(
+    r"(?:\b(?:Rs|USD|THB|EUR|GBP|JPY|INR|CNY)\b\.?)|(?:ดอลลาร์|ยูโร|บาท)",
+    re.IGNORECASE,
+)
+# ตรวจจับว่าเซลล์ "มีสัญลักษณ์สกุลเงิน" หรือไม่ (อักขระสัญลักษณ์ หรือคำย่อ)
+_CURRENCY_DETECT_RE = re.compile(
+    r"["
+    + re.escape(_CURRENCY_SYMBOL_CHARS)
+    + r"]|"
+    + r"(?:\b(?:Rs|USD|THB|EUR|GBP|JPY|INR|CNY)\b)|(?:ดอลลาร์|ยูโร|บาท)",
+    re.IGNORECASE,
+)
+# อักขระที่ต้องตัดออกเพื่อให้เหลือตัวเลขล้วน: สัญลักษณ์ + comma คั่นหลักพัน + ช่องว่าง
+_CURRENCY_STRIP_RE = re.compile(r"[" + re.escape(_CURRENCY_SYMBOL_CHARS) + r",\s]")
+
+# สัดส่วนขั้นต่ำของค่าที่มีสัญลักษณ์สกุลเงิน เพื่อถือว่าคอลัมน์เป็น "คอลัมน์สกุลเงิน"
+_CURRENCY_MIN_RATIO = 0.10
+
+
+def normalize_currency(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
+    """แปลงคอลัมน์สกุลเงินเป็นตัวเลขล้วน — v2.0.
+
+    ตัดสัญลักษณ์: ฿, $, €, £, ¥, ₹, Rs/USD/THB/บาท + commas คั่นหลักพัน
+    รักษา: ค่า NaN, ค่าที่เป็นตัวเลขอยู่แล้ว (คอลัมน์ numeric จะไม่ถูกแตะ)
+    ตรวจจับ: ทำงานเฉพาะคอลัมน์ที่มีสัญลักษณ์สกุลเงิน > 10% ของค่าที่ไม่ว่าง
+        (กันการแปลงคอลัมน์ข้อความทั่วไปที่บังเอิญมี '$' ปนเล็กน้อย)
+
+    คืน (Series ที่เป็นตัวเลข, CleaningResult). ถ้าไม่เข้าเกณฑ์จะคืน series เดิมไม่แตะ.
+    """
+    col = str(series.name or "")
+    # คอลัมน์ที่เป็นตัวเลขอยู่แล้ว — ไม่ต้องทำอะไร
+    if pd.api.types.is_numeric_dtype(series):
+        return series, CleaningResult(
+            operation="normalize_currency",
+            rows_affected=0,
+            column=col,
+            description_th="คอลัมน์เป็นตัวเลขอยู่แล้ว — ข้ามการแปลงสกุลเงิน",
+        )
+
+    notna = series.notna()
+    if not notna.any():
+        return series, CleaningResult(operation="normalize_currency", rows_affected=0, column=col)
+
+    str_vals = series[notna].astype(str).str.strip()
+    has_symbol = str_vals.str.contains(_CURRENCY_DETECT_RE, na=False)
+    n = int(str_vals.shape[0])
+    ratio = float(has_symbol.sum()) / n if n else 0.0
+
+    # เกณฑ์ตรวจจับ: ต้องมีสัญลักษณ์สกุลเงิน > 10% จึงถือว่าเป็นคอลัมน์สกุลเงิน
+    if ratio <= _CURRENCY_MIN_RATIO:
+        return series, CleaningResult(
+            operation="normalize_currency",
+            rows_affected=0,
+            column=col,
+            description_th=f"ไม่ใช่คอลัมน์สกุลเงิน (มีสัญลักษณ์ {ratio * 100:.0f}% ≤ 10%)",
+        )
+
+    # ตัดสัญลักษณ์ + คำย่อ + comma แล้วแปลงเป็นตัวเลข
+    stripped = str_vals.str.replace(_CURRENCY_WORD_RE, "", regex=True)
+    stripped = stripped.str.replace(_CURRENCY_STRIP_RE, "", regex=True)
+    coerced = pd.to_numeric(stripped, errors="coerce")
+    ok = coerced.notna()
+
+    out = series.astype(object)
+    ok_idx = coerced[ok].index
+    out.loc[ok_idx] = coerced[ok].to_numpy()
+    # ค่าที่แปลงไม่ได้ (เช่น 'free') → NaN เพื่อให้คอลัมน์เป็น numeric ล้วน
+    fail_idx = coerced[~ok].index
+    out.loc[fail_idx] = pd.NA
+    with contextlib.suppress(Exception):
+        out = pd.to_numeric(out, errors="coerce")
+
+    affected = int(has_symbol.sum())
+    before_examples = str_vals[has_symbol].to_numpy()[:_MAX_EXAMPLES].tolist()
+    after_examples = [str(v) for v in coerced[has_symbol].to_numpy()[:_MAX_EXAMPLES].tolist()]
+    return out, CleaningResult(
+        operation="normalize_currency",
+        rows_affected=affected,
+        column=col,
+        before_examples=before_examples,
+        after_examples=after_examples,
+        description_th=f"แปลงคอลัมน์สกุลเงิน → ตัวเลข ({affected} ค่ามีสัญลักษณ์, ตัด ฿/$/comma)",
+    )
+
+
 def convert_buddhist_era(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
     """แปลงปีพุทธศักราช (พ.ศ.) → คริสต์ศักราช (ค.ศ.) ในคอลัมน์ตัวเลขหรือวันที่ (v0.8).
 
@@ -950,6 +1040,8 @@ def handle_missing_values(
       - 'median'  : แทนด้วย median (numeric only)
       - 'mode'    : แทนด้วย mode (ทุกประเภท)
       - 'unknown' : แทนด้วย 'unknown' (text/categorical)
+      - 'ml'      : (v2.0) Series เดี่ยว → median/mode; ใช้ thaieda.clean(df, handle_missing="ml")
+                    เพื่อ ML imputation เต็มรูปแบบ (IterativeImputer ที่ใช้คอลัมน์อื่นทำนาย)
 
     Q1: คอลัมน์ที่ขาดข้อมูลสูงจะไม่ถูก fill เงียบ ๆ ในโหมด 'flag' (ค่าเริ่มต้น):
       - missing > 80% → flag เป็น "mostly_missing" และข้ามการเติมค่า (fill 0/'ไม่ระบุ' จะบิดเบือนสถิติ)
@@ -1000,6 +1092,26 @@ def handle_missing_values(
     elif strategy == "unknown":
         out = series.fillna("unknown")
         desc = f"แทน {missing} ค่าว่างด้วย 'unknown'"
+    elif strategy == "ml":
+        # ML imputation ระดับ Series เดี่ยว — IterativeImputer ต้องใช้หลายคอลัมน์ร่วมทำนาย
+        # คอลัมน์เดียวจึง degrade เป็น median (numeric) / mode (categorical) อย่างโปร่งใส
+        # → สำหรับ ML imputation เต็มรูปแบบ เรียก
+        #   thaieda.clean(df, handle_missing="ml")
+        if pd.api.types.is_numeric_dtype(series):
+            med = series.median()
+            out = series.fillna(med)
+            desc = (
+                f"[ML→median] แทน {missing} ค่าว่างด้วย median ({med}) "
+                "— Series เดี่ยวใช้ IterativeImputer ไม่ได้ ใช้ median แทน"
+            )
+        else:
+            mode_series = series.mode()
+            mode_val = mode_series.iloc[0] if not mode_series.empty else None
+            if mode_val is not None:
+                out = series.fillna(mode_val)
+                desc = f"[ML→mode] แทน {missing} ค่าว่าง (categorical) ด้วย mode ({mode_val})"
+            else:
+                desc = f"ไม่สามารถหา mode ของคอลัมน์ '{col_name}' ได้"
     else:  # 'flag' (default)
         if pd.api.types.is_numeric_dtype(series):
             out = series.fillna(0)
@@ -1041,6 +1153,7 @@ _OPERATIONS: dict[str, Callable[[pd.Series], tuple[pd.Series, CleaningResult]]] 
     "expand_abbreviations": expand_abbreviations,
     "spell_correct": spell_correct,
     "coerce_numeric": coerce_numeric_column,
+    "currency": normalize_currency,
     "buddhist_era": convert_buddhist_era,
     "normalize_dates": normalize_dates,
 }
@@ -1138,6 +1251,7 @@ __all__ = [
     "spell_correct",
     "fix_keyboard_layout",
     "coerce_numeric_column",
+    "normalize_currency",
     "convert_buddhist_era",
     "normalize_dates",
     "remove_duplicate_rows",
@@ -1145,4 +1259,29 @@ __all__ = [
     "clean_thai_text",
     "available_operations",
     "DEFAULT_OPERATIONS",
+    "clean",
+    "CleaningReport",
 ]
+
+
+# ----------------------------------------------------------------------------
+# v2.0: DataFrame-level pipeline + ทำให้ thaieda.clean(df) เรียกได้
+# ----------------------------------------------------------------------------
+# import ไว้ท้ายไฟล์เพื่อให้ชื่อ (CleaningResult, handle_missing_values, ฯลฯ) ที่ _pipeline ใช้
+# ถูกนิยามครบก่อน — เลี่ยง circular import
+# ทำให้ "thaieda.clean(df)" เรียกใช้งานได้ ทั้งที่ thaieda.clean เป็นชื่อ subpackage —
+# เปลี่ยนคลาสของ module object เป็น subclass ของ ModuleType ที่ callable (เทคนิคมาตรฐาน, PEP 562 era)
+import sys as _sys  # noqa: E402
+from types import ModuleType as _ModuleType  # noqa: E402
+
+from thaieda.clean._pipeline import CleaningReport, clean  # noqa: E402
+
+
+class _CallableCleanModule(_ModuleType):
+    """แพ็กเกจ thaieda.clean ที่เรียกเป็นฟังก์ชันได้: ``thaieda.clean(df)`` → ``clean(df)``."""
+
+    def __call__(self, df, **kwargs):  # type: ignore[override]
+        return clean(df, **kwargs)
+
+
+_sys.modules[__name__].__class__ = _CallableCleanModule

@@ -178,13 +178,21 @@ def _read_with_format(path: Path, fmt: str, encoding: str) -> pd.DataFrame:
     raise ValueError(f"format ไม่รองรับ: {fmt!r} — รองรับเฉพาะ auto, csv, json, jsonl, excel")
 
 
-def read_data(path: str | Path, format: str = "auto", encoding: str = "auto") -> pd.DataFrame:
+def read_data(
+    path: str | Path,
+    format: str = "auto",
+    encoding: str = "auto",
+    *,
+    downcast: bool = False,
+) -> pd.DataFrame:
     """อ่านไฟล์ CSV/JSON อัตโนมัติ — ตรวจ encoding และ format ให้เอง.
 
     Args:
         path: พาธไฟล์ที่ต้องการอ่าน.
         format: "auto" (เดาจากนามสกุล), "csv", "json" หรือ "jsonl".
         encoding: "auto" (ลอง utf-8/tis-620/cp874/cp1252) หรือ encoding เฉพาะ.
+        downcast: (v2.0) ลด dtype หลังอ่าน (int64→int32, float64→float32, object→category)
+            เพื่อประหยัด memory บนเครื่อง low-resource (default: False).
 
     Returns:
         pandas DataFrame.
@@ -210,8 +218,9 @@ def read_data(path: str | Path, format: str = "auto", encoding: str = "auto") ->
     else:
         tried_enc = f"encoding: {enc}"
 
+    df: pd.DataFrame | None = None
     try:
-        return _read_with_format(p, fmt, enc)
+        df = _read_with_format(p, fmt, enc)
     except Exception as exc:  # noqa: BLE001 — เก็บ error ไว้ก่อน ลอง format อื่นถ้าเดาเอง
         if not auto_format:
             raise ValueError(f"อ่านไฟล์ {p} แบบ {fmt} ไม่สำเร็จ ({tried_enc}): {exc}") from exc
@@ -220,16 +229,34 @@ def read_data(path: str | Path, format: str = "auto", encoding: str = "auto") ->
             if alt == fmt:
                 continue
             try:
-                return _read_with_format(p, alt, enc)
+                df = _read_with_format(p, alt, enc)
+                break
             except Exception:  # noqa: BLE001 — ลองตัวถัดไป
                 continue
-        raise ValueError(
-            f"อ่านไฟล์ {p} ไม่สำเร็จ (ลองทั้ง CSV และ JSON แล้ว, {tried_enc}): {exc}"
-        ) from exc
+        if df is None:
+            raise ValueError(
+                f"อ่านไฟล์ {p} ไม่สำเร็จ (ลองทั้ง CSV และ JSON แล้ว, {tried_enc}): {exc}"
+            ) from exc
+
+    if downcast:
+        from thaieda.io._downcast import downcast_dtypes
+
+        df, _ = downcast_dtypes(df)
+    return df
 
 
 __all__ = [
     "read_data",
     "detect_encoding",
     "detect_format",
+    "downcast_dtypes",
 ]
+
+
+def __getattr__(name: str):
+    """Lazy import — ให้ ``thaieda.io.downcast_dtypes`` เข้าถึงได้โดยไม่โหลดตอน import."""
+    if name == "downcast_dtypes":
+        from thaieda.io._downcast import downcast_dtypes
+
+        return downcast_dtypes
+    raise AttributeError(f"module 'thaieda.io' has no attribute {name!r}")
