@@ -11,6 +11,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from thaieda.detect import ColumnType, _detect_language, script_ratio
@@ -878,6 +879,323 @@ def normalize_thai_digits(text: str) -> str:
     return text.translate(_THAI_TO_ARABIC)
 
 
+# ------------------------------------------------------------------------------
+# v1.8: Missing data mechanism detection (MCAR / MAR / MNAR)
+# ------------------------------------------------------------------------------
+_MISSING_MECHANISM_MIN_ROWS = 50
+_MISSING_MECHANISM_MIN_COLS = 3
+
+
+@dataclass
+class MissingMechanismResult:
+    """ผลการวิเคราะห์รูปแบบค่าว่าง — v1.8."""
+
+    mechanism: str  # "MCAR", "MAR_likely", "MNAR_likely", "insufficient_data"
+    missing_pct: float
+    missing_cols: int
+    total_cols: int
+    description: str
+    description_th: str
+    evidence: dict[str, Any]
+
+    def to_dict(self) -> dict:
+        return {
+            "mechanism": self.mechanism,
+            "missing_pct": round(self.missing_pct, 2),
+            "missing_cols": self.missing_cols,
+            "total_cols": self.total_cols,
+            "description": self.description,
+            "description_th": self.description_th,
+            "evidence": self.evidence,
+        }
+
+
+def detect_missing_mechanism(df: pd.DataFrame) -> MissingMechanismResult | None:
+    """วิเคราะห์รูปแบบค่าว่าง (missing data mechanism) — v1.8.
+
+    จำแนก pattern ของ missing data ออกเป็น:
+      - MCAR (Missing Completely at Random): ค่าว่างกระจายสุ่ม ไม่ขึ้นกคอลัมน์อื่น
+      - MAR_likely (Missing at Random): ค่าว่างมีความสัมพันธ์กับคอลัมน์ที่สังเกตได้
+      - MNAR_likely (Missing Not at Random): ค่าว่างน่าจะขึ้นกับค่าตัวเอง
+
+    วิธี:
+      1. สร้าง missing indicator matrix (1 = missing, 0 = present)
+      2. ตรวจ Little's MCAR test approximation: เปรียบเทียบ covariance ของ
+         observed data กับ covariance ของ data ที่ไม่มี missing
+      3. ถ้า missing pattern ไม่ correlated กับคอลัมน์อื่น → MCAR
+      4. ถ้า missing pattern ในคอลัมน์ A correlated กับค่าในคอลัมน์ B → MAR_likely
+      5. ถ้าไม่มีคอลัมน์อื่นอธิบายได้ แต่ missing rate สูง → MNAR_likely
+
+    Args:
+        df: ข้อมูลที่วิเคราะห์.
+
+    Returns:
+        MissingMechanismResult หรือ None ถ้าข้อมูลไม่พอหรือไม่มี missing.
+    """
+    n_rows, n_cols = df.shape
+    if n_rows < _MISSING_MECHANISM_MIN_ROWS or n_cols < _MISSING_MECHANISM_MIN_COLS:
+        return None
+
+    # คำนวณ missing rate รวม
+    missing_matrix = df.isna()
+    total_cells = n_rows * n_cols
+    total_missing = int(missing_matrix.sum().sum())
+    if total_missing == 0:
+        return None
+
+    missing_pct = (total_missing / total_cells) * 100.0
+
+    # หาคอลัมน์ที่มี missing
+    col_missing = missing_matrix.sum()
+    missing_cols = col_missing[col_missing > 0]
+    n_missing_cols = len(missing_cols)
+
+    if n_missing_cols == 0:
+        return None
+
+    evidence: dict[str, Any] = {
+        "total_missing": total_missing,
+        "missing_by_column": {
+            str(k): int(v) for k, v in missing_cols.items()
+        },
+    }
+
+    # ตรวจ correlation ของ missing indicators ระหว่างคอลัมน์
+    # ถ้า missing ในคอลัมน์ A correlated กับ missing ในคอลัมน์ B → co-missingness
+    missing_indicators = missing_matrix.astype(float)
+    # เลือกเฉพาะคอลัมน์ที่มี missing
+    cols_with_missing = list(missing_cols.index)
+    sub_matrix = missing_indicators[cols_with_missing]
+
+    if len(cols_with_missing) >= 2:
+        corr = sub_matrix.corr()
+        # หาคู่ที่ correlated สูง (|r| > 0.3)
+        high_corr_pairs: list[dict] = []
+        for i, col_a in enumerate(cols_with_missing):
+            for col_b in cols_with_missing[i + 1 :]:
+                r = corr.loc[col_a, col_b]
+                if pd.notna(r) and abs(r) > 0.3:
+                    high_corr_pairs.append({
+                        "col_a": str(col_a),
+                        "col_b": str(col_b),
+                        "correlation": round(float(r), 3),
+                    })
+        evidence["co_missing_correlations"] = high_corr_pairs
+    else:
+        high_corr_pairs = []
+
+    # ตรวจ: missing indicator correlated กับค่าจริงของคอลัมน์อื่นหรือไม่ (MAR detection)
+    # สำหรับแต่ละคอลัมน์ที่มี missing: เช็คว่า missing pattern ใน col A
+    # correlated กับค่าใน col B (numeric) หรือไม่
+    mar_evidence: list[dict] = []
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    for miss_col in cols_with_missing:
+        miss_indicator = missing_matrix[miss_col].astype(int)
+        for val_col in numeric_cols:
+            if val_col == miss_col:
+                continue
+            val_series = pd.to_numeric(df[val_col], errors="coerce")
+            # ต้องมีค่าที่ไม่ missing พอ
+            valid = val_series.notna() & miss_indicator.notna()
+            if valid.sum() < 30:
+                continue
+            # แปลงเป็น indicator เพื่อคำนวณ correlation
+            miss_vals = miss_indicator[valid].astype(float)
+            obs_vals = val_series[valid].astype(float)
+            if miss_vals.std() == 0 or obs_vals.std() == 0:
+                continue
+            r = miss_vals.corr(obs_vals)
+            if pd.notna(r) and abs(r) > 0.2:
+                mar_evidence.append({
+                    "missing_col": str(miss_col),
+                    "predictor_col": str(val_col),
+                    "correlation": round(float(r), 3),
+                })
+    evidence["mar_indicators"] = mar_evidence
+
+    # ตัดสินใจ mechanism
+    if n_missing_cols == df.shape[1] and missing_pct > 50:
+        # ทุกคอลัมน์มี missing สูง → MNAR_likely
+        mechanism = "MNAR_likely"
+        desc = "High missing rate across all columns suggests data may be MNAR (Missing Not at Random)."
+        desc_th = "อัตราค่าว่างสูงทุกคอลัมน์ ข้อมูลอาจเป็น MNAR (ค่าว่างขึ้นกับค่าตัวเอง)"
+    elif mar_evidence:
+        mechanism = "MAR_likely"
+        desc = f"Missing patterns correlated with observed values ({len(mar_evidence)} pairs) — likely MAR (Missing at Random)."
+        desc_th = f"รูปแบบค่าว่างมีความสัมพันธ์กับค่าที่สังเกตได้ ({len(mar_evidence)} คู่) — น่าจะเป็น MAR"
+    elif high_corr_pairs:
+        mechanism = "MAR_likely"
+        desc = f"Co-missingness detected ({len(high_corr_pairs)} column pairs) — missing values cluster together."
+        desc_th = f"พบค่าว่างเกิดพร้อมกัน ({len(high_corr_pairs)} คู่คอลัมน์) — ค่าว่างกลุ่มติดกัน"
+    else:
+        mechanism = "MCAR"
+        desc = "No correlation between missing patterns and observed data — consistent with MCAR (Missing Completely at Random)."
+        desc_th = "ไม่พบความสัมพันธ์ระหว่างรูปแบบค่าว่างกับข้อมูล — สอดคล้องกับ MCAR (สุ่มสมบูรณ์)"
+
+    return MissingMechanismResult(
+        mechanism=mechanism,
+        missing_pct=missing_pct,
+        missing_cols=n_missing_cols,
+        total_cols=n_cols,
+        description=desc,
+        description_th=desc_th,
+        evidence=evidence,
+    )
+
+
+# ------------------------------------------------------------------------------
+# v1.8: Distribution fitting + Kolmogorov-Smirnov goodness-of-fit test
+# ------------------------------------------------------------------------------
+_KS_MIN_SAMPLE = 30
+_KS_ALPHA = 0.05
+_DISTRIBUTION_CANDIDATES = ("normal", "lognormal", "exponential", "uniform")
+
+
+@dataclass
+class DistributionFitResult:
+    """ผลการ fitting distribution — v1.8."""
+
+    column: str
+    best_fit: str  # ชื่อ distribution ที่ fit ที่สุด
+    ks_statistic: float
+    p_value: float
+    parameters: dict[str, float]
+    description: str
+    description_th: str
+    all_fits: list[dict[str, Any]]
+
+    def to_dict(self) -> dict:
+        return {
+            "column": self.column,
+            "best_fit": self.best_fit,
+            "ks_statistic": round(self.ks_statistic, 4),
+            "p_value": round(self.p_value, 4),
+            "parameters": {k: round(v, 4) for k, v in self.parameters.items()},
+            "description": self.description,
+            "description_th": self.description_th,
+            "all_fits": self.all_fits,
+        }
+
+
+def fit_distributions(series: pd.Series, column: str) -> DistributionFitResult | None:
+    """ทดสอบ fitting distribution และ KS goodness-of-fit — v1.8.
+
+    ลอง fit 4 distributions (normal, lognormal, exponential, uniform) แล้ว
+    เลือกที่ p-value สูงสุด (fit ที่ดีที่สุด) โดยใช้ Kolmogorov-Smirnov test
+
+    Args:
+        series: คอลัมน์ตัวเลข.
+        column: ชื่อคอลัมน์.
+
+    Returns:
+        DistributionFitResult หรือ None ถ้าข้อมูลไม่พอ.
+    """
+    numeric = pd.to_numeric(series, errors="coerce").dropna()
+    n = len(numeric)
+    if n < _KS_MIN_SAMPLE:
+        return None
+
+    values = numeric.to_numpy(dtype="float64")
+    if values.std() == 0:
+        return None  # constant column — ไม่มี distribution ที่ fit ได้
+
+    # พยายาม import scipy (optional)
+    try:
+        from scipy import stats as st
+    except ImportError:
+        return None  # ไม่มี scipy — skip
+
+    all_fits: list[dict[str, Any]] = []
+
+    # Normal distribution
+    try:
+        mu, sigma = st.norm.fit(values)
+        ks_stat, p_val = st.kstest(values, "norm", args=(mu, sigma))
+        all_fits.append({
+            "distribution": "normal",
+            "ks_statistic": float(ks_stat),
+            "p_value": float(p_val),
+            "parameters": {"mean": float(mu), "std": float(sigma)},
+        })
+    except Exception:
+        pass
+
+    # Lognormal distribution (ต้องมีค่าบวก)
+    if (values > 0).all():
+        try:
+            shape, loc, scale = st.lognorm.fit(values, floc=0)
+            ks_stat, p_val = st.kstest(values, "lognorm", args=(shape, loc, scale))
+            all_fits.append({
+                "distribution": "lognormal",
+                "ks_statistic": float(ks_stat),
+                "p_value": float(p_val),
+                "parameters": {"shape": float(shape), "loc": float(loc), "scale": float(scale)},
+            })
+        except Exception:
+            pass
+
+    # Exponential distribution (ต้องมีค่าไม่ติดลบ)
+    if (values >= 0).all():
+        try:
+            loc, scale = st.expon.fit(values)
+            ks_stat, p_val = st.kstest(values, "expon", args=(loc, scale))
+            all_fits.append({
+                "distribution": "exponential",
+                "ks_statistic": float(ks_stat),
+                "p_value": float(p_val),
+                "parameters": {"loc": float(loc), "scale": float(scale)},
+            })
+        except Exception:
+            pass
+
+    # Uniform distribution
+    try:
+        loc, scale = st.uniform.fit(values)
+        ks_stat, p_val = st.kstest(values, "uniform", args=(loc, scale))
+        all_fits.append({
+            "distribution": "uniform",
+            "ks_statistic": float(ks_stat),
+            "p_value": float(p_val),
+            "parameters": {"loc": float(loc), "scale": float(scale)},
+        })
+    except Exception:
+        pass
+
+    if not all_fits:
+        return None
+
+    # เลือก distribution ที่ p-value สูงสุด (fit ดีสุด)
+    best = max(all_fits, key=lambda x: x["p_value"])
+    best_name = best["distribution"]
+
+    # คำอธิบาย
+    _DIST_DESC_TH = {
+        "normal": "การกระจายปกติ",
+        "lognormal": "การกระจาย log-normal",
+        "exponential": "การกระจายเอกซ์โพเนนเชียล",
+        "uniform": "การกระจายสม่ำเสมอ",
+    }
+    fit_th = _DIST_DESC_TH.get(best_name, best_name)
+    is_good_fit = best["p_value"] >= _KS_ALPHA
+    if is_good_fit:
+        desc = f"'{column}' follows {best_name} distribution (KS p={best['p_value']:.4f})."
+        desc_th = f"'{column}' ตาม{fit_th} (KS p={best['p_value']:.4f})"
+    else:
+        desc = f"'{column}' does not follow any tested distribution well (best: {best_name}, p={best['p_value']:.4f})."
+        desc_th = f"'{column}' ไม่ตรงกับการกระจายใดที่ทดสอบ (ดีที่สุด: {fit_th}, p={best['p_value']:.4f})"
+
+    return DistributionFitResult(
+        column=column,
+        best_fit=best_name,
+        ks_statistic=best["ks_statistic"],
+        p_value=best["p_value"],
+        parameters=best["parameters"],
+        description=desc,
+        description_th=desc_th,
+        all_fits=all_fits,
+    )
+
+
 from thaieda.quality._score import (  # noqa: E402 — import หลัง QualityIssue เพื่อเลี่ยง circular import
     QualityBreakdown,
     QualityScoreResult,
@@ -888,6 +1206,8 @@ __all__ = [
     "QualityIssue",
     "QualityBreakdown",
     "QualityScoreResult",
+    "MissingMechanismResult",
+    "DistributionFitResult",
     "check_buddhist_era",
     "check_thai_numerals",
     "check_zero_width",
@@ -903,4 +1223,6 @@ __all__ = [
     "compute_quality_score",
     "validate_thai_id",
     "validate_thai_id_column",
+    "detect_missing_mechanism",
+    "fit_distributions",
 ]

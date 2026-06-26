@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import difflib
+import math
 import re
 import unicodedata
 import warnings
@@ -222,7 +223,17 @@ def _choose_outlier_method(values: np.ndarray, skew: float) -> tuple[str, np.nda
     """เลือกวิธีตามการกระจาย: เบ้มาก -> MAD (robust), ใกล้ปกติ -> z-score.
 
     ลองวิธีถัดไปเป็น fallback หากวิธีแรกใช้ไม่ได้ (เช่น std/MAD/IQR เป็น 0)
+
+    v1.8: เพิ่ม GESD (Generalized ESD) เป็นตัวเลือกแรกเมื่อข้อมูลใกล้ normal (skew < 0.5)
+          และมีขนาดพอ (n >= 25) — GESD จับ multiple outliers ได้ดีกว่าและไม่มี masking problem
     """
+    # v1.8: GESD สำหรับข้อมูลใกล้ normal
+    n = values.size
+    if skew < 0.5 and n >= 25:
+        gesd_mask = _gesd_test(values)
+        if gesd_mask is not None and bool(gesd_mask.any()):
+            return "Generalized ESD (Rosner)", gesd_mask
+
     if skew > 1.0:
         order = (
             ("modified_z_score (MAD)", _mad_mask),
@@ -240,6 +251,103 @@ def _choose_outlier_method(values: np.ndarray, skew: float) -> tuple[str, np.nda
         if mask is not None:
             return name, mask
     return "none", None
+
+
+def _gesd_test(
+    values: np.ndarray, max_outliers: int = 10, alpha: float = 0.05
+) -> np.ndarray | None:
+    """Generalized ESD test (Rosner 1983) — จับ multiple outliers — v1.8.
+
+    ทดสอบหา 1 ถึง k outliers พร้อมกันโดยควบคุม Type I error
+    ต้องการข้อมูลที่ approximately normal distribution
+
+    Args:
+        values: ข้อมูลตัวเลข 1D (ไม่มี NaN).
+        max_outliers: จำนวน outlier สูงสุดที่จะทดสอบ.
+        alpha: ระดับนัยสำคัญ.
+
+    Returns:
+        boolean mask ของ outliers (True = outlier) หรือ None ถ้าไม่สามารถทดสอบได้.
+    """
+    n = values.size
+    if n < 25:
+        return None  # GESD ต้องการ n >= 25
+
+    # เช็ค scipy สำหรับ t-distribution
+    try:
+        from scipy import stats as st
+    except ImportError:
+        return None
+
+    max_outliers = min(max_outliers, n // 2)
+    if max_outliers < 1:
+        return None
+
+    # ทำสำเนาเพื่อไม่แก้ข้อมูลต้นฉบับ
+    work = values.copy()
+    # เก็บ index ของค่าที่ยังไม่ถูก remove
+    remaining_indices = np.arange(n)
+
+    test_stats: list[float] = []
+    critical_values: list[float] = []
+
+    for i in range(max_outliers):
+        m = work.size
+        if m < 3:
+            break
+
+        mean = float(work.mean())
+        std = float(work.std(ddof=1))
+        if std == 0:
+            break
+
+        # หาค่าที่ห่างจาก mean มากที่สุด
+        deviations = np.abs(work - mean)
+        max_idx = int(np.argmax(deviations))
+        test_stat = deviations[max_idx] / std
+        test_stats.append(float(test_stat))
+
+        # Critical value: lambda_i = (n-i) * t_p / sqrt((n-i-1 + t_p^2) * (n-i+1))
+        n_i = n - i  # ขนาดใน iteration นี้ (ใช้ n ตั้งต้น ไม่ใช่ m)
+        p = 1 - alpha / (2 * n_i)
+        t_p = float(st.t.ppf(p, df=n_i - 2))
+        lam = (n_i * t_p) / math.sqrt((n_i - 2 + t_p**2) * (n_i + 1))
+        critical_values.append(float(lam))
+
+        # ลบค่านั้นออก
+        work = np.delete(work, max_idx)
+        remaining_indices = np.delete(remaining_indices, max_idx)
+
+    # นับจำนวน outliers: หาค่า i สูงสุดที่ test_stats[i] > critical_values[i]
+    # และทุกค่าก่อนหน้าก็ต้อง > critical ด้วย (consecutive)
+    num_outliers = 0
+    for i in range(len(test_stats)):
+        if test_stats[i] > critical_values[i]:
+            num_outliers = i + 1
+        else:
+            break
+
+    # สร้าง mask
+    mask = np.zeros(n, dtype=bool)
+    if num_outliers > 0:
+        # outlier indices คือค่าแรก num_outliers ที่ถูก remove
+        # (ตามลำดับการลบจาก iteration 0 ถึง num_outliers-1)
+        # แต่เราลบค่าออกทีละตัว ต้อง track ว่า index ไหนถูกลบบ้าง
+        # วิธีง่าย: รันใหม่และเก็บ indices
+        work2 = values.copy()
+        idx2 = np.arange(n)
+        for i in range(num_outliers):
+            mean = float(work2.mean())
+            std = float(work2.std(ddof=1))
+            if std == 0:
+                break
+            deviations = np.abs(work2 - mean)
+            max_idx = int(np.argmax(deviations))
+            mask[idx2[max_idx]] = True
+            work2 = np.delete(work2, max_idx)
+            idx2 = np.delete(idx2, max_idx)
+
+    return mask
 
 
 def detect_numeric_outliers(series: pd.Series) -> AnomalyIssue | None:

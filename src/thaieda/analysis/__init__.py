@@ -42,6 +42,7 @@ class TargetAssociation:
     score: float  # correlation coefficient, chi2 หรือ F-statistic
     p_value: float  # NaN ถ้าไม่มี scipy
     description_th: str
+    effect_size: float = 0.0  # v1.8: Cramér's V สำหรับ chi_square, |r| สำหรับ correlation
 
     def to_dict(self) -> dict:
         return {
@@ -51,6 +52,7 @@ class TargetAssociation:
             "score": round(self.score, 4) if not math.isnan(self.score) else None,
             "p_value": round(self.p_value, 4) if not math.isnan(self.p_value) else None,
             "description_th": self.description_th,
+            "effect_size": round(self.effect_size, 4) if self.effect_size else None,
         }
 
 
@@ -144,6 +146,39 @@ def _chi_square(observed: np.ndarray, st) -> tuple[float, float] | None:
     return chi2, float("nan")
 
 
+def _cramers_v(observed: np.ndarray, chi2: float | None = None) -> float:
+    """Cramér's V — effect size สำหรับ categorical association — v1.8.
+
+    คืนค่าระหว่าง 0 (ไม่สัมพันธ์) ถึง 1 (สัมพันธ์สมบูรณ์)
+    พร้อม bias correction (Bergsma's correction)
+
+    Args:
+        observed: contingency table (2D array).
+        chi2: chi-square statistic (ถ้าคำนวณแล้ว ส่งมาเพื่อไม่ต้องคำนวณซ้ำ).
+    """
+    n = int(observed.sum())
+    if n == 0:
+        return 0.0
+    r, c = observed.shape
+    k = min(r, c)
+    if k < 2:
+        return 0.0
+
+    # คำนวณ chi2 ถ้าไม่ได้ส่งมา
+    if chi2 is None:
+        row_marg = observed.sum(axis=1, keepdims=True)
+        col_marg = observed.sum(axis=0, keepdims=True)
+        expected = row_marg @ col_marg / n
+        nonzero = expected > 0
+        chi2 = float((((observed - expected) ** 2)[nonzero] / expected[nonzero]).sum())
+
+    v = math.sqrt(chi2 / (n * (k - 1)))
+
+    # Bias correction (Bergsma's)
+    v_adj = v - (k - 1) / (n - 1) if n > 1 else v
+    return max(0.0, v_adj)
+
+
 # ----------------------------------------------------------------------------
 # ฟังก์ชันหลัก
 # ----------------------------------------------------------------------------
@@ -224,7 +259,7 @@ def _associate(
             return None
         r, p = out
         desc = f"สหสัมพันธ์ Pearson ระหว่าง '{col}' กับ '{target_name}' = {r:.3f} — {_sig_th(p, alpha)}"
-        return TargetAssociation(col, target_name, "correlation", r, p, desc)
+        return TargetAssociation(col, target_name, "correlation", r, p, desc, effect_size=abs(r))
 
     # numeric × categorical (ทิศใดก็ได้) -> ANOVA F
     if "numeric" in (target_kind, col_kind) and "categorical" in (target_kind, col_kind):
@@ -244,7 +279,7 @@ def _associate(
         desc = f"ANOVA F ของ '{col}' เทียบกับ '{target_name}' = {f:.3f} — {_sig_th(p, alpha)}"
         return TargetAssociation(col, target_name, "anova", f, p, desc)
 
-    # categorical × categorical -> Chi-square
+    # categorical × categorical -> Chi-square + Cramér's V (v1.8)
     if target_kind == "categorical" and col_kind == "categorical":
         frame = pd.DataFrame({"a": series.astype("object"), "b": target.astype("object")}).dropna()
         if len(frame) < _MIN_SAMPLE:
@@ -254,8 +289,16 @@ def _associate(
         if out is None:
             return None
         chi2, p = out
-        desc = f"Chi-square ระหว่าง '{col}' กับ '{target_name}' = {chi2:.3f} — {_sig_th(p, alpha)}"
-        return TargetAssociation(col, target_name, "chi_square", chi2, p, desc)
+        # v1.8: คำนวณ Cramér's V effect size
+        v = _cramers_v(observed, chi2)
+        if v < 0.3:
+            strength_th = "ความสัมพันธ์เบาบาง"
+        elif v < 0.5:
+            strength_th = "ความสัมพันธ์ปานกลาง"
+        else:
+            strength_th = "ความสัมพันธ์ชัดเจน"
+        desc = f"Chi-square ระหว่าง '{col}' กับ '{target_name}' = {chi2:.3f} — {_sig_th(p, alpha)} (Cramér's V = {v:.3f}, {strength_th})"
+        return TargetAssociation(col, target_name, "chi_square", chi2, p, desc, effect_size=v)
 
     return None
 

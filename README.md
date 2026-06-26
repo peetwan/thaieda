@@ -117,21 +117,19 @@ We ran all three on **6 representative datasets** (small/large/wide, Thai + non-
 | aps-failure | 16,000 | 171 | 99.8s | **71.2 MB** | 15.8s | 8.2 MB | — | — | 93.0s | **0.48 MB** |
 | synthetic | 2,000 | 12 | 45s | 7.2 MB | 3s | 0.9 MB | 1s | 3.7 MB | 16s | **1.5 MB** |
 
-### Quality benchmark — 5 tools on synthetic dataset (10 known issues)
+### Quality benchmark — 4 tools on synthetic dataset (10 known issues)
 
 We injected 10 known defects into a 2,000-row synthetic dataset and measured detection. All tools processed identically: HTML output stripped to plain text, same keyword detection applied uniformly.
 
 **Table A — General EDA quality** (6 issues all tools can detect)
 
-| Metric | ydata (default) | sweetviz | Evidently | PyGWalker | **ThaiEDA** |
-|--------|:---:|:---:|:---:|:---:|:---:|
-| **GTR** — Ground-Truth Recall | 100% | 83% | 100% | 0%\* | **100%** |
-| **ITB** — Issue Type Breadth (11) | 73% | 64% | 91% | 0%\* | **91%** |
-| **RC** — Report Completeness (10) | 70% | 50% | 70% | 10% | **100%** |
-| Time | 45s | 3s | 1s | <1s | 16s |
-| HTML size | 7.2 MB | 0.9 MB | 3.7 MB | 2.9 MB | **1.5 MB** |
-
-\* PyGWalker is a visual exploration tool, not a report generator — its HTML contains a JS app shell with no extractable findings. Included for completeness, not as a quality comparison.
+| Metric | ydata (default) | sweetviz | Evidently | **ThaiEDA** |
+|--------|:---:|:---:|:---:|:---:|
+| **GTR** — Ground-Truth Recall | 100% | 83% | 100% | **100%** |
+| **ITB** — Issue Type Breadth (11) | 73% | 64% | 91% | **91%** |
+| **RC** — Report Completeness (10) | 70% | 50% | 70% | **100%** |
+| Time | 45s | 3s | 1s | 16s |
+| HTML size | 7.2 MB | 0.9 MB | 3.7 MB | **1.5 MB** |
 
 On general EDA, ThaiEDA and Evidently both achieve 100% recall and 91% breadth. ThaiEDA wins on report completeness (100% vs 70%) while producing a 2× smaller report than Evidently and 5× smaller than ydata.
 
@@ -196,6 +194,71 @@ ThaiEDA's 75% (3/4) reflects purpose-built Thai detection. The one miss (zero-wi
 | Quality tokenizer | `engine="auto-quality"` | AttaCut (neural, better for OOV) |
 | Keyboard layout anomaly | report-only | Detects suspicious Latin/Thai mixing |
 | Grapheme validation | report-only | Detects abnormal stacked tone marks |
+
+---
+
+## v1.8 — Statistical Accuracy Improvements
+
+Five new techniques that improve detection accuracy across different data patterns:
+
+### 1. Spearman rank correlation (non-linear relationships)
+
+Previously only Pearson (linear) correlation was computed. Now also computes Spearman ρ to catch **monotonic non-linear** relationships that Pearson misses (e.g., y = x⁵). The method with the highest |coefficient| is reported automatically.
+
+```python
+from thaieda.insight_engine import discover_insights
+# Now detects both linear AND non-linear strong correlations
+```
+
+### 2. Cramér's V effect size (categorical association)
+
+Chi-square test only tells you *if* two categorical variables are associated (p-value). Cramér's V tells you *how strongly* — a 0–1 effect size with bias correction:
+
+| V range | Strength |
+|---------|----------|
+| < 0.3 | เบาบาง (weak) |
+| 0.3–0.5 | ปานกลาง (moderate) |
+| > 0.5 | ชัดเจน (strong) |
+
+```python
+from thaieda.analysis import analyze_target
+results = analyze_target(df, "category_column")
+# Each chi_square result now includes effect_size (Cramér's V)
+```
+
+### 3. Generalized ESD test (multiple outlier detection)
+
+The existing z-score/IQR/MAD methods detect outliers one at a time, suffering from **masking** (outliers hide each other). The Generalized Extreme Studentized Deviate (Rosner 1983) test detects multiple outliers simultaneously with controlled Type I error:
+
+- Automatically selected when data is approximately normal (skew < 0.5, n ≥ 25)
+- Falls back to z-score/IQR/MAD for skewed or small datasets
+- Detects up to 10 outliers in one pass
+
+### 4. Missing data mechanism detection (MCAR / MAR / MNAR)
+
+Beyond counting missing values, ThaiEDA now classifies the **missing data mechanism**:
+
+| Mechanism | Meaning | Implication |
+|-----------|---------|-------------|
+| MCAR | Missing Completely at Random | Safe to drop or impute simply |
+| MAR_likely | Missing at Random | Imputation should use observed predictors |
+| MNAR_likely | Missing Not at Random | Missing depends on unobserved values — needs domain model |
+
+```python
+from thaieda.quality import detect_missing_mechanism
+result = detect_missing_mechanism(df)
+print(result.mechanism)  # "MCAR", "MAR_likely", or "MNAR_likely"
+```
+
+### 5. Distribution fitting + Kolmogorov-Smirnov test
+
+Automatically fits 4 distributions (normal, lognormal, exponential, uniform) to each numeric column and reports the best fit via KS goodness-of-fit test:
+
+```python
+from thaieda.quality import fit_distributions
+result = fit_distributions(df["column"], "column")
+# result.best_fit → "normal", result.p_value, result.parameters
+```
 
 ---
 

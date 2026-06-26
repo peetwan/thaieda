@@ -872,17 +872,24 @@ def _build_text(c: dict) -> tuple[str, str, str]:
         rec = f"พบแนวโน้ม{dir_th}ตาม '{breakdown}' — พิจารณาวางแผน/พยากรณ์โดยคำนึงถึงทิศทางนี้"
         return title, desc, rec
 
-    # v0.8: correlation
+    # v0.8: correlation (v1.8: เพิ่ม Spearman)
     if pattern == "correlation":
         col_a = ev["col_a"]
         col_b = ev["col_b"]
         r = ev["correlation"]
         direction = ev["direction"]
+        method = ev.get("method", "pearson")
         dir_th = "เป็นบวก" if direction == "positive" else "เป็นลบ"
-        title = f"'{col_a}' และ '{col_b}' มีความสัมพันธ์กันสูง (r={r:.2f})"
+        if method == "spearman":
+            corr_th = "สหสัมพันธ์ Spearman (non-linear)"
+            stat_label = "ρ"
+        else:
+            corr_th = "สหสัมพันธ์ Pearson"
+            stat_label = "r"
+        title = f"'{col_a}' และ '{col_b}' มี{corr_th}สูง ({stat_label}={r:.2f})"
         desc = (
-            f"คอลัมน์ '{col_a}' และ '{col_b}' มีความสัมพันธ์{dir_th}ที่ strong "
-            f"(r={r:.3f}, n={ev['n']:,}) — ค่าเคลื่อนไหวไปด้วยกัน"
+            f"คอลัมน์ '{col_a}' และ '{col_b}' มี{corr_th}{dir_th}ที่ strong "
+            f"({stat_label}={r:.3f}, n={ev['n']:,}) — ค่าเคลื่อนไหวไปด้วยกัน"
         )
         rec = (
             "คอลัมน์ทั้งสองสัมพันธ์กันสูง — อาจวัดสิ่งเดียวกัน พิจารณาใช้คอลัมน์ใดคอลัมน์หนึ่ง "
@@ -1038,7 +1045,11 @@ def discover_insights(
 # v0.8: pattern ใหม่ — correlation + outlier
 # ----------------------------------------------------------------------------
 def _detect_strong_correlations(df: pd.DataFrame, measures: dict[str, dict]) -> list[dict]:
-    """ตรวจหาความสัมพันธ์ที่ strong (|r| >= 0.7) ระหว่างคู่คอลัมน์ตัวเลข — v0.8.
+    """ตรวจหาความสัมพันธ์ที่ strong (|r| >= 0.7) ระหว่างคู่คอลัมน์ตัวเลข — v0.8 + v1.8.
+
+    v0.8: ใช้ Pearson correlation เท่านั้น (linear)
+    v1.8: เพิ่ม Spearman rank correlation เพื่อจับ non-linear monotonic relationships
+          ที่ Pearson พลาด (เช่น y = x² สำหรับ x >= 0)
 
     คืน list ของ candidate dict ที่มี pattern="correlation"
     จำกัดที่ top 10 คู่เพื่อกันการคำนวณบานปลาย
@@ -1051,7 +1062,9 @@ def _detect_strong_correlations(df: pd.DataFrame, measures: dict[str, dict]) -> 
     if len(numeric) < 10:
         return []
 
-    corr_matrix = numeric.corr(numeric_only=True)
+    # v1.8: คำนวณทั้ง Pearson และ Spearman correlation matrix
+    pearson_matrix = numeric.corr(method="pearson", numeric_only=True)
+    spearman_matrix = numeric.corr(method="spearman", numeric_only=True)
     candidates: list[dict] = []
 
     # ดึงคู่ที่ |r| >= threshold (ข้ามแนวทแยงและคู่ซ้ำ)
@@ -1062,11 +1075,25 @@ def _detect_strong_correlations(df: pd.DataFrame, measures: dict[str, dict]) -> 
             if pair in seen:
                 continue
             seen.add(pair)
-            r = float(corr_matrix.get(col_a, {}).get(col_b, 0.0))
-            if pd.isna(r):
+
+            # v1.8: เลือก method ตามค่า correlation สูงสุด
+            r_pearson = float(pearson_matrix.get(col_a, {}).get(col_b, 0.0))
+            r_spearman = float(spearman_matrix.get(col_a, {}).get(col_b, 0.0))
+            if pd.isna(r_pearson):
+                r_pearson = 0.0
+            if pd.isna(r_spearman):
+                r_spearman = 0.0
+
+            # ใช้ Pearson ถ้า |Pearson| >= threshold; ถ้าไม่ ลอง Spearman
+            if abs(r_pearson) >= _CORRELATION_THRESHOLD:
+                method = "pearson"
+                r = r_pearson
+            elif abs(r_spearman) >= _CORRELATION_THRESHOLD:
+                method = "spearman"
+                r = r_spearman
+            else:
                 continue
-            if abs(r) < _CORRELATION_THRESHOLD:
-                continue
+
             direction = "positive" if r > 0 else "negative"
             candidates.append(
                 {
@@ -1087,6 +1114,7 @@ def _detect_strong_correlations(df: pd.DataFrame, measures: dict[str, dict]) -> 
                         "correlation": round(r, 3),
                         "direction": direction,
                         "n": len(numeric),
+                        "method": method,
                     },
                 }
             )
