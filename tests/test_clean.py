@@ -15,11 +15,13 @@ from thaieda.clean import (
     fix_repeated_chars,
     fix_tone_mark_stacking,
     normalize_encoding,
+    normalize_nfkc,
     normalize_phone_numbers,
     normalize_thai_numerals,
     normalize_unicode,
     pythainlp_normalize,
     remove_zero_width_chars,
+    spell_correct,
     strip_whitespace,
 )
 
@@ -40,8 +42,19 @@ def _pythainlp_installed() -> bool:
     return importlib.util.find_spec("pythainlp") is not None
 
 
+def _khamyo_installed() -> bool:
+    import importlib.util
+
+    return importlib.util.find_spec("khamyo") is not None
+
+
 requires_pythainlp = pytest.mark.skipif(
     not _pythainlp_installed(), reason="pythainlp not installed"
+)
+
+requires_khamyo = pytest.mark.skipif(
+    not (_pythainlp_installed() and _khamyo_installed()),
+    reason="khamyo (pythainlp[abbreviation]) not installed",
 )
 
 
@@ -344,3 +357,128 @@ def test_normalize_phone_numbers_not_phone_passthrough():
     cleaned, result = normalize_phone_numbers(s)
     assert cleaned.iloc[0] == "hello"
     assert result.rows_affected == 0
+
+
+# ------------------------------------------------------------ AC-3: NFKC
+def test_normalize_nfkc_fullwidth():
+    # full-width Ａ(U+FF21)/９(U+FF19) → half-width A/9
+    s = pd.Series(["Ａ９", "２０２４", "ปกติ"])
+    cleaned, result = normalize_nfkc(s)
+    assert cleaned.iloc[0] == "A9"
+    assert cleaned.iloc[1] == "2024"
+    assert cleaned.iloc[2] == "ปกติ"
+    assert result.rows_affected == 2
+    assert result.operation == "normalize_nfkc"
+
+
+def test_normalize_nfkc_no_change_when_already_halfwidth():
+    s = pd.Series(["hello", "123", "ปกติ"])
+    cleaned, result = normalize_nfkc(s)
+    assert result.rows_affected == 0
+    assert list(cleaned) == ["hello", "123", "ปกติ"]
+
+
+def test_normalize_nfkc_empty_series():
+    s = pd.Series([], dtype=object)
+    cleaned, result = normalize_nfkc(s)
+    assert result.rows_affected == 0
+
+
+def test_normalize_nfkc_not_in_default_operations():
+    from thaieda.clean import DEFAULT_OPERATIONS, available_operations
+
+    assert "nfkc" not in DEFAULT_OPERATIONS
+    assert "nfkc" in available_operations()
+
+
+def test_normalize_nfkc_via_clean_thai_text():
+    # เรียกผ่าน pipeline แบบระบุ op เองได้
+    s = pd.Series(["Ａ９"])
+    cleaned, results = clean_thai_text(s, operations=["nfkc"])
+    assert cleaned.iloc[0] == "A9"
+    assert results[0].operation == "normalize_nfkc"
+
+
+# ------------------------------------------------------ AC-2: spell_correct
+@requires_pythainlp
+def test_spell_correct_leaves_correct_text_unchanged():
+    s = pd.Series(["สวัสดีครับ", "ขอบคุณค่ะ"])
+    cleaned, result = spell_correct(s)
+    assert cleaned.iloc[0] == "สวัสดีครับ"
+    assert cleaned.iloc[1] == "ขอบคุณค่ะ"
+    assert result.rows_affected == 0
+    assert result.operation == "spell_correct"
+
+
+@requires_pythainlp
+def test_spell_correct_changes_misspelling():
+    # คำที่สะกดผิดต้องถูกแก้/เปลี่ยน (โมเดล spell ของ pythainlp ไม่สมบูรณ์ —
+    # ทดสอบว่ามีการเปลี่ยนแปลงเกิดขึ้น ไม่ใช่ผลลัพธ์ที่ถูกต้องเป๊ะ)
+    s = pd.Series(["เรอม", "ปกติดี"])
+    cleaned, result = spell_correct(s)
+    assert cleaned.iloc[0] != "เรอม"
+    assert result.rows_affected >= 1
+
+
+@requires_pythainlp
+def test_spell_correct_empty_and_none():
+    s = pd.Series(["", None])
+    cleaned, result = spell_correct(s)
+    assert result.rows_affected == 0
+
+
+def test_spell_correct_without_pythainlp_raises(monkeypatch):
+    # ไม่มี pythainlp -> ต้อง fail loudly (ไม่ silent fallback)
+    monkeypatch.setitem(sys.modules, "pythainlp", None)
+    monkeypatch.setitem(sys.modules, "pythainlp.spell", None)
+    monkeypatch.setitem(sys.modules, "pythainlp.tokenize", None)
+    s = pd.Series(["x"])
+    with pytest.raises(ImportError):
+        spell_correct(s)
+
+
+def test_spell_correct_not_in_default_operations():
+    from thaieda.clean import DEFAULT_OPERATIONS, available_operations
+
+    assert "spell_correct" not in DEFAULT_OPERATIONS
+    assert "spell_correct" in available_operations()
+
+
+# ------------------------------------------------ AC-1: expand_abbreviations
+@requires_khamyo
+def test_expand_abbreviations():
+    from thaieda.clean import expand_abbreviations
+
+    s = pd.Series(["กทม.", "บจ.", "ทดสอบ"])
+    result, info = expand_abbreviations(s)
+    assert "กรุงเทพมหานคร" in result.iloc[0]
+    assert info.rows_affected > 0
+    assert info.operation == "expand_abbreviations"
+
+
+@requires_pythainlp
+def test_expand_abbreviations_fails_loudly_without_khamyo():
+    # ถ้าไม่มี khamyo การเรียกต้อง fail loudly (ImportError) — ไม่ silent fallback
+    from thaieda.clean import expand_abbreviations
+
+    if _khamyo_installed():
+        pytest.skip("khamyo installed; ไม่สามารถทดสอบ path ที่ไม่มี khamyo ได้")
+    with pytest.raises(ImportError):
+        expand_abbreviations(pd.Series(["กทม."]))
+
+
+def test_expand_abbreviations_without_pythainlp_raises(monkeypatch):
+    from thaieda.clean import expand_abbreviations
+
+    monkeypatch.setitem(sys.modules, "pythainlp", None)
+    monkeypatch.setitem(sys.modules, "pythainlp.util", None)
+    s = pd.Series(["x"])
+    with pytest.raises(ImportError):
+        expand_abbreviations(s)
+
+
+def test_expand_abbreviations_not_in_default_operations():
+    from thaieda.clean import DEFAULT_OPERATIONS, available_operations
+
+    assert "expand_abbreviations" not in DEFAULT_OPERATIONS
+    assert "expand_abbreviations" in available_operations()

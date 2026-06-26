@@ -8,6 +8,7 @@ from thaieda.detect import ColumnType
 from thaieda.quality import (
     QualityIssue,
     check_buddhist_era,
+    check_keyboard_layout_suspect,
     check_normalization,
     check_script_composition,
     check_thai_numerals,
@@ -113,6 +114,76 @@ def test_normalization_duplicate_tone_marks():
     issue = check_normalization(s, "text")
     assert issue is not None
     assert "duplicate tone marks" in issue.description
+
+
+# ------------------------------------------------ AC-6: grapheme validation
+def test_normalization_multiple_different_tone_marks_on_base():
+    # ก่้ = ไม้เอก (่) + ไม้โท (้) บนพยัญชนะตัวเดียว — ผิดหลักภาษา (วรรณยุกต์ได้ตัวเดียว/พยางค์)
+    s = pd.Series(["ก่้าว", "ปกติ"])
+    issue = check_normalization(s, "text")
+    assert issue is not None
+    assert "multiple tone marks on one base" in issue.description
+    assert issue.count == 1
+
+
+def test_normalization_no_multi_tone_when_single_tone():
+    # วรรณยุกต์ตัวเดียวบนพยัญชนะ = ปกติ ไม่ใช่ปัญหา
+    s = pd.Series(["ก่อน", "น้ำ", "ดี"])
+    issue = check_normalization(s, "text")
+    if issue is not None:
+        assert "multiple tone marks on one base" not in issue.description
+
+
+# ------------------------------------------- AC-5: keyboard layout suspect
+def test_keyboard_layout_suspect_detected():
+    # คอลัมน์ไทยที่มีเซลล์พิมพ์ผิดแป้น (ลืมสลับเป็นไทย -> ละตินมั่ว)
+    s = pd.Series(["สวัสดีครับ", "ขอบคุณมาก", "l;ylfu", "อาหารอร่อย"])
+    issue = check_keyboard_layout_suspect(s, "comment")
+    assert issue is not None
+    assert issue.check_name == "keyboard_layout_suspect"
+    assert issue.severity == "info"
+    assert issue.count == 1
+    assert "l;ylfu" in issue.examples
+
+
+def test_keyboard_layout_suspect_skips_english_column():
+    # คอลัมน์ที่ไม่ใช่ไทยเป็นหลัก -> ไม่ตรวจ (ละตินเป็นปกติ ไม่ใช่การพิมพ์ผิดแป้น)
+    s = pd.Series(["hello", "world", "foobar"])
+    assert check_keyboard_layout_suspect(s, "eng") is None
+
+
+def test_keyboard_layout_suspect_none_on_clean_thai():
+    s = pd.Series(["สวัสดี", "ขอบคุณ", "อร่อยมาก"])
+    assert check_keyboard_layout_suspect(s, "c") is None
+
+
+def test_keyboard_layout_suspect_ignores_thai_with_brand_names():
+    # คอลัมน์ไทยที่มีคำอังกฤษ/แบรนด์ปนเล็กน้อย (ละติน <50% ของตัวอักษร) -> ไม่ flag
+    s = pd.Series(["สวัสดี iPhone", "ราคาดีมาก", "บริการเยี่ยม"])
+    assert check_keyboard_layout_suspect(s, "c") is None
+
+
+def test_keyboard_layout_suspect_is_report_only():
+    # report-only: ต้องไม่แก้ไขข้อมูลต้นฉบับ
+    s = pd.Series(["สวัสดีครับ", "l;ylfu", "ดีมาก"])
+    original = list(s)
+    check_keyboard_layout_suspect(s, "c")
+    assert list(s) == original
+
+
+def test_keyboard_layout_suspect_empty_series():
+    s = pd.Series([], dtype=object)
+    assert check_keyboard_layout_suspect(s, "c") is None
+
+
+def test_keyboard_layout_suspect_in_run_quality_checks():
+    df = pd.DataFrame(
+        {"comment": ["สวัสดีครับ", "ขอบคุณมาก", "l;ylfu", "อาหารอร่อยมาก"]}
+    )
+    types = {"comment": ColumnType.THAI_TEXT}
+    issues = run_quality_checks(df, types)
+    names = {i.check_name for i in issues}
+    assert "keyboard_layout_suspect" in names
 
 
 # ---------------------------------------------------- script composition

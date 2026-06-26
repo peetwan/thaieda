@@ -663,6 +663,7 @@ class ProfileReport:
             cleaning_results=self._cleaning_diff,
             column_types=self._analysis_column_types(),
             timeseries_results=self._timeseries,
+            ner_results=self._ner,
             extra_insights=self._business_insights(),
         )
 

@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -20,6 +21,7 @@ from thaieda.analysis import TargetAssociation
 from thaieda.anomaly import AnomalyIssue
 from thaieda.clean import CleaningResult
 from thaieda.detect import ColumnType
+from thaieda.ner import NERResult
 from thaieda.quality import QualityIssue
 from thaieda.text import TextMetrics
 from thaieda.timeseries import TimeseriesResult
@@ -116,6 +118,48 @@ _MAX_CORR_PAIRS = 8
 _TYPE_MISMATCH_RATIO = 0.8
 # สัดส่วนแถวซ้ำที่ถือว่ารุนแรง (ยกระดับเป็น warning)
 _DUP_WARN_RATIO = 0.01
+
+# ---- เกณฑ์สำหรับ insight เฉพาะข้อความ (text-heavy datasets — IN-1) --------------
+# จำนวนเซลล์/โทเคนขั้นต่ำที่ทำให้สถิติข้อความมีความหมาย
+_MIN_TEXT_LENGTH_SAMPLE = 20
+_MIN_VOCAB_TOKENS = 50
+# มัธยฐานความยาวอักขระ: ต่ำกว่านี้ = ข้อความสั้น (social), สูงกว่านี้ = รีวิว/บทความยาว
+_SHORT_TEXT_MEDIAN = 10
+_LONG_TEXT_MEDIAN = 200
+# ความยาวแปรปรวนสูง: เฉลี่ย > _LENGTH_SKEW_RATIO × มัธยฐาน และสูงสุด > _LENGTH_OUTLIER_RATIO × มัธยฐาน
+_LENGTH_SKEW_RATIO = 2.0
+_LENGTH_OUTLIER_RATIO = 8.0
+# ความหลากหลายคำศัพท์ (unique/total tokens): ต่ำ = คำซ้ำเยอะ, สูง = หลากหลาย
+_LOW_VOCAB_RICHNESS = 0.1
+_HIGH_VOCAB_RICHNESS = 0.5
+# NER: จำนวน entity ขั้นต่ำที่จะรายงานเป็น insight
+_MIN_NER_ENTITIES = 1
+# sentiment/rating: จำนวนค่าขั้นต่ำ, จำนวนระดับสูงสุด (0-10 → 11 ระดับ), เกณฑ์การกระจาย
+_MIN_SENTIMENT_SAMPLE = 20
+_MAX_RATING_LEVELS = 11
+_SENTIMENT_DOMINANT = 0.5  # สัดส่วนที่ถือว่า "ส่วนใหญ่" กระจุกที่ขั้วเดียว
+_SENTIMENT_BIMODAL_TAIL = 0.25  # สัดส่วนของแต่ละขั้ว (ต่ำสุด/สูงสุด) ที่ถือว่าเด่นใน bimodal
+_SENTIMENT_BIMODAL_TOTAL = 0.6  # สัดส่วนรวมสองขั้วที่ถือว่าแบ่งเป็น 2 กลุ่ม
+
+# ป้ายภาษาไทยของประเภท named entity (รองรับทั้ง thainer และ thainer-v2)
+_ENTITY_TYPE_TH: dict[str, str] = {
+    "PERSON": "ชื่อบุคคล",
+    "PER": "ชื่อบุคคล",
+    "LOCATION": "สถานที่",
+    "LOC": "สถานที่",
+    "ORGANIZATION": "องค์กร",
+    "ORG": "องค์กร",
+    "DATE": "วันที่",
+    "TIME": "เวลา",
+    "MONEY": "จำนวนเงิน",
+}
+
+# ชื่อคอลัมน์ที่บ่งชี้ว่าเป็นคะแนน/เรตติ้ง (ordinal) — ใช้คู่กับการตรวจค่าจำนวนเต็มช่วงแคบ
+_RATING_NAME_RE = re.compile(
+    r"(rating|score|star|sentiment|satisfaction|nps|csat|polarity|"
+    r"คะแนน|ดาว|ความพึงพอใจ|เรตติ้ง)",
+    re.IGNORECASE,
+)
 _DATE_COMPONENT_NAMES = {
     "year",
     "month",
@@ -332,6 +376,225 @@ def _high_cardinality_text_insights(
                     f"({unique:,} จาก {n:,} แถว) — อาจเป็น ID หรือข้อความอิสระ ไม่ใช่ตัวแปรหมวดหมู่",
                     f"ตรวจสอบว่าคอลัมน์ '{col}' ควรใช้เป็น ID/ข้อความอิสระ "
                     "และไม่นำไปจัดกลุ่ม (groupby) เป็นหมวดหมู่",
+                )
+            )
+    return out
+
+
+# ----------------------------------------------------------------------------
+# insight เฉพาะข้อความ — ทำให้ text-heavy datasets มีข้อค้นพบมากกว่าแค่ quality/anomaly (IN-1)
+# ----------------------------------------------------------------------------
+def _text_length_distribution_insights(
+    text_metrics: dict[str, TextMetrics],
+) -> list[Insight]:
+    """ตีความการกระจายความยาวข้อความต่อคอลัมน์ — สั้น/ยาว/แปรปรวนสูง (จาก text_metrics)."""
+    out: list[Insight] = []
+    for col, m in text_metrics.items():
+        if m.non_null_cells < _MIN_TEXT_LENGTH_SAMPLE:
+            continue
+        median = float(m.median_char_length)
+        if median <= 0:
+            continue
+        if median < _SHORT_TEXT_MEDIAN:
+            out.append(
+                Insight(
+                    "text",
+                    "info",
+                    "ข้อมูลเป็นข้อความสั้น ๆ",
+                    f"คอลัมน์ '{col}' มีความยาวมัธยฐานเพียง {median:.0f} อักขระ — "
+                    "เป็นข้อความสั้น (เช่น โพสต์โซเชียล/แท็ก/ข้อความแชต)",
+                    f"ใช้เทคนิคที่เหมาะกับข้อความสั้นกับ '{col}' (คีย์เวิร์ด/อิโมจิ/แฮชแท็ก) "
+                    "แทนการวิเคราะห์เชิงบทความยาว",
+                )
+            )
+        elif median > _LONG_TEXT_MEDIAN:
+            out.append(
+                Insight(
+                    "text",
+                    "info",
+                    "ข้อมูลเป็นข้อความยาว (รีวิว/บทความ)",
+                    f"คอลัมน์ '{col}' มีความยาวมัธยฐาน {median:.0f} อักขระ — เป็นรีวิว/บทความยาว",
+                    f"พิจารณาสรุปความ/แบ่งประโยค หรือใช้โมเดลที่รองรับข้อความยาวกับ '{col}'",
+                )
+            )
+        # ความยาวแปรปรวนสูง: เฉลี่ยเบ้ขวาจากมัธยฐาน และมีค่าสูงสุดยาวผิดปกติ (long tail)
+        avg = float(m.avg_char_length)
+        if (
+            avg > _LENGTH_SKEW_RATIO * median
+            and float(m.max_char_length) > _LENGTH_OUTLIER_RATIO * median
+        ):
+            out.append(
+                Insight(
+                    "text",
+                    "info",
+                    "ความยาวข้อความแปรปรวนสูง",
+                    f"คอลัมน์ '{col}' มีความยาวข้อความแตกต่างกันมาก "
+                    f"(มัธยฐาน {median:.0f}, เฉลี่ย {avg:.0f}, สูงสุด {m.max_char_length:,} อักขระ) — "
+                    "อาจมีข้อความสั้นและยาวผิดปกติปนกัน",
+                    f"ตรวจสอบข้อความที่ยาว/สั้นผิดปกติใน '{col}' "
+                    "และพิจารณาแยกกลุ่มหรือตัดข้อความที่ผิดปกติก่อนวิเคราะห์",
+                )
+            )
+    return out
+
+
+def _vocabulary_richness_insights(
+    text_metrics: dict[str, TextMetrics],
+) -> list[Insight]:
+    """ความหลากหลายของคำศัพท์ (unique/total tokens) — ต่ำ = คำซ้ำเยอะ, สูง = หลากหลาย."""
+    out: list[Insight] = []
+    for col, m in text_metrics.items():
+        if m.total_tokens < _MIN_VOCAB_TOKENS:
+            continue
+        ratio = m.unique_tokens / m.total_tokens
+        if ratio < _LOW_VOCAB_RICHNESS:
+            out.append(
+                Insight(
+                    "text",
+                    "info",
+                    "คำศัพท์หลากหลายต่ำ (คำซ้ำเยอะ)",
+                    f"คอลัมน์ '{col}' มีคำไม่ซ้ำเพียง {ratio * 100:.0f}% ของคำทั้งหมด "
+                    f"({m.unique_tokens:,} จาก {m.total_tokens:,} คำ) — มีคำซ้ำเยอะ",
+                    f"ข้อความใน '{col}' อาจเป็นเทมเพลต/ข้อความซ้ำ ๆ — "
+                    "ตรวจสอบว่ามีคุณค่าต่อการวิเคราะห์เนื้อหาเพียงพอหรือไม่",
+                )
+            )
+        elif ratio > _HIGH_VOCAB_RICHNESS:
+            out.append(
+                Insight(
+                    "text",
+                    "info",
+                    "คำศัพท์หลากหลายสูง",
+                    f"คอลัมน์ '{col}' มีคำไม่ซ้ำถึง {ratio * 100:.0f}% ของคำทั้งหมด "
+                    f"({m.unique_tokens:,} จาก {m.total_tokens:,} คำ) — คำศัพท์หลากหลายสูง",
+                    f"ข้อความใน '{col}' มีความหลากหลายของเนื้อหา "
+                    "เหมาะกับการวิเคราะห์หัวข้อ (topic modeling) หรือสกัดคีย์เวิร์ด",
+                )
+            )
+    return out
+
+
+def _ner_summary_insights(ner_results: dict[str, NERResult] | None) -> list[Insight]:
+    """สรุปชื่อเฉพาะ (named entities) ที่สกัดได้ — บ่งชี้ความหลากหลาย/ลักษณะเนื้อหา."""
+    out: list[Insight] = []
+    if not ner_results:
+        return out
+    for col, r in ner_results.items():
+        if r.total_entities < _MIN_NER_ENTITIES or not r.entity_counts:
+            continue
+        # ประเภท entity ที่พบมากสุด (เรียงตามจำนวน แล้วตามชื่อ — ให้ผลคงที่เมื่อจำนวนเสมอกัน)
+        top_type, top_count = max(r.entity_counts.items(), key=lambda kv: (kv[1], kv[0]))
+        top_type_th = _ENTITY_TYPE_TH.get(top_type.upper(), top_type)
+        out.append(
+            Insight(
+                "text",
+                "info",
+                "พบชื่อเฉพาะ (named entities) ในข้อความ",
+                f"คอลัมน์ '{col}' มีชื่อเฉพาะ {r.total_entities:,} ตัว "
+                f"(เด่นสุดคือประเภท{top_type_th} {top_count:,} ตัว) — "
+                "บ่งชี้ว่าข้อความมีความหลากหลายของเนื้อหา",
+                f"พิจารณาใช้ชื่อเฉพาะจาก '{col}' เป็นมิติเพิ่มเติม "
+                "(เช่น จัดกลุ่มตามบุคคล/สถานที่/องค์กร) ในการวิเคราะห์",
+            )
+        )
+        if top_type.upper() in ("PERSON", "PER"):
+            out.append(
+                Insight(
+                    "text",
+                    "info",
+                    "ข้อความมีชื่อบุคคลเป็น entities หลัก",
+                    f"คอลัมน์ '{col}' มีชื่อบุคคลเป็นชื่อเฉพาะหลัก ({top_count:,} ตัว)",
+                    f"ระวังข้อมูลส่วนบุคคล (PII) ใน '{col}' — พิจารณา anonymize ก่อนเผยแพร่/วิเคราะห์",
+                )
+            )
+        elif top_type.upper() in ("LOCATION", "LOC"):
+            out.append(
+                Insight(
+                    "text",
+                    "info",
+                    "ข้อความเกี่ยวข้องกับสถานที่",
+                    f"คอลัมน์ '{col}' มีชื่อสถานที่เป็นชื่อเฉพาะหลัก ({top_count:,} ตัว)",
+                    f"พิจารณาวิเคราะห์เชิงพื้นที่ (geo) จากสถานที่ที่พบใน '{col}'",
+                )
+            )
+    return out
+
+
+def _looks_like_rating(series: pd.Series) -> bool:
+    """ค่าดูเหมือนคะแนน/เรตติ้ง: จำนวนเต็มในช่วงแคบ (เช่น 1-5, 0-10) มีหลายระดับแต่ไม่มากเกินไป."""
+    numeric = pd.to_numeric(series, errors="coerce").dropna()
+    if len(numeric) < _MIN_SENTIMENT_SAMPLE:
+        return False
+    n_levels = int(numeric.nunique())
+    if n_levels < 2 or n_levels > _MAX_RATING_LEVELS:
+        return False
+    arr = numeric.to_numpy(dtype="float64")
+    if not np.allclose(arr, np.round(arr)):  # ต้องเป็นจำนวนเต็มทั้งหมด
+        return False
+    return float(arr.min()) >= 0 and float(arr.max()) <= 10
+
+
+def _sentiment_distribution_insights(
+    df: pd.DataFrame, column_types: dict[str, ColumnType] | None
+) -> list[Insight]:
+    """การกระจายของคอลัมน์คะแนน/เรตติ้ง — เชิงบวก/ลบ/แบ่งเป็น 2 กลุ่ม (sentiment)."""
+    out: list[Insight] = []
+    date_dimension = _has_date_dimension_context(df)
+    for col in df.columns:
+        name = str(col)
+        if not _RATING_NAME_RE.search(name.lower()):
+            continue
+        if date_dimension and _is_date_component_name(name):
+            continue
+        if column_types is not None:
+            ctype = column_types.get(name)
+            if ctype is not None and ctype not in (ColumnType.NUMERIC, ColumnType.CATEGORICAL):
+                continue
+        if not _looks_like_rating(df[col]):
+            continue
+        numeric = pd.to_numeric(df[col], errors="coerce").dropna()
+        shares = {float(k): float(v) for k, v in numeric.value_counts(normalize=True).items()}
+        lo, hi = min(shares), max(shares)
+        top_value = max(shares, key=lambda k: shares[k])
+        top_share = shares[top_value]
+        lo_share, hi_share = shares.get(lo, 0.0), shares.get(hi, 0.0)
+
+        if top_value == hi and top_share >= _SENTIMENT_DOMINANT:
+            out.append(
+                Insight(
+                    "text",
+                    "info",
+                    "ส่วนใหญ่เป็นรีวิวเชิงบวก",
+                    f"คอลัมน์ '{col}' ส่วนใหญ่ ({top_share * 100:.0f}%) ให้คะแนนสูงสุด "
+                    f"({top_value:.0f}) — เป็นความเห็นเชิงบวกเป็นหลัก",
+                    f"หากใช้ '{col}' เป็น target ระวัง class imbalance "
+                    "(พิจารณา resampling/weighting) และตรวจว่าคะแนนสูงสะท้อนความจริง",
+                )
+            )
+        elif top_value == lo and top_share >= _SENTIMENT_DOMINANT:
+            out.append(
+                Insight(
+                    "text",
+                    "warning",
+                    "ส่วนใหญ่เป็นรีวิวเชิงลบ",
+                    f"คอลัมน์ '{col}' ส่วนใหญ่ ({top_share * 100:.0f}%) ให้คะแนนต่ำสุด "
+                    f"({top_value:.0f}) — เป็นความเห็นเชิงลบเป็นหลัก อาจเป็นปัญหาที่ต้องตรวจสอบ",
+                    f"ตรวจสอบสาเหตุของคะแนนต่ำใน '{col}' (คุณภาพสินค้า/บริการ) เป็นลำดับแรก",
+                )
+            )
+        elif (
+            lo_share >= _SENTIMENT_BIMODAL_TAIL
+            and hi_share >= _SENTIMENT_BIMODAL_TAIL
+            and (lo_share + hi_share) >= _SENTIMENT_BIMODAL_TOTAL
+        ):
+            out.append(
+                Insight(
+                    "text",
+                    "info",
+                    "คะแนนแบ่งเป็น 2 กลุ่มชัดเจน",
+                    f"คอลัมน์ '{col}' มีคะแนนกระจุกที่สองขั้ว — ต่ำสุด ({lo:.0f}) {lo_share * 100:.0f}% "
+                    f"และสูงสุด ({hi:.0f}) {hi_share * 100:.0f}% (ความเห็นแบ่งเป็นชอบมาก/ไม่ชอบมาก)",
+                    f"วิเคราะห์แยกสองกลุ่มของ '{col}' เพื่อหาสาเหตุของความเห็นที่ขั้วตรงข้าม",
                 )
             )
     return out
@@ -741,6 +1004,7 @@ def generate_insights(
     cleaning_results: list[CleaningResult] | None = None,
     column_types: dict[str, ColumnType] | None = None,
     timeseries_results: dict[str, TimeseriesResult] | None = None,
+    ner_results: dict[str, NERResult] | None = None,
     extra_insights: list[Insight] | None = None,
     max_insights: int = _MAX_INSIGHTS,
 ) -> InsightSummary:
@@ -759,6 +1023,7 @@ def generate_insights(
         cleaning_results: ผลการทำความสะอาด (ถ้ามี).
         column_types: ประเภทคอลัมน์ (จาก detect_all) — ใช้ตรวจ cardinality/การกระจาย/ชนิดข้อมูล.
         timeseries_results: ผลวิเคราะห์ timeseries ต่อคอลัมน์ (ถ้ามี).
+        ner_results: ผลสกัดชื่อเฉพาะ (NER) ต่อคอลัมน์ (ถ้ามี) — ใช้สร้าง insight เฉพาะข้อความ.
         extra_insights: Insight เพิ่มเติมจากภายนอก (เช่น cross-column insight engine v0.6)
             ที่ถูกแปลงเป็น Insight แล้ว — จะถูกรวมและจัดเรียงร่วมกับข้อค้นพบอื่น.
         max_insights: จำนวน Insight สูงสุดที่คืน (กัน insight overflow — P1). ตัดโดยเก็บ
@@ -781,6 +1046,11 @@ def generate_insights(
     insights.extend(_insight_from_quality(i) for i in quality_issues)
     insights.extend(_insight_from_anomaly(a) for a in anomaly_issues)
     insights.extend(_high_cardinality_text_insights(df, column_types, text_metrics))
+    # insight เฉพาะข้อความ — ทำให้ text-heavy datasets มีข้อค้นพบมากกว่าแค่ quality/anomaly (IN-1)
+    insights.extend(_text_length_distribution_insights(text_metrics))
+    insights.extend(_vocabulary_richness_insights(text_metrics))
+    insights.extend(_ner_summary_insights(ner_results))
+    insights.extend(_sentiment_distribution_insights(df, column_types))
     insights.extend(_distribution_insights(df, column_types))
     insights.extend(_correlation_insights(df))
     insights.extend(_type_mismatch_insights(df, column_types))

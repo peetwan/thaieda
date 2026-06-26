@@ -304,6 +304,24 @@ def normalize_unicode(series: pd.Series, form: str = "NFC") -> tuple[pd.Series, 
     )
 
 
+def normalize_nfkc(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
+    """ทำ Unicode normalization แบบ NFKC (แปลง fullwidth → halfwidth, เช่น Ａ→A, ９→9).
+
+    ใช้ NFKC แทน NFC เพื่อจัดการ full-width characters (อักขระความกว้างเต็ม U+FF01–U+FF5E)
+    ที่มักหลุดมาจากการคัดลอกข้อความจากเอกสารญี่ปุ่น/จีน หรือฟอร์มที่ตั้งค่า IME ผิด
+    เป็น opt-in operation เพราะ NFKC เปลี่ยน semantics ของข้อความ (เช่น ligature, ตัวยก/ตัวห้อย,
+    เครื่องหมายความกว้างเต็ม) จึงไม่ได้เปิดใช้ใน DEFAULT_OPERATIONS
+    """
+    return _apply_str_transform(
+        series,
+        lambda s: unicodedata.normalize("NFKC", s),
+        operation="normalize_nfkc",
+        description_th="ทำ Unicode normalization แบบ NFKC (แปลง full-width → half-width เช่น ９→9)",
+        # .str.normalize ทำงานระดับ C บน pandas 3.x (str dtype) — เร็วกว่าวน Python ทีละเซลล์
+        vectorized=lambda s: s.str.normalize("NFKC"),
+    )
+
+
 def _fix_repeated_str(text: str, max_repeat: int) -> str:
     if _should_skip_repeated_char_fix(text):
         return text
@@ -352,7 +370,11 @@ def fix_tone_mark_stacking(series: pd.Series) -> tuple[pd.Series, CleaningResult
         lambda s: _TONE_STACK_RE.sub(r"\1", s),
         operation="fix_tone_mark_stacking",
         description_th="ลบวรรณยุกต์ที่ซ้อนติดกัน (เช่น '่่' → '่')",
-        vectorized=lambda s: s.str.replace(_TONE_STACK_RE.pattern, r"\1", regex=True),
+        # ใช้ callable แทนสตริง backreference (r"\1") เพราะ regex engine ของ Arrow
+        # (string[pyarrow] เป็น dtype เริ่มต้นใน pandas 3.x) ไม่รองรับ \1 ในสตริงแทนที่
+        vectorized=lambda s: s.str.replace(
+            _TONE_STACK_RE.pattern, lambda m: m.group(1), regex=True
+        ),
     )
 
 
@@ -394,6 +416,84 @@ def pythainlp_normalize(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
         normalize,
         operation="pythainlp_normalize",
         description_th="จัดระเบียบข้อความไทยด้วย pythainlp.normalize (ลบ zw/ช่องว่างซ้ำ/สระซ้ำ ฯลฯ)",
+    )
+
+
+def expand_abbreviations(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
+    """ขยายคำย่อภาษาไทย (เช่น กทม. → กรุงเทพมหานคร, บจ. → บริษัทจำกัด).
+
+    ใช้ pythainlp.util.abbreviation_to_full_text (อาศัย khamyo ภายใน) — เป็น opt-in operation
+    ไม่ได้เปิดใช้ใน DEFAULT_OPERATIONS เพราะการขยายคำย่อเปลี่ยนความหมายของข้อความ
+    (และคำย่อหนึ่งคำอาจขยายได้หลายแบบ เช่น รร. = โรงเรียน/โรงแรม)
+
+    abbreviation_to_full_text คืน list ของ (ข้อความเต็ม, ค่าความใกล้เคียง) เรียงจากมากไปน้อย
+    ฟังก์ชันนี้เลือกตัวเลือกอันดับแรก (ความใกล้เคียงสูงสุด)
+
+    Raises:
+        ImportError: ถ้าไม่ได้ติดตั้ง pythainlp (ติดตั้งผ่าน thaieda[thai]) หรือไม่ได้ติดตั้ง khamyo
+            (ติดตั้งผ่าน pip install khamyo / pythainlp[abbreviation]) — fail loudly ไม่ silent fallback.
+    """
+    try:
+        from pythainlp.util import abbreviation_to_full_text  # lazy import — optional dep [thai]
+    except ImportError as exc:
+        raise ImportError(f"expand_abbreviations {_PYTHAINLP_INSTALL_HINT}.") from exc
+
+    def _expand(text: str) -> str:
+        # abbreviation_to_full_text จะ raise ImportError ถ้าไม่มี khamyo — ปล่อยให้ทะลุออกไป
+        # (fail loudly: ผู้ใช้ระบุ op นี้เองจึงควรเห็น error ที่ชัดเจน ไม่ใช่คืนค่าเดิมเงียบ ๆ)
+        candidates = abbreviation_to_full_text(text)
+        if candidates:
+            # candidates[0] = (full_text, score) ที่ใกล้เคียงสุด
+            return candidates[0][0]
+        return text
+
+    return _apply_str_transform(
+        series,
+        _expand,
+        operation="expand_abbreviations",
+        description_th="ขยายคำย่อภาษาไทยเป็นข้อความเต็ม (เช่น กทม. → กรุงเทพมหานคร)",
+    )
+
+
+def spell_correct(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
+    """แก้การสะกดคำผิดภาษาไทย (เช่น ขอบคุน → ขอบคุณ, คับ → ครับ).
+
+    ใช้ pythainlp.spell.correct_sent ร่วมกับ word_tokenize — เป็น opt-in operation
+    ไม่ได้เปิดใช้ใน DEFAULT_OPERATIONS เพราะ spell correction อาจแก้คำที่ถูกอยู่แล้ว
+    (โมเดลแก้คำผิดไม่สมบูรณ์ — อาจเปลี่ยนคำเฉพาะ/ชื่อ/คำทับศัพท์ที่ถูกต้องอยู่แล้ว)
+
+    ขั้นตอนต่อเซลล์: ตัดคำ → ส่งรายการ token ให้ correct_sent → ต่อกลับเป็นข้อความ
+    token ที่เป็นช่องว่างล้วนจะถูกคงไว้ตามเดิม (correct_sent อาจแก้ช่องว่างเป็นคำมั่ว)
+
+    Raises:
+        ImportError: ถ้าไม่ได้ติดตั้ง pythainlp (ติดตั้งผ่าน thaieda[thai]).
+    """
+    try:
+        from pythainlp.spell import correct_sent  # lazy import — optional dependency [thai]
+        from pythainlp.tokenize import word_tokenize
+    except ImportError as exc:
+        raise ImportError(f"spell_correct {_PYTHAINLP_INSTALL_HINT}.") from exc
+
+    def _correct(text: str) -> str:
+        if not text.strip():
+            return text
+        tokens = word_tokenize(text, keep_whitespace=True)
+        if not tokens:
+            return text
+        corrected = correct_sent(tokens)
+        # คงช่องว่างเดิมไว้ (correct_sent map แบบ 1:1 ตามจำนวน token) — กันการแก้ ' ' เป็นคำมั่ว
+        if len(corrected) == len(tokens):
+            corrected = [
+                orig if orig.strip() == "" else corr
+                for orig, corr in zip(tokens, corrected, strict=True)
+            ]
+        return "".join(corrected)
+
+    return _apply_str_transform(
+        series,
+        _correct,
+        operation="spell_correct",
+        description_th="แก้การสะกดคำผิดภาษาไทย (เช่น ขอบคุน → ขอบคุณ)",
     )
 
 
@@ -931,19 +1031,26 @@ _OPERATIONS: dict[str, Callable[[pd.Series], tuple[pd.Series, CleaningResult]]] 
     "zwspace": remove_zero_width_chars,
     "whitespace": strip_whitespace,
     "unicode": normalize_unicode,
+    "nfkc": normalize_nfkc,
     "tonemarks": fix_tone_mark_stacking,
     "repeat": fix_repeated_chars,
     "numerals": normalize_thai_numerals,
     "phone": normalize_phone_numbers,
     "pythainlp_normalize": pythainlp_normalize,
     "keyboard_layout": fix_keyboard_layout,
+    "expand_abbreviations": expand_abbreviations,
+    "spell_correct": spell_correct,
     "coerce_numeric": coerce_numeric_column,
     "buddhist_era": convert_buddhist_era,
     "normalize_dates": normalize_dates,
 }
 
 # การดำเนินการที่ต้องใช้ pythainlp (ติดตั้งผ่าน thaieda[thai]) — ใช้ตัดสินใจ skip ใน default pipeline
-_PYTHAINLP_OPERATIONS = frozenset({"pythainlp_normalize", "keyboard_layout"})
+# หมายเหตุ: expand_abbreviations/spell_correct เป็น opt-in (ไม่อยู่ใน DEFAULT_OPERATIONS) จึงไม่เคย
+# ถูกเพิ่มอัตโนมัติ — ถ้าผู้ใช้ระบุเองโดยไม่มี pythainlp จะ fail loudly ตามหลักการ no silent fallback
+_PYTHAINLP_OPERATIONS = frozenset(
+    {"pythainlp_normalize", "keyboard_layout", "expand_abbreviations", "spell_correct"}
+)
 
 # ลำดับการทำความสะอาดเริ่มต้น (ทั้งหมด): แก้ encoding ก่อน แล้วค่อยลบ/ยุบ/normalize
 # จบด้วยขั้นตอนที่ใช้ pythainlp (normalize + แก้ keyboard layout) ถ้าติดตั้งไว้
@@ -1025,7 +1132,10 @@ __all__ = [
     "fix_repeated_chars",
     "fix_tone_mark_stacking",
     "normalize_phone_numbers",
+    "normalize_nfkc",
     "pythainlp_normalize",
+    "expand_abbreviations",
+    "spell_correct",
     "fix_keyboard_layout",
     "coerce_numeric_column",
     "convert_buddhist_era",

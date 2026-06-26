@@ -213,7 +213,8 @@ def _normalize_key_series(non_null: pd.Series) -> pd.Series:
     s = s.str.translate(_THAI_DIGIT_MAP)
     s = s.str.replace(_ZW_RE, "", regex=True)
     s = s.str.strip()
-    s = s.str.replace(_FLOAT_INT_RE, r"\1", regex=True)
+    # callable แทนสตริง backreference (r"\1") — Arrow regex engine ใน pandas 3.x ไม่รองรับ \1
+    s = s.str.replace(_FLOAT_INT_RE, lambda m: m.group(1), regex=True)
     return s
 
 

@@ -66,3 +66,94 @@ def test_no_engine_never_silent_whitespace_fallback(monkeypatch):
     # ต้อง raise ไม่ใช่คืน tokenizer ที่ตัดด้วย split()
     with pytest.raises(ImportError):
         get_tokenizer("auto")
+
+
+# ----------------------------------------------------- AC-4: auto modes
+class _DummyTokenizer:
+    """tokenizer ปลอมสำหรับทดสอบลำดับการเลือก โดยไม่ต้องโหลด engine จริง."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def tokenize(self, text: str) -> list[str]:
+        return [text] if text else []
+
+
+def _patch_factories(monkeypatch, available: dict[str, bool]):
+    """ทำให้ทุก engine ใช้ tokenizer ปลอม และกำหนดว่า engine ใด 'ติดตั้ง' บ้าง."""
+    import thaieda.tokenize as tk
+
+    monkeypatch.setattr(tk, "_engine_available", lambda e: available[e])
+    monkeypatch.setattr(
+        tk,
+        "_FACTORIES",
+        {
+            "pythainlp": lambda: _DummyTokenizer("pythainlp:newmm"),
+            "nlpo3": lambda: _DummyTokenizer("nlpo3"),
+            "attacut": lambda: _DummyTokenizer("attacut"),
+        },
+    )
+
+
+def test_auto_fast_prefers_nlpo3(monkeypatch):
+    import thaieda.tokenize as tk
+
+    _patch_factories(monkeypatch, {"pythainlp": True, "nlpo3": True, "attacut": True})
+    assert tk.get_tokenizer("auto-fast").name == "nlpo3"
+
+
+def test_auto_quality_prefers_attacut(monkeypatch):
+    import thaieda.tokenize as tk
+
+    _patch_factories(monkeypatch, {"pythainlp": True, "nlpo3": True, "attacut": True})
+    assert tk.get_tokenizer("auto-quality").name == "attacut"
+
+
+def test_auto_default_unchanged_prefers_pythainlp(monkeypatch):
+    # โหมด "auto" เดิมต้องไม่เปลี่ยน — ยังเลือก pythainlp ก่อน
+    import thaieda.tokenize as tk
+
+    _patch_factories(monkeypatch, {"pythainlp": True, "nlpo3": True, "attacut": True})
+    assert tk.get_tokenizer("auto").name == "pythainlp:newmm"
+
+
+def test_auto_fast_falls_back_when_nlpo3_missing(monkeypatch):
+    # nlpo3 ไม่มี -> auto-fast ถอยไป pythainlp (ตัวถัดไปในลำดับ)
+    import thaieda.tokenize as tk
+
+    _patch_factories(monkeypatch, {"pythainlp": True, "nlpo3": False, "attacut": False})
+    assert tk.get_tokenizer("auto-fast").name == "pythainlp:newmm"
+
+
+def test_auto_quality_falls_back_when_attacut_missing(monkeypatch):
+    # attacut ไม่มี -> auto-quality ถอยไป pythainlp
+    import thaieda.tokenize as tk
+
+    _patch_factories(monkeypatch, {"pythainlp": True, "nlpo3": False, "attacut": False})
+    assert tk.get_tokenizer("auto-quality").name == "pythainlp:newmm"
+
+
+def test_auto_fast_no_engine_raises(monkeypatch):
+    import thaieda.tokenize as tk
+
+    monkeypatch.setattr(tk, "_engine_available", lambda e: False)
+    with pytest.raises(ImportError):
+        tk.get_tokenizer("auto-fast")
+
+
+def test_auto_quality_no_engine_raises(monkeypatch):
+    import thaieda.tokenize as tk
+
+    monkeypatch.setattr(tk, "_engine_available", lambda e: False)
+    with pytest.raises(ImportError):
+        tk.get_tokenizer("auto-quality")
+
+
+@pytest.mark.skipif(not _HAS_ENGINE, reason="ไม่มี Thai tokenizer engine ติดตั้ง")
+def test_auto_modes_return_tokenizer_instance():
+    # integration: โหมด auto ทุกแบบต้องคืน Tokenizer ที่ระบุชื่อ engine ได้
+    # (ไม่เรียก .tokenize เพราะบาง engine เช่น nlpo3 ต้องลงทะเบียน dict ก่อนใช้งานจริง)
+    for mode in ("auto", "auto-fast", "auto-quality"):
+        tok = get_tokenizer(mode)
+        assert isinstance(tok, Tokenizer)
+        assert isinstance(tok.name, str) and tok.name

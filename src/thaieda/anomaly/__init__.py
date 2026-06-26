@@ -73,6 +73,17 @@ _EXCESSIVE_REPEAT_RE = re.compile(r"(.)\1{4,}")
 # วรรณยุกต์เดียวกันซ้อนติดกัน (เช่น "่่")
 _TONE_STACK_RE = re.compile(f"([{_THAI_TONE_MARKS}])\\1+")
 
+# combining mark ที่ขึ้นต้น หรือตามหลังอักขระที่ไม่ใช่ฐาน (orphan) — แทนการวนทีละอักขระ
+# lookbehind ที่ start-of-string เป็นจริง → จับ combining ที่ขึ้นต้นด้วย (ตรงกับลูปเดิมทุกกรณี)
+_ORPHAN_BASE_CHARS = "".join(sorted(_THAI_CONSONANTS | _THAI_COMBINING))
+_ORPHAN_COMBINING_CHARS = "".join(sorted(_THAI_COMBINING))
+_ORPHAN_COMBINING_RE = re.compile(f"(?<![{_ORPHAN_BASE_CHARS}])[{_ORPHAN_COMBINING_CHARS}]")
+# มี combining mark ไทยอย่างน้อยหนึ่งตัวไหม (เงื่อนไขถูกของ diacritic-order ก่อนเรียก NFC)
+_HAS_THAI_COMBINING_RE = re.compile(f"[{_ORPHAN_COMBINING_CHARS}]")
+# นับอักษรไทย (ก–ฮ, U+0E01–U+0E2E) และอักษรละติน แบบไม่วนทีละอักขระ
+_THAI_LETTER_COUNT_RE = re.compile("[ก-ฮ]")
+_LATIN_LETTER_COUNT_RE = re.compile("[a-zA-Z]")
+
 
 # ----------------------------------------------------------------------------
 # โครงสร้างผลลัพธ์
@@ -708,24 +719,21 @@ def detect_text_anomalies(series: pd.Series, tokenizer) -> list[AnomalyIssue]:
 # (c) Thai-specific text anomalies
 # ----------------------------------------------------------------------------
 def _has_orphan_combining(text: str) -> bool:
-    """True ถ้ามี combining mark ของไทยที่ขึ้นต้น หรือตามหลังอักขระที่ไม่ใช่ฐาน."""
-    prev_is_base = False
-    for ch in text:
-        if ch in _THAI_COMBINING and not prev_is_base:
-            return True
-        prev_is_base = (ch in _THAI_CONSONANTS) or (ch in _THAI_COMBINING)
-    return False
+    """True ถ้ามี combining mark ของไทยที่ขึ้นต้น หรือตามหลังอักขระที่ไม่ใช่ฐาน.
+
+    ใช้ regex lookbehind (_ORPHAN_COMBINING_RE) แทนการวนทีละอักขระ — ผลเท่ากันทุกกรณี
+    """
+    return bool(_ORPHAN_COMBINING_RE.search(text))
 
 
 def _thai_latin_letter_counts(text: str) -> tuple[int, int]:
-    """นับ (อักษรไทย, อักษรละติน) ในข้อความ — ไม่รวมเลข/ช่องว่าง/เครื่องหมาย."""
-    thai = latin = 0
-    for ch in text:
-        cp = ord(ch)
-        if _THAI_LETTER_RANGE[0] <= cp <= _THAI_LETTER_RANGE[1]:
-            thai += 1
-        elif ("a" <= ch <= "z") or ("A" <= ch <= "Z"):
-            latin += 1
+    """นับ (อักษรไทย, อักษรละติน) ในข้อความ — ไม่รวมเลข/ช่องว่าง/เครื่องหมาย.
+
+    นับด้วย regex (จำนวน match ของ character class ตัวเดียว = จำนวนอักขระชนิดนั้น)
+    แทนการวน ord() ทีละอักขระ — ผลเท่ากันแต่เร็วกว่า
+    """
+    thai = len(_THAI_LETTER_COUNT_RE.findall(text))
+    latin = len(_LATIN_LETTER_COUNT_RE.findall(text))
     return thai, latin
 
 
@@ -782,7 +790,9 @@ def _tone_stacking_anomalies(items: list[tuple[int, str]], col: str) -> AnomalyI
 def _diacritic_order_anomalies(items: list[tuple[int, str]], col: str) -> AnomalyIssue | None:
     flagged: list[tuple[int, str]] = []
     for pos, s in items:
-        if unicodedata.normalize("NFC", s) != s and any(c in _THAI_COMBINING for c in s):
+        # ตรวจ "มี combining ไทย" ด้วย regex ก่อน (ถูกอยู่แล้ว) แล้วค่อยเรียก NFC normalize
+        # เฉพาะแถวที่มี combining — เลี่ยงการ normalize ทุกแถว (ช้ามากบนข้อความยาว) ผล AND เท่าเดิม
+        if _HAS_THAI_COMBINING_RE.search(s) and unicodedata.normalize("NFC", s) != s:
             flagged.append((pos, s))
     if not flagged:
         return None

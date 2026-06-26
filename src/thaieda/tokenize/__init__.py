@@ -15,6 +15,20 @@ from typing import Protocol, runtime_checkable
 # ลำดับการลองเลือก engine เมื่อ engine="auto"
 _AUTO_ORDER = ("pythainlp", "nlpo3", "attacut")
 
+# v1.6: โหมด auto เฉพาะทาง — เลือก engine ตามเป้าหมาย (ความเร็ว vs คุณภาพ)
+#   * auto-fast    : เน้นความเร็ว — nlpo3 (Rust) เร็วกว่า ~3-4 เท่า
+#   * auto-quality : เน้นคุณภาพ — attacut (neural) ตัดคำ social media / คำนอกพจนานุกรม (OOV) ได้ดีกว่า
+# ทั้งสองโหมดถอยไปใช้ engine ตัวถัดไปในลำดับถ้าตัวที่ต้องการไม่ได้ติดตั้ง (degrade อย่างสุภาพ)
+_AUTO_FAST_ORDER = ("nlpo3", "pythainlp", "attacut")
+_AUTO_QUALITY_ORDER = ("attacut", "pythainlp", "nlpo3")
+
+# แผนที่ชื่อโหมด auto -> ลำดับการลอง engine
+_AUTO_MODES: dict[str, tuple[str, ...]] = {
+    "auto": _AUTO_ORDER,
+    "auto-fast": _AUTO_FAST_ORDER,
+    "auto-quality": _AUTO_QUALITY_ORDER,
+}
+
 # engine ย่อยเริ่มต้นของ pythainlp — สมดุลความเร็ว/คุณภาพดีที่สุด
 _DEFAULT_PYTHAINLP_ENGINE = "newmm"
 
@@ -112,8 +126,12 @@ def get_tokenizer(engine: str = "auto") -> Tokenizer:
     """สร้างและคืน Tokenizer ตาม engine ที่ระบุ.
 
     Args:
-        engine: ชื่อ engine — "auto", "pythainlp", "nlpo3" หรือ "attacut".
-            "auto" จะลองตามลำดับ pythainlp -> nlpo3 -> attacut และใช้ตัวแรกที่มี.
+        engine: ชื่อ engine หรือโหมด auto —
+            * "auto"          : ลองตามลำดับ pythainlp -> nlpo3 -> attacut (สมดุล)
+            * "auto-fast"     : เน้นความเร็ว — nlpo3 -> pythainlp -> attacut
+            * "auto-quality"  : เน้นคุณภาพ — attacut -> pythainlp -> nlpo3
+            * "pythainlp" / "nlpo3" / "attacut" : ระบุ engine ตรง ๆ
+            โหมด auto ทุกแบบจะใช้ engine ตัวแรกในลำดับที่ติดตั้งอยู่.
 
     Returns:
         Tokenizer ที่พร้อมใช้งาน.
@@ -122,8 +140,8 @@ def get_tokenizer(engine: str = "auto") -> Tokenizer:
         ImportError: เมื่อไม่มี engine ใดติดตั้งเลย (ข้อความแนะนำชัดเจน).
         ValueError: เมื่อระบุชื่อ engine ที่ไม่รู้จัก.
     """
-    if engine == "auto":
-        for candidate in _AUTO_ORDER:
+    if engine in _AUTO_MODES:
+        for candidate in _AUTO_MODES[engine]:
             if _engine_available(candidate):
                 return _FACTORIES[candidate]()
         # ไม่มี engine เลย — fail loudly ตามหลักการ
@@ -131,7 +149,8 @@ def get_tokenizer(engine: str = "auto") -> Tokenizer:
 
     if engine not in _FACTORIES:
         raise ValueError(
-            f"Unknown tokenizer engine {engine!r}. Expected one of: auto, {', '.join(_FACTORIES)}."
+            f"Unknown tokenizer engine {engine!r}. "
+            f"Expected one of: {', '.join(_AUTO_MODES)}, {', '.join(_FACTORIES)}."
         )
 
     if not _engine_available(engine):

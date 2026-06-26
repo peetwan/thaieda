@@ -40,6 +40,10 @@ _PHONE_RE = re.compile(
     r")"
 )
 
+# placeholder token ที่ขั้น regex (เบอร์/บัตร) ใส่ไว้ เช่น "[PHONE_1]", "[IDCARD_2]"
+# ใช้กัน NER ไม่ให้แทนที่ token เหล่านี้ซ้ำ (NER มักจับ "[PHONE_1]" เป็น LOCATION/URL)
+_TOKEN_PLACEHOLDER_RE = re.compile(r"^\[[A-Z]+_\d+\]$")
+
 # ประเภท NER → ป้าย token
 # thaieda.ner ใช้ป้ายแบบ pythainlp: PERSON, LOCATION, ORGANIZATION
 _NER_TYPE_TOKEN: dict[str, str] = {
@@ -193,6 +197,10 @@ def _replace_ner_entities(
         if token_type is None:
             continue
         for entity_text, _count in pairs:
+            # ข้าม placeholder ที่ขั้น regex ใส่ไว้แล้ว (เช่น "[PHONE_1]") — ไม่แทนซ้ำ
+            # ป้องกัน token_map เสีย (key="[PHONE_1]" → value="[LOC_1]") และคงความ invertible
+            if _TOKEN_PLACEHOLDER_RE.match(entity_text):
+                continue
             if not entity_text or entity_text in token_map:
                 # ถ้ามี token อยู่แล้ว ใช้ตัวเดิม
                 if entity_text in token_map:

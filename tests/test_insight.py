@@ -10,8 +10,29 @@ from thaieda.anomaly import AnomalyIssue, detect_anomalies
 from thaieda.clean import CleaningResult
 from thaieda.detect import ColumnType, detect_all
 from thaieda.insight import Insight, InsightSummary, generate_insights
+from thaieda.ner import NERResult
 from thaieda.quality import QualityIssue, run_quality_checks
+from thaieda.text import TextMetrics
 from thaieda.timeseries import analyze_dataframe_timeseries
+
+
+def _text_metrics(**kw) -> TextMetrics:
+    """TextMetrics ตัวอย่างสำหรับทดสอบ — ปรับ field ที่สนใจผ่าน kwargs."""
+    base = dict(
+        total_cells=100,
+        non_null_cells=100,
+        sampled_cells=100,
+        avg_char_length=50.0,
+        avg_token_length=10.0,
+        avg_word_length=5.0,
+        median_char_length=50.0,
+        min_char_length=5,
+        max_char_length=80,
+        total_tokens=1000,
+        unique_tokens=300,
+    )
+    base.update(kw)
+    return TextMetrics(**base)
 
 
 def _quality_issue(check_name="buddhist_era", severity="critical", column="year", count=3):
@@ -267,6 +288,127 @@ def test_timeseries_insights_gap_warning():
     summary = generate_insights(df, [], [], {}, timeseries_results=ts)
     tsi = [i for i in summary.insights if i.category == "timeseries"]
     assert any("ช่องว่าง" in i.title_th for i in tsi)
+
+
+# ------------------------------------------------------------- text-specific insights (IN-1)
+def test_text_length_short_and_long():
+    summary = generate_insights(
+        pd.DataFrame({"a": [1, 2, 3]}),
+        [],
+        [],
+        {
+            "short": _text_metrics(median_char_length=5),
+            "long": _text_metrics(median_char_length=300),
+        },
+    )
+    titles = {i.title_th for i in summary.insights}
+    assert "ข้อมูลเป็นข้อความสั้น ๆ" in titles
+    assert "ข้อมูลเป็นข้อความยาว (รีวิว/บทความ)" in titles
+
+
+def test_text_length_variability():
+    summary = generate_insights(
+        pd.DataFrame({"a": [1]}),
+        [],
+        [],
+        {"c": _text_metrics(median_char_length=20, avg_char_length=60, max_char_length=500)},
+    )
+    assert any(i.title_th == "ความยาวข้อความแปรปรวนสูง" for i in summary.insights)
+
+
+def test_text_length_skips_tiny_sample():
+    summary = generate_insights(
+        pd.DataFrame({"a": [1]}),
+        [],
+        [],
+        {"c": _text_metrics(non_null_cells=5, median_char_length=5)},
+    )
+    assert not any(i.category == "text" and "ข้อความสั้น" in i.title_th for i in summary.insights)
+
+
+def test_vocabulary_richness_low_and_high():
+    low = generate_insights(
+        pd.DataFrame({"a": [1]}), [], [], {"c": _text_metrics(total_tokens=1000, unique_tokens=50)}
+    )
+    assert any(i.title_th == "คำศัพท์หลากหลายต่ำ (คำซ้ำเยอะ)" for i in low.insights)
+    high = generate_insights(
+        pd.DataFrame({"a": [1]}), [], [], {"c": _text_metrics(total_tokens=1000, unique_tokens=700)}
+    )
+    assert any(i.title_th == "คำศัพท์หลากหลายสูง" for i in high.insights)
+
+
+def test_vocabulary_richness_skips_few_tokens():
+    summary = generate_insights(
+        pd.DataFrame({"a": [1]}), [], [], {"c": _text_metrics(total_tokens=10, unique_tokens=1)}
+    )
+    assert not any("คำศัพท์หลากหลาย" in i.title_th for i in summary.insights)
+
+
+def test_ner_summary_person_and_location():
+    ner_person = {"c": NERResult("c", 100, {"PERSON": 80, "LOCATION": 20}, {})}
+    summary = generate_insights(pd.DataFrame({"a": [1]}), [], [], {}, ner_results=ner_person)
+    titles = {i.title_th for i in summary.insights}
+    assert "พบชื่อเฉพาะ (named entities) ในข้อความ" in titles
+    assert "ข้อความมีชื่อบุคคลเป็น entities หลัก" in titles
+
+    ner_loc = {"c": NERResult("c", 100, {"LOCATION": 80, "PERSON": 20}, {})}
+    summary = generate_insights(pd.DataFrame({"a": [1]}), [], [], {}, ner_results=ner_loc)
+    assert any(i.title_th == "ข้อความเกี่ยวข้องกับสถานที่" for i in summary.insights)
+
+
+def test_ner_summary_none_or_empty():
+    assert not any(
+        i.category == "text"
+        for i in generate_insights(pd.DataFrame({"a": [1]}), [], [], {}).insights
+    )
+    empty = {"c": NERResult("c", 0, {}, {})}
+    summary = generate_insights(pd.DataFrame({"a": [1]}), [], [], {}, ner_results=empty)
+    assert not any("ชื่อเฉพาะ" in i.title_th for i in summary.insights)
+
+
+def test_sentiment_positive_negative_bimodal():
+    pos = pd.DataFrame({"star_rating": [5] * 70 + [4] * 20 + [1] * 10})
+    s = generate_insights(pos, [], [], {}, column_types={"star_rating": ColumnType.NUMERIC})
+    assert any(i.title_th == "ส่วนใหญ่เป็นรีวิวเชิงบวก" for i in s.insights)
+
+    neg = pd.DataFrame({"rating": [1] * 70 + [2] * 20 + [5] * 10})
+    s = generate_insights(neg, [], [], {}, column_types={"rating": ColumnType.NUMERIC})
+    neg_ins = [i for i in s.insights if i.title_th == "ส่วนใหญ่เป็นรีวิวเชิงลบ"]
+    assert len(neg_ins) == 1 and neg_ins[0].severity == "warning"
+
+    bi = pd.DataFrame({"score": [1] * 40 + [3] * 15 + [5] * 45})
+    s = generate_insights(bi, [], [], {}, column_types={"score": ColumnType.NUMERIC})
+    assert any(i.title_th == "คะแนนแบ่งเป็น 2 กลุ่มชัดเจน" for i in s.insights)
+
+
+def test_sentiment_ignores_non_rating_numeric_columns():
+    # ชื่อไม่เข้าข่าย rating (Pclass/Survived/month) หรือเป็น float (age_score) ต้องไม่สร้าง insight
+    df = pd.DataFrame(
+        {
+            "Pclass": [1, 2, 3] * 40,
+            "Survived": [0, 1] * 60,
+            "month": list(range(1, 13)) * 10,
+            "age_score": np.linspace(0, 1, 120),
+        }
+    )
+    ct = {c: ColumnType.NUMERIC for c in df.columns}
+    summary = generate_insights(df, [], [], {}, column_types=ct)
+    assert not any(
+        i.title_th in ("ส่วนใหญ่เป็นรีวิวเชิงบวก", "ส่วนใหญ่เป็นรีวิวเชิงลบ", "คะแนนแบ่งเป็น 2 กลุ่มชัดเจน")
+        for i in summary.insights
+    )
+
+
+def test_text_dataset_gets_more_than_baseline_insights():
+    # text dataset (text + rating) ควรได้ insight มากขึ้นจากเดิมที่อิงเฉพาะ quality/anomaly
+    df = pd.DataFrame({"review": ["x"] * 100, "star_rating": [5] * 80 + [1] * 20})
+    tm = {"review": _text_metrics(median_char_length=5, total_tokens=1000, unique_tokens=40)}
+    ner = {"review": NERResult("review", 50, {"PERSON": 50}, {})}
+    summary = generate_insights(
+        df, [], [], tm, column_types={"star_rating": ColumnType.NUMERIC}, ner_results=ner
+    )
+    text_insights = [i for i in summary.insights if i.category == "text"]
+    assert len(text_insights) >= 3
 
 
 # ------------------------------------------------------------- to_dict

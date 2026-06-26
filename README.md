@@ -5,7 +5,7 @@
 [![PyPI](https://img.shields.io/pypi/v/thaieda.svg)](https://pypi.org/project/thaieda/)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-yellow.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Tests: 645 passed](https://img.shields.io/badge/tests-645%20passed-brightgreen.svg)]()
+[![Tests: 691 passed](https://img.shields.io/badge/tests-691%20passed-brightgreen.svg)]()
 [![Code Style: ruff](https://img.shields.io/badge/code%20style-ruff-261230.svg)](https://docs.astral.sh/ruff/)
 [![Language aware](https://img.shields.io/badge/language-Thai%20%2B%20English%20aware-blueviolet.svg)]()
 
@@ -126,6 +126,15 @@ Tested across 14 public datasets — from 500 rows to 541K rows, 8 to 171 column
 - **Language detection** — Thai, English, mixed, and numeric data detected with confidence and per-column detail.
 - **Data type classification** — transaction, registry, survey, timeseries, and mixed datasets classified before EDA.
 - **Language-aware quality** — English-only data skips Thai-specific warnings automatically.
+
+### Accuracy Improvements (opt-in)
+
+- **Abbreviation expansion** — `expand_abbreviations()` ขยายคำย่อไทย (กทม. → กรุงเทพมหานคร, บจ. → บริษัทจำกัด) ผ่าน `pythainlp.util.abbreviation_to_full_text` — opt-in operation ไม่ได้เปิดใช้ใน default pipeline เพราะเปลี่ยน semantics ของข้อความ
+- **Spell correction** — `spell_correct()` แก้การสะกดคำผิดภาษาไทย (ขอบคุน → ขอบคุณ) ผ่าน `pythainlp.spell.correct_sent` — opt-in operation
+- **NFKC normalization** — `normalize_nfkc()` แปลง full-width characters (Ａ→A, ９→9) ผ่าน stdlib `unicodedata.normalize("NFKC")` — opt-in operation
+- **Tokenizer selection modes** — `engine="auto-fast"` เลือก nlpo3 (Rust, เร็ว 3-4x) และ `engine="auto-quality"` เลือก AttaCut (neural, แม่นยำสำหรับ social media/OOV text)
+- **Keyboard layout anomaly detection** — ตรวจหาเซลล์ที่สงสัยว่าพิมพ์ผิด keyboard layout (ละตินผสมในคอลัมน์ไทย) — report-only ไม่แก้ไขอัตโนมัติ
+- **Thai grapheme validation** — ตรวจหาวรรณยุกต์ซ้อนที่ผิดปกติ (เช่น ก่้ — mai ek + mai tho บนพยัญชนะเดียว) — report-only
 
 ---
 
