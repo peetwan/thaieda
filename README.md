@@ -5,7 +5,7 @@
 [![PyPI](https://img.shields.io/pypi/v/thaieda.svg)](https://pypi.org/project/thaieda/)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-yellow.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Tests: 631 passed](https://img.shields.io/badge/tests-631%20passed-brightgreen.svg)]()
+[![Tests: 645 passed](https://img.shields.io/badge/tests-645%20passed-brightgreen.svg)]()
 [![Code Style: ruff](https://img.shields.io/badge/code%20style-ruff-261230.svg)](https://docs.astral.sh/ruff/)
 [![Language aware](https://img.shields.io/badge/language-Thai%20%2B%20English%20aware-blueviolet.svg)]()
 
@@ -108,6 +108,38 @@ run_folder("data/")  → FolderResult
   - **Fewer false positives** — Fuzzy duplicate guard skips short near-identical labels (`INLAND ↔ ISLAND`); script mixing skipped on low-cardinality columns; numeric outliers on heavy-tail distributions (skew > 2.0) downgraded to info severity.
   - **Better reporting** — `payment_method` no longer mistaken for amount column; `Unnamed: 0` index artifacts ignored; Titanic classified as registry/mixed instead of survey; conditional missing (e.g. `holiday_name`) annotated; duplicate insights on constant columns deduplicated; date-dimension tautologies (year/month/week) suppressed.
   - **New quality checks** — Per-column missing value detection with severity thresholds (warning >5%, info 1–5%); CSV semicolon-delimiter warning when a single-column DataFrame has many `;` in values.
+- **v1.5 — Scale hardening (14-dataset QA round 2–3):** 10 defects fixed across 3 Claude Code batches ($35.78 total). All 14 public datasets now pass with 0 defects, every report <2 MB, every dataset <120 s. Key improvements:
+  - **Insight capping** — `generate_insights(max_insights=30)` keeps all critical insights, fills with warning, then info; `InsightSummary.total_generated` records the true count so the executive summary can say "พบ 679 ข้อ แสดงเฉพาะ 30" (was 679 → now 30 on aps-failure).
+  - **HTML bloat control** — dual chart budget (`_MAX_CHARTS_PER_REPORT=40` + `_MAX_CHART_BYTES=1.6 MB`); quality/anomaly tables capped at 50 rows with `<details>` collapse; column details switch to a summary table when >60 columns (bike-sharing 3.7 MB → 1.55 MB, aps-failure 2.3 MB → 0.48 MB).
+  - **Wide-table performance** — `insight_engine` samples 50% of breakdowns/measures when cols >100; `viz` skips correlation heatmap (>30 cols) and scatter matrix (>50 cols); quality/anomaly checks vectorized (aps-failure 171 cols × 16K rows: 491 s → **99.9 s**).
+  - **Tall-table performance** — anomaly/quality/outlier checks sample 50K rows when rows >100K; correlation computed on sample; timeseries decomposition skipped >200K rows (online-retail 541K rows: 397 s → **81 s**).
+  - **High-NA handling** — `handle_missing_values` flags >80% missing as `mostly_missing` (fill skipped, NaN preserved) and warns on >40% missing; <40% unchanged (beijing-pm25 pm2.5 now flagged instead of filled).
+  - **Template pagination** — Key Insights shows top-20 with collapsible `<details>` for the rest; count badges kept; context dict structure preserved.
+
+---
+
+## Benchmarks
+
+ThaiEDA is tested on 14 public datasets ranging from 500 rows to 541K rows, 8 to 171 columns. Every dataset produces a report under 2 MB in under 120 seconds.
+
+| Dataset | Rows | Cols | Time | HTML | Insights |
+|---------|-----:|-----:|-----:|-----:|---------:|
+| titanic | 891 | 12 | 8 s | 0.79 MB | 27 |
+| telco-churn | 7,043 | 21 | 11 s | 0.84 MB | 11 |
+| wine-quality | 1,599 | 12 | 7 s | 0.93 MB | 29 |
+| california-housing | 20,640 | 10 | 15 s | 0.99 MB | 30 |
+| superstore | 10,800 | 21 | 31 s | 1.46 MB | 30 |
+| adult | 32,561 | 15 | 22 s | 1.03 MB | 29 |
+| bank-marketing | 41,188 | 21 | 21 s | 0.94 MB | 30 |
+| online-retail | 541,909 | 8 | **81 s** | 0.96 MB | 30 |
+| dirty-thai-retail | 500 | 8 | 2 s | 0.51 MB | 15 |
+| absenteeism | 740 | 21 | 10 s | 1.25 MB | 30 |
+| online-shoppers | 12,330 | 18 | 18 s | 1.06 MB | 30 |
+| aps-failure | 16,000 | 171 | **100 s** | 0.48 MB | 30 |
+| beijing-pm25 | 43,824 | 13 | 12 s | 0.76 MB | 19 |
+| bike-sharing | 17,379 | 17 | 42 s | 1.55 MB | 30 |
+
+All 14 datasets pass QA with 0 defects. Datasets from UCI ML Repository and public sources.
 
 ---
 

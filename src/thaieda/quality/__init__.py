@@ -395,16 +395,28 @@ _DUP_VOWEL_RE = re.compile(f"[{_THAI_UPPER_VOWELS}]{{2,}}")
 # อักขระเดียวกันซ้ำ 3+ ครั้ง (เช่น 5555, ๆๆๆ, อืมมม)
 _REPEAT_SPAM_RE = re.compile(r"(.)\1{2,}")
 _THAI_LAUGHTER_RE = re.compile(r"^5{3,}$")
+# v1.x (C2): รหัส/ID แบบ alphanumeric คั่นด้วย hyphen เช่น "FUR-BO-10001798",
+# "CA-2017-152156" — เป็น code ปกติ ไม่ใช่ repeated-char spam (ไม่มีช่องว่าง = ไม่ใช่ข้อความธรรมชาติ)
+_ID_CODE_RE = re.compile(r"^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+$")
 
 
 def _skip_repeated_spam_check(text: str) -> bool:
-    """ข้าม repeated-char spam ใน code/category สั้น ๆ ที่มีเลขปน เช่น Ticket/Cabin."""
+    """ข้าม repeated-char spam ใน code/category/ID ที่ไม่ใช่ข้อความธรรมชาติ.
+
+    ข้ามเมื่อ:
+    - เป็น code/category สั้น (<15 ตัว) ที่มีตัวเลขปน เช่น Ticket/Cabin, หรือ
+    - เป็นรหัส ID แบบ alphanumeric คั่นด้วย hyphen ที่มีตัวเลข >=3 ตัว
+      เช่น "FUR-BO-10001798", "CA-2017-152156" (เป็นรหัส ไม่ใช่สแปม)
+    ไม่ข้าม Thai laughter (5555) เพื่อให้ยัง flag เป็นสแปมได้.
+    """
     stripped = text.strip()
-    return (
-        len(stripped) < 15
-        and any(ch.isdigit() for ch in stripped)
-        and not _THAI_LAUGHTER_RE.match(stripped)
-    )
+    if _THAI_LAUGHTER_RE.match(stripped):
+        return False
+    # code/category สั้นที่มีเลขปน
+    if len(stripped) < 15 and any(ch.isdigit() for ch in stripped):
+        return True
+    # รหัส ID: alphanumeric + hyphen + ตัวเลข >=3 ตัว
+    return bool(_ID_CODE_RE.match(stripped)) and sum(ch.isdigit() for ch in stripped) >= 3
 
 
 def _has_combining_order_issue(text: str) -> bool:
@@ -680,12 +692,19 @@ def check_placeholder_values(series: pd.Series, column: str) -> QualityIssue | N
         return None
     # vectorized: ใช้ .isin()
     s = pd.Series(values)
-    placeholder_mask = s.str.strip().isin(_PLACEHOLDER_SET)
+    stripped = s.str.strip()
+    placeholder_mask = stripped.isin(_PLACEHOLDER_SET)
     count = int(placeholder_mask.sum())
     if count == 0:
         return None
-    examples = s[placeholder_mask].unique()[:5].tolist()
     total = len(values)
+    # v1.x (C1): ลด false positive — "-" เดี่ยวที่พบน้อย (<1%) มักเป็น ad-hoc missing
+    # ในข้อมูลอังกฤษ ไม่ใช่ placeholder จริงที่ต้องเตือน. ข้ามเฉพาะกรณีที่เจอ placeholder
+    # ชนิดเดียวคือ "-" และคิดเป็น <1% ของคอลัมน์ — ถ้าหลายชนิดหรือ >=1% ให้ flag ตามปกติ
+    found_types = set(stripped[placeholder_mask].unique())
+    if found_types == {"-"} and count / total < 0.01:
+        return None
+    examples = s[placeholder_mask].unique()[:5].tolist()
     return QualityIssue(
         column=column,
         check_name="placeholder_values",

@@ -27,6 +27,10 @@ from thaieda.timeseries import TimeseriesResult
 # ลำดับความรุนแรง (วิกฤตก่อน) สำหรับการเรียง
 _SEVERITY_ORDER = {"critical": 0, "warning": 1, "info": 2}
 
+# จำนวน insight สูงสุดที่แสดงในรายงาน (กัน insight overflow บนชุดข้อมูลคอลัมน์เยอะ — P1)
+# ตัดให้เหลือเท่านี้โดยเก็บ critical ทั้งหมด → เติม warning → เติม info
+_MAX_INSIGHTS = 30
+
 # ประเภทคอลัมน์ที่ถือว่าเป็นข้อความ
 _TEXT_TYPES = {ColumnType.THAI_TEXT, ColumnType.MIXED_TEXT, ColumnType.ENGLISH_TEXT}
 
@@ -188,6 +192,32 @@ def _dedupe_quality_anomaly(
     return q_out, a_out
 
 
+def _cap_insights(insights: list[Insight], max_insights: int) -> list[Insight]:
+    """ตัดรายการ insight ให้เหลือไม่เกิน max_insights — กัน insight overflow (P1).
+
+    หลักการ (เรียงตามความสำคัญ): เก็บ critical "ทั้งหมด" (ห้ามตัด) → เติม warning จนเต็มโควตา
+    → เติม info ที่เหลือ (info ตัดได้เต็มที่). คาดว่า ``insights`` ถูก sort ตามความรุนแรงมาแล้ว
+    (critical → warning → info) ทำให้ลำดับภายในแต่ละระดับยังคงเดิม
+
+    ถ้า critical มีมากกว่า max_insights จะคืน critical ทั้งหมด (ยอมให้เกินโควตา —
+    correctness สำคัญกว่า completeness: ห้ามซ่อนเรื่องวิกฤต)
+    """
+    if max_insights <= 0 or len(insights) <= max_insights:
+        return insights
+    critical = [i for i in insights if i.severity == "critical"]
+    warning = [i for i in insights if i.severity == "warning"]
+    info = [i for i in insights if i.severity == "info"]
+
+    kept = list(critical)  # critical เก็บทั้งหมดเสมอ
+    budget = max_insights - len(kept)
+    if budget > 0:
+        kept.extend(warning[:budget])
+        budget -= min(len(warning), budget)
+    if budget > 0:
+        kept.extend(info[:budget])
+    return kept
+
+
 # ----------------------------------------------------------------------------
 # โครงสร้างผลลัพธ์
 # ----------------------------------------------------------------------------
@@ -221,10 +251,14 @@ class InsightSummary:
     info_count: int
     insights: list[Insight] = field(default_factory=list)
     executive_summary_th: str = ""
+    # จำนวนข้อค้นพบที่สร้างได้ทั้งหมด "ก่อน" ตัดให้เหลือ max_insights (P1)
+    # เท่ากับ total_insights เมื่อไม่มีการตัด; มากกว่าเมื่อถูกตัด — ใช้บอกผู้อ่านว่ามีทั้งหมดกี่ข้อ
+    total_generated: int = 0
 
     def to_dict(self) -> dict:
         return {
             "total_insights": self.total_insights,
+            "total_generated": self.total_generated,
             "critical_count": self.critical_count,
             "warning_count": self.warning_count,
             "info_count": self.info_count,
@@ -633,6 +667,9 @@ def _build_executive_summary(
     quality_issues: list[QualityIssue],
     anomaly_issues: list[AnomalyIssue],
     timeseries_results: dict[str, TimeseriesResult] | None = None,
+    *,
+    total_generated: int | None = None,
+    shown: int | None = None,
 ) -> str:
     """สร้างบทสรุปผู้บริหาร 2-3 ประโยค ที่ระบุปัญหาเด่นและคำตัดสินสุขภาพข้อมูลโดยรวม."""
     timeseries_results = timeseries_results or {}
@@ -672,6 +709,12 @@ def _build_executive_summary(
         top_titles = "; ".join(dict.fromkeys(i.title_th for i in crit[:3]))
         parts.append(f"ประเด็นที่ควรแก้ก่อน: {top_titles}")
 
+    # ระบุว่ามีข้อค้นพบทั้งหมดกี่ข้อ แต่แสดงเพียงส่วนที่สำคัญที่สุด (เมื่อถูกตัด — P1)
+    if total_generated is not None and shown is not None and total_generated > shown:
+        parts.append(
+            f"พบข้อค้นพบทั้งหมด {total_generated:,} ข้อ แสดงเฉพาะ {shown:,} ข้อที่สำคัญที่สุด"
+        )
+
     # คำตัดสินสุขภาพข้อมูลโดยรวม
     if crit:
         verdict = "ควรแก้ปัญหาวิกฤต (โดยเฉพาะ encoding/ศักราช) ก่อนนำไปวิเคราะห์"
@@ -699,6 +742,7 @@ def generate_insights(
     column_types: dict[str, ColumnType] | None = None,
     timeseries_results: dict[str, TimeseriesResult] | None = None,
     extra_insights: list[Insight] | None = None,
+    max_insights: int = _MAX_INSIGHTS,
 ) -> InsightSummary:
     """สร้างสรุปข้อมูลเชิงลึกอัตโนมัติเป็นภาษาไทย.
 
@@ -717,9 +761,12 @@ def generate_insights(
         timeseries_results: ผลวิเคราะห์ timeseries ต่อคอลัมน์ (ถ้ามี).
         extra_insights: Insight เพิ่มเติมจากภายนอก (เช่น cross-column insight engine v0.6)
             ที่ถูกแปลงเป็น Insight แล้ว — จะถูกรวมและจัดเรียงร่วมกับข้อค้นพบอื่น.
+        max_insights: จำนวน Insight สูงสุดที่คืน (กัน insight overflow — P1). ตัดโดยเก็บ
+            critical ทั้งหมด → เติม warning → เติม info. ใช้ค่า <= 0 เพื่อปิดการตัด.
 
     Returns:
         InsightSummary พร้อมรายการ Insight (เรียงวิกฤตก่อน) และบทสรุปผู้บริหารภาษาไทย.
+        ``total_generated`` บอกจำนวนข้อค้นพบทั้งหมดก่อนถูกตัด (>= total_insights).
     """
     target_associations = target_associations or []
     cleaning_results = cleaning_results or []
@@ -758,12 +805,22 @@ def generate_insights(
     # เรียงตามความรุนแรง (วิกฤตก่อน) — เสถียร จึงรักษาลำดับการเพิ่มภายในระดับเดียวกัน
     insights.sort(key=lambda i: _SEVERITY_ORDER.get(i.severity, 99))
 
+    # ตัดให้เหลือไม่เกิน max_insights (P1) — เก็บ critical ทั้งหมด → warning → info
+    total_generated = len(insights)
+    insights = _cap_insights(insights, max_insights)
+
     critical_count = sum(1 for i in insights if i.severity == "critical")
     warning_count = sum(1 for i in insights if i.severity == "warning")
     info_count = sum(1 for i in insights if i.severity == "info")
 
     summary = _build_executive_summary(
-        df, insights, quality_issues, anomaly_issues, timeseries_results
+        df,
+        insights,
+        quality_issues,
+        anomaly_issues,
+        timeseries_results,
+        total_generated=total_generated,
+        shown=len(insights),
     )
 
     return InsightSummary(
@@ -773,6 +830,7 @@ def generate_insights(
         info_count=info_count,
         insights=insights,
         executive_summary_th=summary,
+        total_generated=total_generated,
     )
 
 

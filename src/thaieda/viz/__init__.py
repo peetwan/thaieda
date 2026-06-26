@@ -278,6 +278,29 @@ _MISSING_MATRIX_MAX_ROWS = 1000
 # คอลัมน์ตัวเลขสูงสุดที่นำมาวาด (กันกราฟล้นเมื่อมีคอลัมน์ตัวเลขจำนวนมาก)
 _MAX_NUMERIC_COLS = 30
 
+# เกณฑ์จำนวนคอลัมน์ตัวเลข "กว้างเกินไป" — ข้ามกราฟ O(n^2) เพื่อความเร็ว/หน่วยความจำ (P3)
+# correlation heatmap: O(n^2) ของหน่วยความจำ + การวาดช่อง; scatter matrix: O(n^2) ของกราฟย่อย
+_CORR_HEATMAP_MAX_COLS = 30
+_SCATTER_MATRIX_MAX_COLS = 50
+
+# จำนวนจุดสูงสุดที่นำมา "วาด" ในกราฟเส้น/scatter — เกินนี้ลดจำนวนจุดลงเพื่อความเร็ว
+# (กราฟกว้าง ~9 นิ้วแสดงจุดที่แตกต่างได้ไม่เกินไม่กี่พันจุดอยู่แล้ว การลดจุดจึงไม่เสียรายละเอียดที่มองเห็น)
+# กราฟเส้น/decomposition: สุ่มแบบเว้นระยะเท่ากัน (รักษารูปร่างตามเวลา); scatter: สุ่มแถว (รักษาการกระจาย)
+_PLOT_MAX_POINTS = 5000
+
+
+def _stride_subsample(n: int, max_points: int = _PLOT_MAX_POINTS) -> slice | np.ndarray:
+    """คืน index แบบเว้นระยะเท่ากันเพื่อลดจำนวนจุดที่วาดให้ไม่เกิน max_points (รักษารูปร่างตามลำดับ)."""
+    if n <= max_points:
+        return slice(None)
+    step = (n + max_points - 1) // max_points  # ceil(n / max_points)
+    return np.arange(0, n, step)
+
+
+def _numeric_col_count(df: pd.DataFrame) -> int:
+    """จำนวนคอลัมน์ตัวเลข "จริง" ก่อนถูก cap โดย _numeric_frame (ใช้ตัดสินว่ากราฟกว้างเกินไปไหม)."""
+    return int(df.select_dtypes(include="number").shape[1])
+
 
 def _numeric_frame(df: pd.DataFrame) -> pd.DataFrame:
     """คืนเฉพาะคอลัมน์ตัวเลข (จำกัดจำนวนคอลัมน์เพื่อให้กราฟอ่านได้)."""
@@ -300,6 +323,9 @@ def create_correlation_heatmap(df: pd.DataFrame, font_path: str | None = None) -
     """
     setup_matplotlib_thai_font()
     prop = _font_prop(font_path)
+    # P3: ข้าม correlation heatmap เมื่อคอลัมน์ตัวเลขมากเกินไป (O(n^2) memory บนตารางกว้าง)
+    if _numeric_col_count(df) > _CORR_HEATMAP_MAX_COLS:
+        return ""
     numeric = _numeric_frame(df)
     if numeric.shape[1] < 2:
         return ""
@@ -550,6 +576,9 @@ def create_scatter_matrix(df: pd.DataFrame, font_path: str | None = None) -> str
     """
     setup_matplotlib_thai_font()
     prop = _font_prop(font_path)
+    # P3: ข้าม scatter matrix เมื่อคอลัมน์ตัวเลขมากเกินไป (เลือกแค่ไม่กี่คอลัมน์จากหลายร้อยไม่สื่อความหมาย)
+    if _numeric_col_count(df) > _SCATTER_MATRIX_MAX_COLS:
+        return ""
     numeric = _numeric_frame(df)
     if numeric.shape[1] < 2:
         return ""
@@ -714,16 +743,24 @@ def create_timeseries_plot(series: pd.Series, title: str = "", font_path: str | 
     y = valid.to_numpy(dtype="float64")
     x = valid.index if isinstance(valid.index, pd.DatetimeIndex) else np.arange(y.size)
 
-    fig, ax = plt.subplots(figsize=(9, 3.5), facecolor=_DARK_BG)
-    ax.set_facecolor(_DARK_BG)
-    ax.plot(x, y, color=_ACCENT, linewidth=1.2, alpha=0.9)
-
-    # เส้นแนวโน้มจาก linear fit (ตามตำแหน่ง 0..n-1)
+    # เส้นแนวโน้มคำนวณบนข้อมูลเต็ม (แม่นยำ) แล้วค่อยลดจำนวนจุดตอนวาดเท่านั้น
+    trend_line = None
     if y.size >= 2 and float(np.std(y)) > 0:
         xi = np.arange(y.size, dtype="float64")
         slope, intercept = np.polyfit(xi, y, 1)
         trend_line = slope * xi + intercept
-        ax.plot(x, trend_line, color=_CRITICAL, linewidth=1.4, linestyle="--", alpha=0.85)
+
+    # ลดจำนวนจุดที่วาดบนซีรีส์ยาว (รักษารูปร่างตามเวลาด้วยการเว้นระยะเท่ากัน)
+    idx = _stride_subsample(y.size)
+    x_plot = x[idx]
+
+    fig, ax = plt.subplots(figsize=(9, 3.5), facecolor=_DARK_BG)
+    ax.set_facecolor(_DARK_BG)
+    ax.plot(x_plot, y[idx], color=_ACCENT, linewidth=1.2, alpha=0.9)
+    if trend_line is not None:
+        ax.plot(
+            x_plot, trend_line[idx], color=_CRITICAL, linewidth=1.4, linestyle="--", alpha=0.85
+        )
 
     if title:
         ax.set_title(title, color=_DARK_FG, fontproperties=prop, fontsize=12)
@@ -763,13 +800,15 @@ def create_decomposition_plot(
 
     trend, seasonal, residual = _pad(trend), _pad(seasonal), _pad(residual)
     observed = trend + seasonal + residual
-    x = np.arange(n)
+    # ลดจำนวนจุดที่วาดบนซีรีส์ยาว (เว้นระยะเท่ากัน — รักษารูปร่างของแต่ละองค์ประกอบ)
+    idx = _stride_subsample(n)
+    x = np.arange(n)[idx]
 
     panels = [
-        ("observed", observed, _ACCENT),
-        ("trend", trend, _CRITICAL),
-        ("seasonal", seasonal, _SEASONAL),
-        ("residual", residual, _RESIDUAL),
+        ("observed", observed[idx], _ACCENT),
+        ("trend", trend[idx], _CRITICAL),
+        ("seasonal", seasonal[idx], _SEASONAL),
+        ("residual", residual[idx], _RESIDUAL),
     ]
     fig, axes = plt.subplots(4, 1, figsize=(9, 7), facecolor=_DARK_BG, sharex=True)
     for ax, (name, data, color) in zip(axes, panels, strict=False):

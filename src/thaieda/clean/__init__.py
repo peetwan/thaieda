@@ -52,6 +52,9 @@ _MOJIBAKE_HINT_RE = re.compile(r"[-ÿ�]|&[#a-zA-Z0-9]{1,8};")
 # จำนวนตัวอย่างก่อน/หลังที่เก็บต่อหนึ่งการทำความสะอาด
 _MAX_EXAMPLES = 5
 
+# sentinel สำหรับ memoization cache (เลี่ยงชนกับค่าผลลัพธ์ที่อาจเป็น None/"" ได้)
+_UNSET = object()
+
 
 # ----------------------------------------------------------------------------
 # โครงสร้างผลลัพธ์
@@ -110,7 +113,23 @@ def _apply_str_transform(
 
     notna = series.notna()
     originals = series[notna].astype(str)
-    cleaned = vectorized(originals) if vectorized is not None else originals.map(func)
+    if vectorized is not None:
+        cleaned = vectorized(originals)
+    else:
+        # ``func`` เป็นฟังก์ชันบริสุทธิ์ของสตริง (ผลขึ้นกับค่าเซลล์อย่างเดียว) จึง memoize
+        # ตามค่าที่ไม่ซ้ำได้ — เรียก func เพียงครั้งเดียวต่อค่าที่ต่างกัน แล้ว map กลับ
+        # ผลลัพธ์เหมือน ``originals.map(func)`` ทุกประการ แต่เร็วขึ้นมากบนคอลัมน์ที่มีค่าซ้ำเยอะ
+        # (เช่น 540K แถวแต่ unique ไม่กี่พัน, หรือคอลัมน์ตัวเลขที่เก็บเป็น string)
+        _memo: dict[str, str] = {}
+
+        def _cached(value: str) -> str:
+            cached = _memo.get(value, _UNSET)
+            if cached is _UNSET:
+                cached = func(value)
+                _memo[value] = cached
+            return cached
+
+        cleaned = originals.map(_cached)
     # เทียบก่อน/หลังแบบเวกเตอร์ — ได้ mask ของเซลล์ที่เปลี่ยนจริง
     changed = cleaned.to_numpy() != originals.to_numpy()
     affected = int(changed.sum())
@@ -815,6 +834,11 @@ def remove_duplicate_rows(df: pd.DataFrame) -> tuple[pd.DataFrame, CleaningResul
     )
 
 
+# เกณฑ์สัดส่วนค่าว่างสำหรับคอลัมน์ที่ขาดข้อมูลสูง (Q1)
+_HIGH_NA_RATIO = 0.40  # > 40%: เตือนว่าควร drop/impute แทนการ fill เงียบ ๆ
+_MOSTLY_MISSING_RATIO = 0.80  # > 80%: mostly_missing — ข้ามการเติมค่า (fill จะบิดเบือนข้อมูล)
+
+
 def handle_missing_values(
     series: pd.Series, strategy: str = "flag"
 ) -> tuple[pd.Series, CleaningResult]:
@@ -826,6 +850,10 @@ def handle_missing_values(
       - 'median'  : แทนด้วย median (numeric only)
       - 'mode'    : แทนด้วย mode (ทุกประเภท)
       - 'unknown' : แทนด้วย 'unknown' (text/categorical)
+
+    Q1: คอลัมน์ที่ขาดข้อมูลสูงจะไม่ถูก fill เงียบ ๆ ในโหมด 'flag' (ค่าเริ่มต้น):
+      - missing > 80% → flag เป็น "mostly_missing" และข้ามการเติมค่า (fill 0/'ไม่ระบุ' จะบิดเบือนสถิติ)
+      - missing > 40% → ยังเติมค่า แต่แนบคำเตือนว่าควร drop หรือ impute ด้วย domain knowledge
     """
     missing = int(series.isna().sum())
     if missing == 0:
@@ -837,7 +865,23 @@ def handle_missing_values(
         )
 
     col_name = str(series.name or "")
+    n = len(series)
+    missing_ratio = missing / n if n else 0.0
     out = series
+
+    # Q1: คอลัมน์ที่ขาดข้อมูลเกือบทั้งหมด — ข้ามการเติมค่า แล้ว flag เป็น mostly_missing
+    # (เฉพาะโหมด 'flag' เริ่มต้น; โหมดอื่นที่ผู้ใช้ระบุเองยังทำงานตามที่สั่ง)
+    if strategy == "flag" and missing_ratio > _MOSTLY_MISSING_RATIO:
+        return series, CleaningResult(
+            operation="handle_missing_values",
+            rows_affected=missing,
+            column=col_name,
+            description_th=(
+                f"คอลัมน์ '{col_name}' ขาดข้อมูล {missing_ratio * 100:.0f}% "
+                "(mostly_missing > 80%) — ข้ามการเติมค่า แนะนำให้ drop คอลัมน์ "
+                "หรือ impute ด้วย domain knowledge (การเติม 0/'ไม่ระบุ' จะบิดเบือนการวิเคราะห์)"
+            ),
+        )
 
     if strategy == "drop":
         out = series.dropna()
@@ -863,6 +907,12 @@ def handle_missing_values(
         else:
             out = series.fillna("ไม่ระบุ")
             desc = f"แทน {missing} ค่าว่างด้วย 'ไม่ระบุ'"
+        # Q1: เตือนเมื่อค่าว่างสูง (> 40%) — การ fill อาจบิดเบือน ควรพิจารณา drop/impute แทน
+        if missing_ratio > _HIGH_NA_RATIO:
+            desc += (
+                f" — เตือน: คอลัมน์นี้มี missing {missing_ratio * 100:.0f}% (> 40%) "
+                "แนะนำพิจารณา drop หรือ impute ด้วย domain knowledge แทนการ fill"
+            )
 
     return out, CleaningResult(
         operation="handle_missing_values",

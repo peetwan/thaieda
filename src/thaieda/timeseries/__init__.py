@@ -25,6 +25,10 @@ from thaieda.detect import ColumnType, detect_all
 # ----------------------------------------------------------------------------
 # จำนวนจุดข้อมูลขั้นต่ำที่ทำให้การวิเคราะห์ timeseries มีความหมาย
 _MIN_TS_POINTS = 5
+# จำนวนจุดสูงสุดที่ยอมใช้ STL decomposition (statsmodels) ในโหมด auto — STL บนซีรีส์ยาวมาก
+# (หลายแสนจุด) ช้ามาก (O(n) ต่อรอบ × หลายรอบ) เกินนี้ถอยไปใช้ decomposition พื้นฐานที่เป็น
+# เวกเตอร์และเร็วกว่ามาก. โหมด engine="statsmodels" ที่ผู้ใช้ระบุเองยังบังคับใช้ STL ตามเดิม
+_MAX_STL_POINTS = 200_000
 # เกณฑ์สหสัมพันธ์ (|r| ระหว่างเวลา↔ค่า) ที่ถือว่า "มีแนวโน้ม"
 _TREND_R_THRESHOLD = 0.30
 # เกณฑ์ ACF ที่ถือว่า "มี seasonality" ที่ lag หนึ่ง
@@ -375,7 +379,8 @@ def detect_timeseries_columns(df: pd.DataFrame) -> dict[str, ColumnType]:
     for col, ctype in types.items():
         if ctype != ColumnType.DATETIME:
             continue
-        parsed = pd.to_datetime(df[col], errors="coerce")
+        # format="mixed": parse แต่ละค่าแยกกัน เลี่ยง UserWarning "Could not infer format" (U1)
+        parsed = pd.to_datetime(df[col], errors="coerce", format="mixed")
         if int(parsed.notna().sum()) >= _MIN_TS_POINTS:
             out[col] = ColumnType.DATETIME
     return out
@@ -497,6 +502,7 @@ def analyze_timeseries(
         and _statsmodels_available()
         and period_for_decompose >= 2
         and n >= 2 * period_for_decompose
+        and n <= _MAX_STL_POINTS
     ):
         parts = _stl_decompose(values, period_for_decompose)
         engine_used = "statsmodels"
@@ -587,7 +593,8 @@ def analyze_dataframe_timeseries(
         chosen = time_col
 
     # --- สร้าง DataFrame ที่มี DatetimeIndex (เรียงตามเวลา) ---
-    time_values = pd.to_datetime(df[chosen], errors="coerce")
+    # format="mixed": parse แต่ละค่าแยกกัน เลี่ยง UserWarning "Could not infer format" (U1)
+    time_values = pd.to_datetime(df[chosen], errors="coerce", format="mixed")
     valid = time_values.notna()
     if int(valid.sum()) < _MIN_TS_POINTS:
         return {}

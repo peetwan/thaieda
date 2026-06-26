@@ -39,6 +39,27 @@ from thaieda.timeseries import (
 # จำนวนกราฟต่อคอลัมน์สูงสุดที่สร้าง (กันรายงานใหญ่เกินไปบนชุดข้อมูลที่มีคอลัมน์ข้อความเยอะ)
 _MAX_CHART_COLUMNS = 20
 
+# จำนวนกราฟ (base64) สูงสุดต่อรายงาน — กัน HTML บวมจนเบราว์เซอร์ค้าง (P2)
+# เมื่อเกิน จะตัดกราฟที่สำคัญน้อยสุดก่อน: valuecounts/distribution ต่อคอลัมน์ → acf/decomposition
+_MAX_CHARTS_PER_REPORT = 40
+# ขนาดรวมสูงสุด (ไบต์) ของกราฟ base64 ที่ฝังใน HTML — กัน HTML > 2MB แม้กราฟไม่ถึง 40 รูป (P2)
+# กราฟบางชนิด (decomposition timeseries) ใหญ่มาก จึงจำกัดด้วย "ขนาด" ควบคู่กับ "จำนวน"
+# เผื่อพื้นที่ ~0.4MB ให้ CSS/ข้อความ/ตาราง เพื่อให้ไฟล์รวมยังต่ำกว่า 2MB
+_MAX_CHART_BYTES = 1_600_000
+
+# กราฟระดับชุดข้อมูล (สำคัญสูง — เก็บไว้เสมอเมื่อตัดงบกราฟ)
+_DATASET_LEVEL_CHART_KEYS = (
+    "correlation_heatmap",
+    "scatter_matrix",
+    "boxplot",
+    "violinplot",
+    "missing_matrix",
+    "missing_heatmap",
+)
+
+# จำนวนคอลัมน์สูงสุดที่ยังแสดงการ์ดรายคอลัมน์เต็ม — เกินนี้สรุปเป็นตารางแทน (P2)
+_MAX_COLUMN_CARDS = 60
+
 # ลำดับความสำคัญในรายงาน — ให้เรื่องที่กระทบการตัดสินใจขึ้นก่อน
 _SEVERITY_ORDER = {"critical": 0, "warning": 1, "info": 2}
 
@@ -256,7 +277,8 @@ def _detect_data_type(df: pd.DataFrame) -> dict[str, Any]:
         if s.dtype == object or pd.api.types.is_string_dtype(s):
             sample = s.dropna().astype(str).head(80)
             if len(sample) >= 3:
-                parsed = pd.to_datetime(sample, errors="coerce")
+                # format="mixed": parse แต่ละค่าแยกกัน เลี่ยง UserWarning "Could not infer format" (U1)
+                parsed = pd.to_datetime(sample, errors="coerce", format="mixed")
                 if float(parsed.notna().mean()) >= 0.8:
                     datetime_cols.append(c)
 
@@ -598,7 +620,9 @@ class ProfileReport:
         # ความผิดปกติ (statistical/text/encoding/categorical) — text checks ต้องมี tokenizer
         self._emit_progress("prog_anomaly")
         analysis_df = self._analysis_df()
-        self._anomalies = detect_anomalies(analysis_df, self._analysis_column_types(), tokenizer)
+        self._anomalies = detect_anomalies(
+            analysis_df, self._analysis_column_types(), tokenizer, notes=self._notes
+        )
         self._note_if_ml_skipped()
 
         # Named entities (NER) — เฉพาะคอลัมน์ข้อความไทย และเมื่อมี NER engine ที่ใช้ได้
@@ -618,7 +642,11 @@ class ProfileReport:
         self._compute_timeseries()
 
         # คำแนะนำการทำความสะอาด (dry-run — ไม่แก้ข้อมูลจริง)
-        self._cleaning = self._compute_cleaning_suggestions()
+        # เมื่อ clean=True ข้อมูลถูกทำความสะอาดไปแล้วใน _apply_cleaning (ใช้ DEFAULT_OPERATIONS
+        # ชุดเดียวกัน) การ dry-run ซ้ำบนข้อมูลที่สะอาดแล้วจะได้ผล rows_affected=0 ทุก op
+        # (operations เหล่านี้ idempotent) → suggestions ว่างเสมอ จึงข้ามได้เพื่อความเร็ว
+        # โดยไม่กระทบ output. เมื่อ clean=False ยัง dry-run บนข้อมูลดิบตามเดิม
+        self._cleaning = [] if self.clean else self._compute_cleaning_suggestions()
 
         # สถิติพื้นฐานของทุกคอลัมน์
         for col in self.df.columns:
@@ -652,9 +680,82 @@ class ProfileReport:
             # กราฟ cross-column insights (outstanding/attribution/comparison/trend) — v0.7
             if self._insight_engine is not None and self._insight_engine.cards:
                 self._build_insight_charts()
+            # จำกัดจำนวนกราฟรวมไม่ให้ HTML บวมเกินไป (P2)
+            self._enforce_chart_budget()
 
         self._ran = True
         return self
+
+    def _count_embedded_charts(self) -> int:
+        """นับจำนวนกราฟ (base64) ที่จะถูกฝังใน HTML จากทุกแหล่งรวมกัน."""
+        dc = self._dataset_charts
+        n = sum(1 for k in _DATASET_LEVEL_CHART_KEYS if dc.get(k))
+        n += sum(1 for k in dc if k.startswith(("distribution::", "valuecounts::")))
+        n += sum(len(v) for v in self._timeseries_charts.values())
+        n += len(self._insight_charts)
+        n += sum(len(v) for v in self._charts.values())
+        return n
+
+    def _embedded_chart_bytes(self) -> int:
+        """ขนาดรวม (ไบต์) ของสตริง base64 ที่จะถูกฝังใน HTML — ใช้คุมขนาดไฟล์รวม."""
+        dc = self._dataset_charts
+        total = sum(len(v) for v in dc.values())
+        total += sum(len(v) for charts in self._timeseries_charts.values() for v in charts.values())
+        total += sum(len(v) for v in self._insight_charts.values())
+        total += sum(len(v) for charts in self._charts.values() for v in charts.values())
+        return total
+
+    def _over_chart_budget(self) -> bool:
+        """เกินงบกราฟไหม — เกินทั้ง 'จำนวน' หรือ 'ขนาดรวม' ถือว่าเกิน (P2)."""
+        return (
+            self._count_embedded_charts() > _MAX_CHARTS_PER_REPORT
+            or self._embedded_chart_bytes() > _MAX_CHART_BYTES
+        )
+
+    def _enforce_chart_budget(self) -> None:
+        """ตัดกราฟที่สำคัญน้อยสุดให้อยู่ในงบทั้งจำนวน (``_MAX_CHARTS_PER_REPORT``) และ
+        ขนาดรวม (``_MAX_CHART_BYTES``) — กัน HTML บวมเกิน 2MB หรือกราฟเยอะจนเบราว์เซอร์ค้าง (P2).
+
+        ลำดับการตัด (จากสำคัญน้อยไปมาก): กราฟ value-counts ต่อคอลัมน์ → histogram การกระจาย
+        ต่อคอลัมน์ → ACF/decomposition ของอนุกรมเวลา (เก็บกราฟเส้นไว้) → กราฟต่อคอลัมน์ข้อความ →
+        กราฟเส้นอนุกรมเวลาที่เหลือ. กราฟระดับชุดข้อมูล (correlation/box/violin/missing) และกราฟ
+        insight เชิงธุรกิจจะถูกเก็บไว้เสมอ (สำคัญต่อการตัดสินใจ)
+        """
+        if not self._over_chart_budget():
+            return
+        dropped = 0
+
+        # 1) ตัด value-counts แล้ว distribution ต่อคอลัมน์ (สำคัญน้อยสุด)
+        for prefix in ("valuecounts::", "distribution::"):
+            for key in [k for k in self._dataset_charts if k.startswith(prefix)]:
+                if not self._over_chart_budget():
+                    break
+                del self._dataset_charts[key]
+                dropped += 1
+
+        # 2) ตัด ACF แล้ว decomposition ของอนุกรมเวลา (เก็บกราฟเส้น 'line' ไว้ — สำคัญสุด)
+        for sub in ("acf", "decomposition"):
+            for col in list(self._timeseries_charts):
+                if not self._over_chart_budget():
+                    break
+                if self._timeseries_charts[col].pop(sub, None) is not None:
+                    dropped += 1
+
+        # 3) ถ้ายังเกิน ตัดกราฟต่อคอลัมน์ข้อความ แล้วกราฟเส้นอนุกรมเวลาที่เหลือ
+        for store in (self._charts, self._timeseries_charts):
+            for col in list(store):
+                if not self._over_chart_budget():
+                    break
+                if store[col]:
+                    dropped += len(store[col])
+                    store[col] = {}
+
+        if dropped:
+            self._notes.append(
+                f"จำกัดกราฟไว้ {_MAX_CHARTS_PER_REPORT} รูป / "
+                f"{_MAX_CHART_BYTES / 1_000_000:.1f}MB (ตัด {dropped} รูปที่สำคัญน้อยสุด) "
+                "เพื่อลดขนาดไฟล์ HTML"
+            )
 
     def _compute_timeseries(self) -> None:
         """ตรวจหาแกนเวลาแล้ววิเคราะห์ทุกคอลัมน์ตัวเลขเป็นอนุกรมเวลา — แบบอัตโนมัติ.
@@ -674,7 +775,8 @@ class ProfileReport:
             return
 
         time_col = next(iter(ts_cols))
-        time_values = pd.to_datetime(self.df[time_col], errors="coerce")
+        # format="mixed": parse แต่ละค่าแยกกัน เลี่ยง UserWarning "Could not infer format" (U1)
+        time_values = pd.to_datetime(self.df[time_col], errors="coerce", format="mixed")
         valid = time_values.notna()
         if int(valid.sum()) < 5:
             return
@@ -703,6 +805,13 @@ class ProfileReport:
         if not numeric_cols:
             return
         self._ts_time_col = str(time_col)
+        # ข้อมูลยาวมาก (>200K จุด): analyze_timeseries จะใช้ decomposition พื้นฐานแทน STL
+        # โดยอัตโนมัติเพื่อความเร็ว — แจ้งให้ผู้ใช้ทราบครั้งเดียว
+        if len(indexed) > 200_000:
+            self._notes.append(
+                f"timeseries: ข้อมูล {len(indexed):,} แถว — ใช้การแยกองค์ประกอบแบบพื้นฐาน "
+                "(ข้าม STL/statsmodels) เพื่อความเร็ว"
+            )
         for col in numeric_cols[:20]:
             try:
                 result = analyze_timeseries(indexed[col])
@@ -995,7 +1104,8 @@ class ProfileReport:
                     }
                 )
         elif ctype == ColumnType.DATETIME:
-            dt = pd.to_datetime(series, errors="coerce").dropna()
+            # format="mixed": parse แต่ละค่าแยกกัน เลี่ยง UserWarning "Could not infer format" (U1)
+            dt = pd.to_datetime(series, errors="coerce", format="mixed").dropna()
             if len(dt) > 0:
                 stats["min"] = str(dt.min())
                 stats["max"] = str(dt.max())
@@ -1645,6 +1755,8 @@ class ProfileReport:
             insight_section = {
                 "executive_summary_th": self._insights.executive_summary_th,
                 "total_insights": self._insights.total_insights,
+                # จำนวนข้อค้นพบทั้งหมดก่อนถูกตัด (P1) — ใช้บอกผู้อ่านว่าแสดงเพียงส่วนสำคัญ
+                "total_generated": self._insights.total_generated,
                 "critical_count": self._insights.critical_count,
                 "warning_count": self._insights.warning_count,
                 "info_count": self._insights.info_count,

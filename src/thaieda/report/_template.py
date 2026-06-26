@@ -4,7 +4,27 @@
 from __future__ import annotations
 
 # ธีมเข้ม, modern, CSS ฝังในตัว, รูปเป็น base64 — ไม่พึ่งไฟล์ภายนอก
-REPORT_TEMPLATE = r"""<!DOCTYPE html>
+# Macro render_issue/render_anomaly: ใช้ซ้ำในส่วนหลัก + ส่วน collapse (top-50 + ที่เหลือ) — P2
+# วางก่อน <!DOCTYPE> โดยไม่มีช่องว่างคั่น เพื่อไม่ให้ HTML ขึ้นต้นด้วย whitespace (กัน quirks mode)
+REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
+    <div class="issue {{ iss.severity }}">
+      <div><span class="sev {{ iss.severity }}">{{ sev_icons[iss.severity] }} {{ L('severity_' ~ iss.severity) }}</span><b>{{ iss.column }}</b> · <span class="ng">{{ iss.check_name }}</span></div>
+      <div class="meta">{{ L('count') }}: {{ "{:,}".format(iss.count) }} ({{ iss.percentage }}%)</div>
+      <div class="desc-th">{{ iss.description_th }}</div>
+      {% if iss.examples %}<div class="examples">{% for ex in iss.examples[:5] %}<span class="ex mono">{{ ex }}</span>{% endfor %}</div>{% endif %}
+      <div class="so-what"><span class="lbl">{{ L('so_what') }}</span> {{ iss.suggestion_th }}</div>
+      <details><summary class="ng">{{ L('show_details') }}</summary><div class="desc-en">{{ iss.description }} — {{ iss.suggestion }}</div></details>
+    </div>
+{% endmacro %}{% macro render_anomaly(an, sev_icons, L) %}
+    <div class="issue {{ an.severity }}">
+      <div><span class="sev {{ an.severity }}">{{ sev_icons[an.severity] }} {{ L('severity_' ~ an.severity) }}</span><b>{{ an.column }}</b> · <span class="ng">{{ an.check_name }}</span> <span class="badge">{{ an.type_label }}</span></div>
+      <div class="meta">{{ L('count') }}: {{ "{:,}".format(an.count) }} ({{ an.percentage }}%)</div>
+      <div class="desc-th">{{ an.description_th }}</div>
+      {% if an.examples %}<div class="examples">{% for ex in an.examples[:5] %}<span class="ex mono">{{ ex }}</span>{% endfor %}</div>{% endif %}
+      <div class="so-what"><span class="lbl">{{ L('so_what') }}</span> {{ an.suggestion_th }}</div>
+      <details><summary class="ng">{{ L('show_details') }}</summary><div class="desc-en">{{ an.description }} — {{ an.suggestion }}</div></details>
+    </div>
+{% endmacro %}<!DOCTYPE html>
 <html lang="{{ lang }}">
 <head>
 <meta charset="utf-8">
@@ -329,8 +349,11 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
       {% if insight_section.info_count %}<span class="sev info">{{ insight_section.info_count }} {{ L('severity_info') }}</span>{% endif %}
     </span>
   </h2>
+  {% if insight_section.total_generated and insight_section.total_generated > insight_section.insights|length %}
+  <div class="note">{{ L('showing_top_of') }} {{ insight_section.insights|length }} {{ L('of_total') }} {{ insight_section.total_generated }} {{ L('auto_insights') }}</div>
+  {% endif %}
   <div class="insight-grid">
-    {% for ins in insight_section.insights %}
+    {% for ins in insight_section.insights[:20] %}
     <div class="issue insight {{ ins.severity }}">
       <div>
         <span class="sev {{ ins.severity }}">{{ sev_icons[ins.severity] }} {{ L('severity_' ~ ins.severity) }}</span>
@@ -342,6 +365,26 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
     </div>
     {% endfor %}
   </div>
+  {% if insight_section.insights|length > 20 %}
+  <details class="block">
+    <summary class="ng">{{ L('show_more_insights') }} <b>({{ insight_section.insights|length - 20 }})</b></summary>
+    <div class="body">
+      <div class="insight-grid">
+        {% for ins in insight_section.insights[20:] %}
+        <div class="issue insight {{ ins.severity }}">
+          <div>
+            <span class="sev {{ ins.severity }}">{{ sev_icons[ins.severity] }} {{ L('severity_' ~ ins.severity) }}</span>
+            <span class="badge cat">{{ ins.category_label }}</span>
+            <b>{{ ins.title_th }}</b>
+          </div>
+          <div class="desc-th">{{ ins.description_th }}</div>
+          <div class="so-what"><span class="lbl">{{ L('so_what') }}</span> {{ ins.recommendation_th }}</div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </details>
+  {% endif %}
   {% endif %}
 
   <!-- ============ CROSS-COLUMN INSIGHTS ============ -->
@@ -352,7 +395,7 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
     <div>
       <span class="badge t-numeric">{{ c.pattern_label }}</span>
       <b>{{ c.title_th }}</b>
-      <span class="cat ng">{{ L('breakdown') }}: <code>{{ c.perspective.breakdown }}</code>{% if c.perspective.measure %} · {{ L('measure') }}: <code>{{ c.perspective.measure }}</code>{% endif %} · {{ c.perspective.agg }}</span>
+      <span class="cat ng">{% if c.perspective.breakdown %}{{ L('breakdown') }}: <code>{{ c.perspective.breakdown }}</code>{% endif %}{% if c.perspective.measure %} · {{ L('measure') }}: <code>{{ c.perspective.measure }}</code>{% endif %} · {{ c.perspective.agg }}</span>
     </div>
     <div class="desc-th">{{ c.description_th }}</div>
     {% if c.chart %}
@@ -372,16 +415,13 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
   <!-- ============ QUALITY ISSUES ============ -->
   <h2 id="quality">{{ L('quality_issues') }} <span class="ng">({{ quality_issues|length }})</span></h2>
   {% if quality_issues %}
-    {% for iss in quality_issues %}
-    <div class="issue {{ iss.severity }}">
-      <div><span class="sev {{ iss.severity }}">{{ sev_icons[iss.severity] }} {{ L('severity_' ~ iss.severity) }}</span><b>{{ iss.column }}</b> · <span class="ng">{{ iss.check_name }}</span></div>
-      <div class="meta">{{ L('count') }}: {{ "{:,}".format(iss.count) }} ({{ iss.percentage }}%)</div>
-      <div class="desc-th">{{ iss.description_th }}</div>
-      {% if iss.examples %}<div class="examples">{% for ex in iss.examples[:5] %}<span class="ex mono">{{ ex }}</span>{% endfor %}</div>{% endif %}
-      <div class="so-what"><span class="lbl">{{ L('so_what') }}</span> {{ iss.suggestion_th }}</div>
-      <details><summary class="ng">{{ L('show_details') }}</summary><div class="desc-en">{{ iss.description }} — {{ iss.suggestion }}</div></details>
-    </div>
-    {% endfor %}
+    {% if quality_issues|length > 50 %}<div class="note">{{ L('showing_top_of') }} 50 {{ L('of_total') }} {{ quality_issues|length }}</div>{% endif %}
+    {% for iss in quality_issues[:50] %}{{ render_issue(iss, sev_icons, L) }}{% endfor %}
+    {% if quality_issues|length > 50 %}
+    <details class="block"><summary class="ng">{{ L('show_details') }} <b>({{ quality_issues|length - 50 }})</b></summary>
+      <div class="body">{% for iss in quality_issues[50:] %}{{ render_issue(iss, sev_icons, L) }}{% endfor %}</div>
+    </details>
+    {% endif %}
   {% else %}
     <p class="empty">✓ {{ L('no_issues') }}</p>
   {% endif %}
@@ -389,16 +429,13 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
   <!-- ============ ANOMALIES ============ -->
   <h2 id="anomalies">{{ L('anomalies') }} <span class="ng">({{ anomalies|length }})</span></h2>
   {% if anomalies %}
-    {% for an in anomalies %}
-    <div class="issue {{ an.severity }}">
-      <div><span class="sev {{ an.severity }}">{{ sev_icons[an.severity] }} {{ L('severity_' ~ an.severity) }}</span><b>{{ an.column }}</b> · <span class="ng">{{ an.check_name }}</span> <span class="badge">{{ an.type_label }}</span></div>
-      <div class="meta">{{ L('count') }}: {{ "{:,}".format(an.count) }} ({{ an.percentage }}%)</div>
-      <div class="desc-th">{{ an.description_th }}</div>
-      {% if an.examples %}<div class="examples">{% for ex in an.examples[:5] %}<span class="ex mono">{{ ex }}</span>{% endfor %}</div>{% endif %}
-      <div class="so-what"><span class="lbl">{{ L('so_what') }}</span> {{ an.suggestion_th }}</div>
-      <details><summary class="ng">{{ L('show_details') }}</summary><div class="desc-en">{{ an.description }} — {{ an.suggestion }}</div></details>
-    </div>
-    {% endfor %}
+    {% if anomalies|length > 50 %}<div class="note">{{ L('showing_top_of') }} 50 {{ L('of_total') }} {{ anomalies|length }}</div>{% endif %}
+    {% for an in anomalies[:50] %}{{ render_anomaly(an, sev_icons, L) }}{% endfor %}
+    {% if anomalies|length > 50 %}
+    <details class="block"><summary class="ng">{{ L('show_details') }} <b>({{ anomalies|length - 50 }})</b></summary>
+      <div class="body">{% for an in anomalies[50:] %}{{ render_anomaly(an, sev_icons, L) }}{% endfor %}</div>
+    </details>
+    {% endif %}
   {% else %}
     <p class="empty">✓ {{ L('no_anomalies') }}</p>
   {% endif %}
@@ -470,6 +507,15 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
 
   <!-- ============ COLUMN DETAILS ============ -->
   <h2 id="columns">{{ L('column_details') }}</h2>
+  {% if columns|length > 60 %}
+  <p class="muted">คอลัมน์จำนวนมาก ({{ columns|length }}) — สรุปเป็นตารางแทนการ์ดรายคอลัมน์เพื่อลดขนาดไฟล์ HTML</p>
+  <table>
+    <tr><th>{{ L('column') }}</th><th>{{ L('column_types') }}</th>{% for k, v in columns[0].basic_stats[:3] %}<th>{{ k }}</th>{% endfor %}</tr>
+    {% for col in columns %}
+    <tr><td><b>{{ col.name }}</b></td><td><span class="badge t-{{ col.type_key }}">{{ col.type_label }}</span></td>{% for k, v in col.basic_stats[:3] %}<td>{{ v }}</td>{% endfor %}</tr>
+    {% endfor %}
+  </table>
+  {% else %}
   <p class="muted">ส่วนนี้ซ่อนไว้เป็นรายคอลัมน์เพื่อลดความรก เปิดเฉพาะคอลัมน์ที่ต้องการตรวจละเอียด</p>
   {% for col in columns %}
   <details class="block col">
@@ -490,6 +536,7 @@ REPORT_TEMPLATE = r"""<!DOCTYPE html>
     </div>
   </details>
   {% endfor %}
+  {% endif %}
   <div class="note">{{ L('more_columns_note') }}</div>
 
   <h2 id="recommended-actions">{{ L('recommended_actions') }}</h2>

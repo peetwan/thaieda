@@ -714,6 +714,13 @@ def _looks_like_datetime(values: list[str]) -> bool:
     """เดาว่ารายการสตริงเป็นวันที่หรือไม่ (parse ผ่าน >90%) — v0.8: รองรับ Thai month names."""
     if not values:
         return False
+    # v1.x (D1): ค่าที่ขึ้นต้นด้วยตัวอักษร 2+ ตัวตามด้วยตัวคั่น (เช่น "CA-2017-152156",
+    # "US-2016-108966", "OFF-EN-10001492") เป็นรหัส/ID ไม่ใช่วันที่ — กัน false positive
+    # จาก segment ที่มีรูป 9999-9999 ภายในรหัส
+    _id_prefix_re = re.compile(r"^[A-Za-z]{2,}[-_/.]")
+    id_prefix_count = sum(1 for v in values if _id_prefix_re.match(v.strip()))
+    if id_prefix_count / len(values) >= 0.6:
+        return False
     # ต้องมีตัวคั่นแบบวันที่ ป้องกัน false positive จากเลขล้วน
     date_like = re.compile(r"\d{1,4}[-/.]\d{1,2}([-/.]\d{1,4})?|\d{4}[-/]\d{2}")
     # v0.8: เพิ่ม pattern สำหรับ Thai month names (เช่น "15 มกราคม 2567", "1 ก.พ. 67")

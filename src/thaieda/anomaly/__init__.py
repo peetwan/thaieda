@@ -33,6 +33,9 @@ _MIN_ML_SAMPLE = 100
 # จำนวนแถวสูงสุดที่ส่งเข้า IF/LOF — เกินนี้สุ่มตัวอย่างลงมา (กัน LOF ช้ามากบนข้อมูลหลักล้านแถว)
 # วิธีเชิงสถิติ (z-score/MAD/IQR) ยังรันบนข้อมูลเต็มเสมอ เพราะเป็นเวกเตอร์และเร็วอยู่แล้ว
 _MAX_ML_SAMPLE = 10000
+# จำนวนคอลัมน์ตัวเลขสูงสุดที่ใช้วิธี ML (IF/LOF) — แต่ละคอลัมน์ต้อง fit โมเดลแยก จึงแพงบนตาราง
+# กว้าง (เช่น 171 คอลัมน์ = 171 โมเดล × 2 วิธี). เกินนี้ใช้เฉพาะวิธีเชิงสถิติบนคอลัมน์ที่เหลือ
+_MAX_ML_ANOMALY_COLS = 30
 # สัดส่วนค่าซ้ำสูงสุดที่ยอมให้ LOF ทำงาน — เกินนี้ผล LOF ไม่น่าเชื่อถือ (ระยะเพื่อนบ้าน = 0)
 _MAX_LOF_DUP_RATIO = 0.5
 # สัดส่วน outlier สูงสุดที่ยอมรับจากวิธี ML — เกินนี้ถือว่า "ไม่ใช่ค่าหายากแล้ว"
@@ -1204,6 +1207,8 @@ def _detect_anomalies_frame(
     df: pd.DataFrame,
     column_types: dict[str, ColumnType] | None = None,
     tokenizer=None,
+    *,
+    notes: list[str] | None = None,
 ) -> list[AnomalyIssue]:
     """ตรวจความผิดปกติทั้งหมดใน DataFrame คืนรายการ AnomalyIssue เรียงตามความรุนแรง.
 
@@ -1212,6 +1217,7 @@ def _detect_anomalies_frame(
         column_types: ผลจำแนกประเภทคอลัมน์ (ถ้าไม่ให้ จะเรียก detect_all ให้เอง).
         tokenizer: ตัวตัดคำ — ถ้าเป็น None จะข้ามการตรวจเชิงข้อความทั่วไป
             (แต่ยังตรวจตัวเลข/หมวดหมู่/เฉพาะภาษาไทยที่ไม่ต้องตัดคำ).
+        notes: ลิสต์ (optional) สำหรับแนบหมายเหตุ เช่น เมื่อจำกัดวิธี ML บนตารางกว้าง.
 
     Returns:
         list[AnomalyIssue] เรียงจากวิกฤต -> เตือน -> ข้อมูล.
@@ -1224,6 +1230,16 @@ def _detect_anomalies_frame(
     # รันวิธี ML เฉพาะเมื่อมี scikit-learn (ตรวจครั้งเดียว ไม่ import ซ้ำต่อคอลัมน์)
     run_ml = sklearn_available()
 
+    # ตารางกว้าง (คอลัมน์ตัวเลขเยอะ): วิธี ML (IsolationForest/LOF) ต้อง fit หนึ่งโมเดล/คอลัมน์
+    # จึงเป็น O(จำนวนคอลัมน์) ที่แพง — จำกัดให้รันเฉพาะ _MAX_ML_ANOMALY_COLS คอลัมน์แรก
+    # ส่วนวิธีเชิงสถิติ (z-score/MAD/IQR) ยังรันครบทุกคอลัมน์ (เวกเตอร์ เร็วอยู่แล้ว)
+    numeric_total = sum(
+        1 for c in df.columns if column_types.get(str(c)) == ColumnType.NUMERIC
+    )
+    ml_budget = _MAX_ML_ANOMALY_COLS if run_ml else 0
+    ml_capped = run_ml and numeric_total > ml_budget
+    ml_used = 0
+
     for col in df.columns:
         col_name = str(col)
         series = df[col]
@@ -1234,7 +1250,8 @@ def _detect_anomalies_frame(
                 issues.append(issue)
             # วิธี ML — เสริมวิธีเชิงสถิติเมื่อข้อมูลพอ (>100 แถว) และมี sklearn
             # ไม่ deduplicate: การที่หลายวิธี flag จุดเดียวกันช่วยเพิ่มความมั่นใจ
-            if run_ml:
+            if run_ml and ml_used < ml_budget:
+                ml_used += 1
                 for ml_detect in (detect_isolation_forest, detect_lof):
                     if (issue := ml_detect(series)) is not None:
                         issues.append(issue)
@@ -1248,6 +1265,13 @@ def _detect_anomalies_frame(
 
         if ctype in _CATEGORICAL_TYPES:
             issues.extend(detect_categorical_anomalies(series))
+
+    if ml_capped and notes is not None:
+        notes.append(
+            f"วิธี ML ในการตรวจ outlier (Isolation Forest/LOF) รันเฉพาะ {ml_budget} "
+            f"จาก {numeric_total} คอลัมน์ตัวเลขแรก เพื่อความเร็วบนตารางกว้าง — "
+            "การตรวจ outlier เชิงสถิติ (z-score/MAD/IQR) ยังครอบคลุมทุกคอลัมน์ตามปกติ"
+        )
 
     issues.sort(key=lambda i: (SEVERITY_ORDER.get(i.severity, 99), -i.percentage))
     return issues
