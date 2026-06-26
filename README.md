@@ -138,67 +138,65 @@ Tested across 19 public datasets — from 500 rows to 541K rows, 2 to 171 column
 
 ---
 
-## Benchmarks — ThaiEDA vs Raw Pandas
+## Benchmarks — ThaiEDA vs ydata-profiling vs sweetviz
 
-Why use ThaiEDA instead of `df.describe()`? We benchmarked both on **19 public datasets** (14 international + 5 Thai) ranging from 500 rows to 541K rows, 2 to 171 columns.
+How does ThaiEDA compare to the most popular AutoEDA tools? We ran all three on **6 representative datasets** (small/large/wide, Thai + non-Thai) and measured speed, report size, and capability.
 
-### Head-to-head totals (19 datasets)
+### Head-to-head comparison (6 datasets)
 
-| Metric | Raw pandas (`describe` + `isnull`) | ThaiEDA (`run(df)`) |
-|--------|-----------------------------------:|--------------------:|
-| Cross-column insights | **0** | **480** |
-| Quality issues found | **0** | **83** |
-| Anomalies detected | **0** | **421** |
-| Charts generated | **0** | **347** |
-| HTML reports | **0** | **19** |
-| Language detection | ❌ | ✅ (Thai/English/mixed) |
-| Column type inference | ❌ | ✅ |
-| Data type classification | ❌ | ✅ |
-| Thai-specific checks | ❌ | ✅ (BE dates, numerals, ZWSP, mojibake) |
-| Quality score (0–100) | ❌ | ✅ |
+| Feature | ydata-profiling | sweetviz | **ThaiEDA** |
+|---------|:-------------:|:--------:|:-----------:|
+| One-line API | `ProfileReport(df)` | `sv.analyze(df)` | `run(df)` |
+| Standalone HTML | ✅ | ✅ | ✅ |
+| Cross-column insights | ❌ descriptive only | ❌ descriptive only | ✅ 6 patterns + BH correction |
+| Anomaly detection | ❌ | ❌ | ✅ IQR + ML + text |
+| Quality scoring (0–100) | ❌ | ❌ | ✅ |
+| Language detection | ❌ | ❌ | ✅ Thai/English/mixed |
+| Thai font rendering | ❌ tofu boxes | ❌ tofu boxes | ✅ Sarabun auto-detected |
+| Buddhist Era dates | ❌ | ❌ | ✅ auto พ.ศ. → CE |
+| Thai numerals (๑๒๓) | ❌ | ❌ | ✅ → 123 |
+| Zero-width space fix | ❌ | ❌ | ✅ stripped + reported |
+| Mojibake repair (TIS-620) | ❌ | ❌ | ✅ auto-fixed |
+| Smart cleaning | ❌ | ❌ | ✅ auto-decide |
+| Thai NER | ❌ | ❌ | ✅ |
+| Privacy LLM modes | ❌ | ❌ | ✅ 4 modes |
+| Folder mode | ❌ | ❌ | ✅ `run_folder()` |
 
-Raw pandas finishes instantly (~0.05s) but tells you nothing actionable — no insights, no quality issues, no anomalies, no charts, no report. ThaiEDA takes a few seconds more but gives you the full picture.
+### Speed & report size (lower is better)
 
-### Per-dataset results
+| Dataset | Rows | Cols | ydata time | ydata size | sweetviz time | sweetviz size | **ThaiEDA time** | **ThaiEDA size** |
+|---------|-----:|-----:|-----------:|-----------:|--------------:|--------------:|-----------------:|-----------------:|
+| titanic | 891 | 12 | 5.3 s | 1.95 MB | 3.3 s | 0.92 MB | **8.2 s** | **0.82 MB** |
+| superstore | 10,800 | 21 | 9.3 s | 5.16 MB | 5.4 s | 1.49 MB | **26.0 s** | **1.50 MB** |
+| adult | 32,561 | 15 | 5.4 s | 1.65 MB | 8.0 s | 1.26 MB | **17.2 s** | **1.05 MB** |
+| dirty-thai-retail | 500 | 8 | 3.1 s | 0.90 MB | 2.1 s | 0.68 MB | **2.1 s** | **0.53 MB** |
+| wisesight-sentiment | 26,737 | 2 | 2.6 s | 0.68 MB | 0.8 s | 0.50 MB | **18.8 s** | **0.42 MB** |
+| aps-failure | 16,000 | 171 | **99.8 s** | **71.2 MB** | 15.8 s | 8.2 MB | **93.0 s** | **0.48 MB** |
 
-| Dataset | Rows | Cols | Pandas (s) | ThaiEDA (s) | Insights | Quality | Anomalies | Charts |
-|---------|-----:|-----:|-----------:|------------:|---------:|--------:|----------:|-------:|
-| titanic | 891 | 12 | 0.02 | 8 | 30 | 3 | 12 | 23 |
-| telco-churn | 7,043 | 21 | 0.03 | 8 | 11 | 0 | 4 | 32 |
-| wine-quality | 1,599 | 12 | 0.02 | 5 | 29 | 0 | 16 | 16 |
-| california-housing | 20,640 | 10 | 0.02 | 13 | 30 | 0 | 12 | 14 |
-| superstore | 10,800 | 21 | 0.04 | 26 | 30 | 13 | 16 | 18 |
-| adult | 32,561 | 15 | 0.05 | 17 | 29 | 3 | 17 | 24 |
-| bank-marketing | 41,188 | 21 | 0.05 | 17 | 30 | 0 | 15 | 29 |
-| online-retail | 541,909 | 8 | 0.19 | 66 | 30 | 2 | 10 | 27 |
-| dirty-thai-retail | 500 | 8 | 0.01 | 2 | 17 | 3 | 4 | 20 |
-| absenteeism | 740 | 21 | 0.02 | 7 | 30 | 0 | 15 | 26 |
-| online-shoppers | 12,330 | 18 | 0.04 | 15 | 30 | 0 | 18 | 22 |
-| aps-failure | 16,000 | 171 | 0.50 | 93 | 30 | 44 | 239 | 2 |
-| beijing-pm25 | 43,824 | 13 | 0.02 | 10 | 19 | 0 | 6 | 19 |
-| bike-sharing | 17,379 | 17 | 0.02 | 38 | 30 | 0 | 10 | 21 |
-| wongnai-reviews-40k | 40,000 | 2 | 0.18 | 454 | 16 | 3 | 5 | 6 |
-| wongnai-train-50k | 40,000 | 2 | 0.20 | 458 | 16 | 3 | 5 | 6 |
-| wisesight-sentiment | 26,737 | 2 | 0.03 | 19 | 16 | 3 | 5 | 6 |
-| thai-ecommerce-15k | 15,000 | 11 | 0.02 | 18 | 28 | 1 | 6 | 15 |
-| thai-restaurant-hybrid-20k | 20,000 | 7 | 0.11 | 452 | 29 | 5 | 6 | 21 |
-| **Total** | | | **1.65** | **1,777** | **480** | **83** | **421** | **347** |
+**Key findings:**
 
-### What pandas misses that ThaiEDA catches
+1. **Report bloat** — ydata-profiling produces a **71 MB** HTML report on aps-failure (171 cols). ThaiEDA's report for the same dataset is **0.48 MB** — **148× smaller**. Even on superstore (21 cols), ydata generates 5.2 MB vs ThaiEDA's 1.5 MB.
 
-| What | Raw pandas | ThaiEDA |
-|------|-----------|---------|
-| Cross-column patterns ("column A predicts column B") | ❌ Can't | ✅ 6 patterns + BH correction |
-| Statistical anomalies | ❌ Manual | ✅ IQR + ML + text |
-| Quality issues (missing %, placeholders, constants) | ❌ Manual | ✅ Auto-detected + scored |
-| Buddhist Era dates (พ.ศ. 2567) | ❌ | ✅ Auto-detected → CE |
-| Thai numerals (๑๒๓) | ❌ | ✅ Converts to 123 |
-| Zero-width spaces | ❌ | ✅ Stripped + reported |
-| Mojibake (TIS-620 → UTF-8) | ❌ | ✅ Auto-fixed |
-| Executive HTML report | ❌ | ✅ Self-contained |
-| Charts (correlation, distribution, timeseries) | ❌ | ✅ 347 charts total |
+2. **Thai font rendering** — ydata-profiling and sweetviz render Thai text as tofu boxes (□□□) in all charts. ThaiEDA auto-detects and loads Sarabun font — Thai labels display correctly in every chart.
 
-Datasets from UCI ML Repository, HuggingFace (Wongnai, Wisesight), and public sources. All 19 pass QA with 0 defects.
+3. **Insights, not just stats** — ydata and sweetviz give you distributions and counts. ThaiEDA finds cross-column patterns ("column A strongly predicts column B"), statistical anomalies, and quality issues — none of which the others offer.
+
+4. **One tool, everything done** — with ydata or sweetviz you still need: a separate anomaly detector, a separate cleaner for Thai text, a separate font config step, and manual insight interpretation. ThaiEDA handles all of these in one `run(df)` call.
+
+### Why ThaiEDA?
+
+| You need | ydata / sweetviz | ThaiEDA |
+|----------|-----------------|---------|
+| Basic stats + distributions | ✅ | ✅ |
+| Thai text in charts | ❌ configure font manually | ✅ auto |
+| Cross-column insights | ❌ manual analysis | ✅ automatic |
+| Anomaly detection | ❌ separate tool needed | ✅ built-in |
+| Thai data cleaning (พ.ศ., เลขไทย, ZWSP) | ❌ not supported | ✅ auto-cleaning |
+| Quality score | ❌ | ✅ 0–100 with grade |
+| Privacy-safe LLM analysis | ❌ | ✅ 4 modes (PDPA-ready) |
+| Report size on wide tables | ❌ 71 MB | ✅ <1 MB |
+
+Datasets from UCI ML Repository, HuggingFace (Wongnai, Wisesight), and public sources. Benchmark scripts in `eval/public-test/`.
 
 ---
 

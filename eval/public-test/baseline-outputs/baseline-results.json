@@ -1,0 +1,128 @@
+[
+  {
+    "name": "titanic",
+    "rows": 891,
+    "cols": 12,
+    "ydata": {
+      "tool": "ydata-profiling",
+      "time_seconds": 5.27,
+      "html_size_bytes": 2001252,
+      "status": "ok",
+      "error": null,
+      "notes": []
+    },
+    "sweetviz": {
+      "tool": "sweetviz",
+      "time_seconds": 3.26,
+      "html_size_bytes": 938902,
+      "status": "ok",
+      "error": null,
+      "notes": []
+    }
+  },
+  {
+    "name": "superstore",
+    "rows": 10800,
+    "cols": 21,
+    "ydata": {
+      "tool": "ydata-profiling",
+      "time_seconds": 9.34,
+      "html_size_bytes": 5279657,
+      "status": "ok",
+      "error": null,
+      "notes": []
+    },
+    "sweetviz": {
+      "tool": "sweetviz",
+      "time_seconds": 5.41,
+      "html_size_bytes": 1490725,
+      "status": "ok",
+      "error": null,
+      "notes": []
+    }
+  },
+  {
+    "name": "adult",
+    "rows": 32561,
+    "cols": 15,
+    "ydata": {
+      "tool": "ydata-profiling",
+      "time_seconds": 5.38,
+      "html_size_bytes": 1648748,
+      "status": "ok",
+      "error": null,
+      "notes": []
+    },
+    "sweetviz": {
+      "tool": "sweetviz",
+      "time_seconds": 7.98,
+      "html_size_bytes": 1256908,
+      "status": "ok",
+      "error": null,
+      "notes": []
+    }
+  },
+  {
+    "name": "dirty-thai-retail",
+    "rows": 500,
+    "cols": 8,
+    "ydata": {
+      "tool": "ydata-profiling",
+      "time_seconds": 3.08,
+      "html_size_bytes": 918462,
+      "status": "ok",
+      "error": null,
+      "notes": []
+    },
+    "sweetviz": {
+      "tool": "sweetviz",
+      "time_seconds": 2.14,
+      "html_size_bytes": 680419,
+      "status": "ok",
+      "error": null,
+      "notes": []
+    }
+  },
+  {
+    "name": "wisesight-sentiment",
+    "rows": 26737,
+    "cols": 2,
+    "ydata": {
+      "tool": "ydata-profiling",
+      "time_seconds": 2.58,
+      "html_size_bytes": 673682,
+      "status": "ok",
+      "error": null,
+      "notes": []
+    },
+    "sweetviz": {
+      "tool": "sweetviz",
+      "time_seconds": 0.77,
+      "html_size_bytes": 501980,
+      "status": "ok",
+      "error": null,
+      "notes": []
+    }
+  },
+  {
+    "name": "aps-failure",
+    "rows": 16000,
+    "cols": 171,
+    "ydata": {
+      "tool": "ydata-profiling",
+      "time_seconds": 99.78,
+      "html_size_bytes": 72868484,
+      "status": "ok",
+      "error": null,
+      "notes": []
+    },
+    "sweetviz": {
+      "tool": "sweetviz",
+      "time_seconds": 15.83,
+      "html_size_bytes": 8399305,
+      "status": "ok",
+      "error": null,
+      "notes": []
+    }
+  }
+]
