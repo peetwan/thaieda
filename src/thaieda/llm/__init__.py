@@ -30,7 +30,7 @@ import pandas as pd
 from thaieda.llm._prepare import prepare_for_llm
 from thaieda.llm._prompt import build_prompt
 from thaieda.llm._provider import call_llm
-from thaieda.llm._synthetic import generate_synthetic_data, privacy_audit_report
+from thaieda.llm._synthetic import generate_synthetic_data, export_synthetic_data, privacy_audit_report
 
 # ----------------------------------------------------------------------------
 # ค่าที่ export
@@ -41,6 +41,7 @@ __all__ = [
     "build_prompt",
     "call_llm",
     "generate_synthetic_data",
+    "export_synthetic_data",
     "privacy_audit_report",
 ]
 

@@ -402,3 +402,94 @@ def _describe_data_sent(privacy_mode: str) -> str:
         "full": "ข้อมูลดิบทั้งหมด (ความเสี่ยงสูง — ใช้เฉพาะเมื่อยอมรับความเสี่ยง)",
     }
     return descriptions.get(privacy_mode, "ไม่ทราบโหมด")
+
+
+# ------------------------------------------------------------------------------
+# Export synthetic data to file — v1.9.1
+# ------------------------------------------------------------------------------
+def export_synthetic_data(
+    df: pd.DataFrame,
+    output_path: str,
+    *,
+    n_rows: int | None = None,
+    random_seed: int | None = 42,
+    preserve_patterns: bool = True,
+    include_audit: bool = True,
+) -> dict[str, Any]:
+    """สร้างข้อมูลจำลองแล้ว export เป็นไฟล์ — v1.9.1.
+
+    รองรับ: .csv, .xlsx, .json, .parquet
+    ไฟล์ผลลัพธ์มี statistical properties ใกล้เคียงข้อมูลจริง แต่ไม่มีค่าจริงปน
+    ปลอดภัยสำหรับส่งให้ LLM หรือบุคคลที่สามวิเคราะห์ต่อ
+
+    Args:
+        df: DataFrame ต้นฉบับ (ข้อมูลจริง).
+        output_path: path ของไฟล์ผลลัพธ์ (.csv/.xlsx/.json/.parquet).
+        n_rows: จำนวนแถว (default: เท่ากับ df).
+        random_seed: seed สำหรับ reproducibility.
+        preserve_patterns: รักษา missing rate.
+        include_audit: แนบ privacy audit report เป็นไฟล์ .json ข้างๆ.
+
+    Returns:
+        dict สรุปผล: {output_path, n_rows, n_cols, audit_path, file_size_kb}
+
+    Raises:
+        ValueError: ถ้านามสกุลไฟล์ไม่รองรับ.
+    """
+    from pathlib import Path
+
+    path = Path(output_path)
+    suffix = path.suffix.lower()
+
+    # สร้าง synthetic data
+    synthetic = generate_synthetic_data(
+        df, n_rows=n_rows, preserve_patterns=preserve_patterns, random_seed=random_seed
+    )
+
+    # export ตามนามสกุล
+    if suffix == ".csv":
+        synthetic.to_csv(path, index=False, encoding="utf-8-sig")
+    elif suffix == ".xlsx":
+        try:
+            synthetic.to_excel(path, index=False, engine="openpyxl")
+        except ImportError as e:
+            raise ImportError(
+                f"ต้องติดตั้ง openpyxl สำหรับ .xlsx: pip install openpyxl\n{e}"
+            ) from e
+    elif suffix == ".json":
+        synthetic.to_json(path, orient="records", force_ascii=False, indent=2)
+    elif suffix == ".parquet":
+        try:
+            synthetic.to_parquet(path, index=False)
+        except ImportError as e:
+            raise ImportError(
+                f"ต้องติดตั้ง pyarrow สำหรับ .parquet: pip install pyarrow\n{e}"
+            ) from e
+    else:
+        raise ValueError(
+            f"ไม่รองรับนามสกุล {suffix!r} — รองรับ: .csv, .xlsx, .json, .parquet"
+        )
+
+    file_size_kb = round(path.stat().st_size / 1024, 1)
+
+    result: dict[str, Any] = {
+        "output_path": str(path),
+        "n_rows": len(synthetic),
+        "n_cols": len(synthetic.columns),
+        "file_size_kb": file_size_kb,
+    }
+
+    # แนบ audit report ถ้าต้องการ
+    if include_audit:
+        audit = privacy_audit_report(df, privacy_mode="synthetic")
+        audit_path = path.with_suffix(".privacy-audit.json")
+        import json
+
+        audit_path.write_text(
+            json.dumps(audit, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        result["audit_path"] = str(audit_path)
+        result["audit_risk"] = audit["overall_risk"]
+        result["n_pii_types"] = audit["n_pii_types"]
+
+    return result
