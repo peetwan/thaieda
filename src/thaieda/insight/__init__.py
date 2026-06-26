@@ -974,9 +974,7 @@ def _build_executive_summary(
 
     # ระบุว่ามีข้อค้นพบทั้งหมดกี่ข้อ แต่แสดงเพียงส่วนที่สำคัญที่สุด (เมื่อถูกตัด — P1)
     if total_generated is not None and shown is not None and total_generated > shown:
-        parts.append(
-            f"พบข้อค้นพบทั้งหมด {total_generated:,} ข้อ แสดงเฉพาะ {shown:,} ข้อที่สำคัญที่สุด"
-        )
+        parts.append(f"พบข้อค้นพบทั้งหมด {total_generated:,} ข้อ แสดงเฉพาะ {shown:,} ข้อที่สำคัญที่สุด")
 
     # คำตัดสินสุขภาพข้อมูลโดยรวม
     if crit:

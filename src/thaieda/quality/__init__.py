@@ -469,9 +469,9 @@ def check_normalization(series: pd.Series, column: str) -> QualityIssue | None:
     full_width = pd.Series(False, index=obj.index)
     if has_fw.any():
         fw = obj[has_fw]
-        full_width.loc[fw.index] = fw.map(
-            lambda v: v != unicodedata.normalize("NFKC", v)
-        ).astype(bool)
+        full_width.loc[fw.index] = fw.map(lambda v: v != unicodedata.normalize("NFKC", v)).astype(
+            bool
+        )
 
     any_problem = dup_tone | dup_vowel | comb_order | repeat_spam | full_width | multi_tone
     count = int(any_problem.sum())
@@ -768,9 +768,10 @@ def run_quality_checks(
                 issues.append(issue)
 
             # v1.6 (AC-5): keyboard layout suspect — เฉพาะคอลัมน์ไทย/ผสม (รายงานอย่างเดียว)
-            if ctype in {ColumnType.THAI_TEXT, ColumnType.MIXED_TEXT} and (
-                issue := check_keyboard_layout_suspect(series, col_name)
-            ) is not None:
+            if (
+                ctype in {ColumnType.THAI_TEXT, ColumnType.MIXED_TEXT}
+                and (issue := check_keyboard_layout_suspect(series, col_name)) is not None
+            ):
                 issues.append(issue)
 
         # v0.8: placeholder/dash แทน NaN

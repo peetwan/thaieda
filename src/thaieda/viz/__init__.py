@@ -758,9 +758,7 @@ def create_timeseries_plot(series: pd.Series, title: str = "", font_path: str | 
     ax.set_facecolor(_DARK_BG)
     ax.plot(x_plot, y[idx], color=_ACCENT, linewidth=1.2, alpha=0.9)
     if trend_line is not None:
-        ax.plot(
-            x_plot, trend_line[idx], color=_CRITICAL, linewidth=1.4, linestyle="--", alpha=0.85
-        )
+        ax.plot(x_plot, trend_line[idx], color=_CRITICAL, linewidth=1.4, linestyle="--", alpha=0.85)
 
     if title:
         ax.set_title(title, color=_DARK_FG, fontproperties=prop, fontsize=12)

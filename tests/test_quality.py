@@ -177,9 +177,7 @@ def test_keyboard_layout_suspect_empty_series():
 
 
 def test_keyboard_layout_suspect_in_run_quality_checks():
-    df = pd.DataFrame(
-        {"comment": ["สวัสดีครับ", "ขอบคุณมาก", "l;ylfu", "อาหารอร่อยมาก"]}
-    )
+    df = pd.DataFrame({"comment": ["สวัสดีครับ", "ขอบคุณมาก", "l;ylfu", "อาหารอร่อยมาก"]})
     types = {"comment": ColumnType.THAI_TEXT}
     issues = run_quality_checks(df, types)
     names = {i.check_name for i in issues}

@@ -1243,9 +1243,7 @@ def _detect_anomalies_frame(
     # ตารางกว้าง (คอลัมน์ตัวเลขเยอะ): วิธี ML (IsolationForest/LOF) ต้อง fit หนึ่งโมเดล/คอลัมน์
     # จึงเป็น O(จำนวนคอลัมน์) ที่แพง — จำกัดให้รันเฉพาะ _MAX_ML_ANOMALY_COLS คอลัมน์แรก
     # ส่วนวิธีเชิงสถิติ (z-score/MAD/IQR) ยังรันครบทุกคอลัมน์ (เวกเตอร์ เร็วอยู่แล้ว)
-    numeric_total = sum(
-        1 for c in df.columns if column_types.get(str(c)) == ColumnType.NUMERIC
-    )
+    numeric_total = sum(1 for c in df.columns if column_types.get(str(c)) == ColumnType.NUMERIC)
     ml_budget = _MAX_ML_ANOMALY_COLS if run_ml else 0
     ml_capped = run_ml and numeric_total > ml_budget
     ml_used = 0
