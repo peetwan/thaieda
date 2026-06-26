@@ -1700,8 +1700,18 @@ class ProfileReport:
         anomalies = self._sorted_anomalies(L)
 
         dc = self._dataset_charts
+        # Plotly interactive correlation heatmap (lazy — fallback to static if not available)
+        plotly_heatmap = ""
+        try:
+            from thaieda.viz._interactive import create_correlation_heatmap_interactive
+            num_df = self.df.select_dtypes(include="number")
+            if len(num_df.columns) >= 2:
+                plotly_heatmap = create_correlation_heatmap_interactive(num_df)
+        except Exception:
+            pass
         dist_charts = {
             "correlation_heatmap": dc.get("correlation_heatmap", ""),
+            "correlation_heatmap_plotly": plotly_heatmap,
             "scatter_matrix": dc.get("scatter_matrix", ""),
             "boxplot": dc.get("boxplot", ""),
             "violinplot": dc.get("violinplot", ""),

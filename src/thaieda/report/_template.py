@@ -34,14 +34,20 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
   :root {
     --bg: #15171c; --panel: #1d2027; --panel2: #23272f; --panel3: #292e38;
     --fg: #e6e6e6; --muted: #9aa0aa; --border: #2e333c; --accent: #4dabf7;
-    --critical: #ff6b6b; --warning: #ffd43b; --info: #4dabf7; --ok: #51cf66;
+    --critical: #ff6b6b; --warning: #ffe066; --info: #4dabf7; --ok: #51cf66;
     --shadow: 0 18px 50px rgba(0,0,0,.22);
+  }
+  [data-theme="light"] {
+    --bg: #f5f6f8; --panel: #ffffff; --panel2: #eef0f4; --panel3: #e2e5eb;
+    --fg: #1a1d23; --muted: #5a6270; --border: #d8dde5; --accent: #1c7ed6;
+    --critical: #e03131; --warning: #e67700; --info: #1c7ed6; --ok: #2f9e44;
+    --shadow: 0 8px 30px rgba(0,0,0,.08);
   }
   * { box-sizing: border-box; }
   body {
     margin: 0; background: radial-gradient(circle at top left, rgba(77,171,247,.12), transparent 32rem), var(--bg);
     color: var(--fg); font-family: "Segoe UI", "Sarabun", "Noto Sans Thai", Tahoma, sans-serif;
-    line-height: 1.65; font-size: 15px;
+    line-height: 1.65; font-size: 15.5px;
   }
   .wrap { max-width: 1160px; margin: 0 auto; padding: 32px 24px 80px; }
   header { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; margin-bottom: 16px; }
@@ -71,7 +77,7 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
   .dtype-focus li { margin: 6px 0; font-size: 14px; }
   /* Key findings */
   .key-findings-list { display: grid; gap: 14px; margin: 14px 0; }
-  .key-finding { display: flex; gap: 16px; background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 18px 22px; border-left: 4px solid var(--accent); }
+  .key-finding { display: flex; gap: 16px; background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 20px 22px; border-left: 4px solid var(--accent); }
   .key-finding.critical { border-left-color: var(--critical); }
   .key-finding.warning { border-left-color: var(--warning); }
   .key-finding.info { border-left-color: var(--info); }
@@ -193,7 +199,58 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
     .issue, .col, .card, .hero, .panel, .action { break-inside: avoid; box-shadow: none; }
     img { max-width: 100%; }
   }
+  .tab-bar { display: flex; gap: 4px; flex-wrap: wrap; margin: 0 0 20px; border-bottom: 2px solid var(--border); padding-bottom: 0; }
+  .tab-btn { padding: 10px 18px; font-size: 14px; font-weight: 600; color: var(--muted); background: none; border: none; border-bottom: 3px solid transparent; cursor: pointer; border-radius: 0; margin-bottom: -2px; transition: color .15s, border-color .15s; }
+  .tab-btn:hover { color: var(--fg); }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+  .col-filter { margin: 0 0 16px; }
+  .col-filter select { padding: 8px 12px; font-size: 14px; background: var(--panel); color: var(--fg); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+  .theme-toggle { padding: 6px 14px; font-size: 13px; background: var(--panel2); color: var(--fg); border: 1px solid var(--border); border-radius: 20px; cursor: pointer; }
+  .theme-toggle:hover { background: var(--panel3); }
+  #back-to-top { position: fixed; bottom: 24px; right: 24px; width: 44px; height: 44px; border-radius: 50%; background: var(--accent); color: #fff; border: none; font-size: 20px; cursor: pointer; opacity: 0; visibility: hidden; transition: opacity .2s, visibility .2s; z-index: 999; box-shadow: var(--shadow); }
+  #back-to-top.visible { opacity: 1; visibility: visible; }
+  #back-to-top:hover { opacity: .85; }
+  .plotly-chart { margin-top: 14px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--panel); }
+  .imgrow img { width: 100%; border-radius: 10px; border: 1px solid var(--border); background: var(--panel2); }
+  .imgcap { color: var(--muted); font-size: 13px; margin-bottom: 6px; }
 </style>
+<script>
+  function switchTab(tabId) {
+    document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+    document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
+    var btn = document.querySelector('[data-tab="' + tabId + '"]');
+    var panel = document.getElementById('tab-' + tabId);
+    if (btn) btn.classList.add('active');
+    if (panel) panel.classList.add('active');
+  }
+  function filterColumns(sel) {
+    var val = sel.value;
+    document.querySelectorAll('[data-col-name]').forEach(function(card) {
+      if (val === 'all' || card.getAttribute('data-col-name') === val) {
+        card.style.display = '';
+      } else {
+        card.style.display = 'none';
+      }
+    });
+  }
+  function toggleTheme() {
+    var body = document.body;
+    var cur = body.getAttribute('data-theme');
+    var next = cur === 'light' ? 'dark' : 'light';
+    if (next === 'dark') { body.removeAttribute('data-theme'); }
+    else { body.setAttribute('data-theme', 'light'); }
+    try { localStorage.setItem('thaieda-theme', next); } catch(e) {}
+  }
+  window.addEventListener('scroll', function() {
+    var btn = document.getElementById('back-to-top');
+    if (btn) { if (window.scrollY > 200) { btn.classList.add('visible'); } else { btn.classList.remove('visible'); } }
+  });
+  (function() {
+    try { var saved = localStorage.getItem('thaieda-theme'); if (saved === 'light') { document.body.setAttribute('data-theme', 'light'); } } catch(e) {}
+  })();
+</script>
 </head>
 <body>
 <div class="wrap">
@@ -202,25 +259,22 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
       <h1>{{ L('report_title') }}</h1>
       <div class="sub">{{ L('generated_by') }} ThaiEDA v{{ version }} · {{ overview.rows }} {{ L('rows') }} × {{ overview.columns }} {{ L('columns') }}</div>
     </div>
-    <div class="badge">{{ L('how_to_read') }}: {{ L('how_to_read_desc') }}</div>
+    <div style="display:flex;gap:12px;align-items:flex-start;">
+      <div class="badge">{{ L('how_to_read') }}: {{ L('how_to_read_desc') }}</div>
+      <button class="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark mode">🌙 / ☀️</button>
+    </div>
   </header>
 
-  <nav class="nav">
-    {% if data_type %}<a href="#what-is-this">{{ L('what_is_this_data') }}</a>{% endif %}
-    {% if key_findings %}<a href="#key-findings">{{ L('most_important') }}</a>{% endif %}
-    <a href="#summary">{{ L('executive_summary') }}</a>
-    <a href="#actions">{{ L('priority_actions') }}</a>
-    <a href="#overview">{{ L('overview') }}</a>
-    {% if insight_section %}<a href="#insights">{{ L('auto_insights') }}</a>{% endif %}
-    {% if business_section %}<a href="#business-insights">{{ L('business_insights') }}</a>{% endif %}
-    <a href="#quality">{{ L('quality_issues') }}</a>
-    <a href="#anomalies">{{ L('anomalies') }}</a>
-    {% if target_section %}<a href="#target">{{ L('target_analysis') }}</a>{% endif %}
-    {% if timeseries_section %}<a href="#timeseries">{{ L('timeseries') }}</a>{% endif %}
-    {% if cleaning_diff %}<a href="#cleaning">{{ L('cleaning_diff') }}</a>{% endif %}
-    <a href="#charts">{{ L('distributions_correlations') }}</a>
-    <a href="#columns">{{ L('column_details') }}</a>
-  </nav>
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')">Overview</button>
+    <button class="tab-btn" data-tab="insights" onclick="switchTab('insights')">Insights</button>
+    <button class="tab-btn" data-tab="quality" onclick="switchTab('quality')">Quality</button>
+    <button class="tab-btn" data-tab="anomalies" onclick="switchTab('anomalies')">Anomalies</button>
+    <button class="tab-btn" data-tab="columns" onclick="switchTab('columns')">Columns</button>
+  </div>
+
+  <!-- TAB: OVERVIEW -->
+  <div id="tab-overview" class="tab-panel active">
 
   <!-- ============ WHAT IS THIS DATA ============ -->
   {% if data_type %}
@@ -340,6 +394,10 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
   </div>
   {% endif %}
 
+  </div><!-- /tab-overview -->
+
+  <!-- TAB: INSIGHTS -->
+  <div id="tab-insights" class="tab-panel">
   <!-- ============ KEY INSIGHTS ============ -->
   {% if insight_section %}
   <h2 id="insights">{{ L('auto_insights') }}
@@ -412,6 +470,10 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
   {% endfor %}
   {% endif %}
 
+  </div><!-- /tab-insights -->
+
+  <!-- TAB: QUALITY -->
+  <div id="tab-quality" class="tab-panel">
   <!-- ============ QUALITY ISSUES ============ -->
   <h2 id="quality">{{ L('quality_issues') }} <span class="ng">({{ quality_issues|length }})</span></h2>
   {% if quality_issues %}
@@ -426,6 +488,10 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
     <p class="empty">✓ {{ L('no_issues') }}</p>
   {% endif %}
 
+  </div><!-- /tab-quality -->
+
+  <!-- TAB: ANOMALIES -->
+  <div id="tab-anomalies" class="tab-panel">
   <!-- ============ ANOMALIES ============ -->
   <h2 id="anomalies">{{ L('anomalies') }} <span class="ng">({{ anomalies|length }})</span></h2>
   {% if anomalies %}
@@ -495,7 +561,9 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
   <!-- ============ CHARTS ============ -->
   <h2 id="charts">{{ L('distributions_correlations') }}</h2>
   {% if has_dist_charts %}
-    {% if dist_charts.correlation_heatmap %}<div class="imgrow full"><div><div class="imgcap">{{ L('correlation_heatmap') }}</div><img src="data:image/png;base64,{{ dist_charts.correlation_heatmap }}" alt="correlation heatmap"><div class="chart-note"><b>{{ L('chart_insight') }}:</b> ดูว่าคอลัมน์ตัวเลขใดเคลื่อนไปด้วยกันสูงมาก อาจใช้แทนกันได้หรือส่งผลต่อโมเดล</div></div></div>{% endif %}
+    {% if dist_charts.correlation_heatmap_plotly %}
+   <div class="plotly-chart">{{ dist_charts.correlation_heatmap_plotly | safe }}</div>
+   {% elif dist_charts.correlation_heatmap %}<div class="imgrow full"><div><div class="imgcap">{{ L('correlation_heatmap') }}</div><img src="data:image/png;base64,{{ dist_charts.correlation_heatmap }}" alt="correlation heatmap"><div class="chart-note"><b>{{ L('chart_insight') }}:</b> ดูว่าคอลัมน์ตัวเลขใดเคลื่อนไปด้วยกันสูงมาก อาจใช้แทนกันได้หรือส่งผลต่อโมเดล</div></div></div>{% endif %}
     {% if dist_charts.scatter_matrix %}<div class="imgrow full"><div><div class="imgcap">{{ L('scatter_matrix') }}</div><img src="data:image/png;base64,{{ dist_charts.scatter_matrix }}" alt="scatter matrix"><div class="chart-note"><b>{{ L('chart_insight') }}:</b> ใช้ดู pattern ระหว่างตัวเลข เช่น เส้นตรง กลุ่มย่อย หรือ outlier</div></div></div>{% endif %}
     <div class="imgrow">{% if dist_charts.boxplot %}<div><div class="imgcap">{{ L('boxplot') }}</div><img src="data:image/png;base64,{{ dist_charts.boxplot }}" alt="box plot"><div class="chart-note"><b>{{ L('chart_insight') }}:</b> จุดที่หลุดจากกล่องคือค่าที่ควรตรวจว่าเป็น outlier จริงหรือไม่</div></div>{% endif %}{% if dist_charts.violinplot %}<div><div class="imgcap">{{ L('violinplot') }}</div><img src="data:image/png;base64,{{ dist_charts.violinplot }}" alt="violin plot"><div class="chart-note"><b>{{ L('chart_insight') }}:</b> ดูรูปทรงการกระจายว่าเบ้ มีหลายกลุ่ม หรือกระจุกตัวตรงไหน</div></div>{% endif %}</div>
   {% else %}<p class="empty">ไม่มีกราฟการกระจายที่เหมาะสมสำหรับข้อมูลชุดนี้</p>{% endif %}
@@ -505,6 +573,10 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
   <div class="imgrow">{% if missing_charts.missing_matrix %}<div><div class="imgcap">{{ L('missing_matrix') }}</div><img src="data:image/png;base64,{{ missing_charts.missing_matrix }}" alt="missing value matrix"><div class="chart-note"><b>{{ L('chart_insight') }}:</b> แถบว่างช่วยบอกว่าค่าว่างกระจุกตัวช่วงใดหรือคอลัมน์ใด</div></div>{% endif %}{% if missing_charts.missing_heatmap %}<div><div class="imgcap">{{ L('missing_heatmap') }}</div><img src="data:image/png;base64,{{ missing_charts.missing_heatmap }}" alt="missing nullity correlation heatmap"><div class="chart-note"><b>{{ L('chart_insight') }}:</b> ถ้าค่าว่างเกิดพร้อมกันหลายคอลัมน์ อาจเกิดจากขั้นตอนเก็บข้อมูลเดียวกัน</div></div>{% endif %}</div>
   {% else %}<p class="empty">✓ {{ L('no_missing') }}</p>{% endif %}
 
+  </div><!-- /tab-anomalies -->
+
+  <!-- TAB: COLUMNS -->
+  <div id="tab-columns" class="tab-panel">
   <!-- ============ COLUMN DETAILS ============ -->
   <h2 id="columns">{{ L('column_details') }}</h2>
   {% if columns|length > 60 %}
@@ -516,9 +588,15 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
     {% endfor %}
   </table>
   {% else %}
+  <div class="col-filter">
+    <select onchange="filterColumns(this)">
+      <option value="all">All Columns ({{ columns|length }})</option>
+      {% for col in columns %}<option value="{{ col.name }}">{{ col.name }}</option>{% endfor %}
+    </select>
+  </div>
   <p class="muted">ส่วนนี้ซ่อนไว้เป็นรายคอลัมน์เพื่อลดความรก เปิดเฉพาะคอลัมน์ที่ต้องการตรวจละเอียด</p>
   {% for col in columns %}
-  <details class="block col">
+  <details class="block col" data-col-name="{{ col.name }}">
     <summary><span class="nm">{{ col.name }}</span><span class="badge t-{{ col.type_key }}">{{ col.type_label }}</span>{% if col.dist_chart or col.valuecounts_chart or col.charts.top_tokens %}<span class="badge">มีกราฟ</span>{% endif %}</summary>
     <div class="body">
       {% if col.is_text and col.metrics %}
@@ -537,7 +615,8 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
   </details>
   {% endfor %}
   {% endif %}
-  <div class="note">{{ L('more_columns_note') }}</div>
+
+  </div><!-- /tab-columns -->
 
   <h2 id="recommended-actions">{{ L('recommended_actions') }}</h2>
   {% if priority_actions %}
@@ -548,5 +627,6 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
 
   <footer>{{ L('generated_by') }} <b>ThaiEDA</b> v{{ version }} — AutoEDA สำหรับข้อมูลภาษาไทย</footer>
 </div>
+<button id="back-to-top" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="Back to top">↑</button>
 </body>
 </html>"""
