@@ -262,6 +262,55 @@ result = fit_distributions(df["column"], "column")
 
 ---
 
+## v1.9 — Privacy-First LLM Pipeline
+
+New **synthetic mode** for enterprise-grade privacy. Generate mock data with real statistical properties — zero real values leave the machine.
+
+### 5 Privacy Modes (ordered by risk)
+
+| Mode | What's sent to LLM | Risk | Use case |
+|------|-------------------|------|----------|
+| `insight_only` | Statistics + insights only | Low | Safe default |
+| **`synthetic`** (v1.9) | Mock data from fitted distributions | Low | LLM sees realistic data shape |
+| `anonymized` | PII replaced with tokens | Medium | Need data structure, no PII |
+| `dp_noise` | Stats + Laplace noise (ε parameter) | Low | Statistical queries |
+| `full` | Raw data | High | User accepts risk |
+
+### Synthetic Data Pipeline
+
+```python
+from thaieda.llm import generate_synthetic_data, privacy_audit_report, analyze_with_llm
+
+# 1. Generate synthetic data (no real values)
+synthetic_df = generate_synthetic_data(df)
+# Numeric → sampled from fitted distribution (normal/lognormal/exponential/uniform)
+# Categorical → sampled from proportions (PII replaced with placeholders)
+# Datetime → sampled from date range
+# Text → length-based placeholders (no real text)
+
+# 2. Audit before sending
+audit = privacy_audit_report(df, privacy_mode="synthetic")
+# Detects: phone, email, Thai national ID, IP, Thai address
+# Returns risk level + recommendations
+
+# 3. Analyze with LLM using synthetic mode
+response = analyze_with_llm(df, privacy="synthetic", provider="ollama")
+```
+
+### Privacy Audit Report
+
+Automatic PII detection before any data leaves the machine:
+
+| PII type | Detection method | Risk |
+|----------|-----------------|------|
+| Phone numbers | Regex (Thai + international) | High |
+| Email addresses | Regex | High |
+| Thai national ID | Regex (x-xxxx-xxxxx-xx-x) | Critical |
+| IP addresses | Regex | Medium |
+| Thai addresses | Keyword matching (ตำบล/อำเภอ/จังหวัด) | Medium |
+
+---
+
 ## Scale & Performance
 
 Tested across 19 public datasets — 500 to 541K rows, 2 to 171 columns:

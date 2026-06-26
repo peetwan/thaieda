@@ -1,14 +1,16 @@
-"""LLM Q&A over computed profiles — การวิเคราะห์ข้อมูลด้วย LLM โดยปกปิดข้อมูลส่วนบุคคล (v0.9).
+"""LLM Q&A over computed profiles — การวิเคราะห์ข้อมูลด้วย LLM โดยปกปิดข้อมูลส่วนบุคคล (v0.9 + v1.9).
 
-สถาปัตยกรรม 4 โหมดความเป็นส่วนตัว:
+สถาปัตยกรรม 5 โหมดความเป็นส่วนตัว:
   1. ``insight_only`` (default) — ส่งเฉพาะสถิติสรุป + ข้อค้นพบเชิงลึก (ไม่ส่งข้อมูลดิบ)
-  2. ``anonymized`` — ลบ PII (ชื่อ/เบอร์/บัตร) ด้วย NER + regex แล้วส่งข้อมูลที่ไม่ระบุตัวได้
-  3. ``dp_noise`` — สถิติสรุป + เสียงรบกวนแบบ differential privacy (Laplace mechanism)
-  4. ``full`` — ส่งข้อมูลดิบทั้งหมด (ผู้ใช้ยอมรับความเสี่ยง)
+  2. ``synthetic`` (v1.9) — สร้างข้อมูลจำลองจาก distribution จริง ไม่มีค่าจริงปน
+  3. ``anonymized`` — ลบ PII (ชื่อ/เบอร์/บัตร) ด้วย NER + regex แล้วส่งข้อมูลที่ไม่ระบุตัวได้
+  4. ``dp_noise`` — สถิติสรุป + เสียงรบกวนแบบ differential privacy (Laplace mechanism)
+  5. ``full`` — ส่งข้อมูลดิบทั้งหมด (ผู้ใช้ยอมรับความเสี่ยง)
 
 โมดูลภายใน:
   * ``_prepare`` — เตรียมข้อมูลตามโหมด (prepare_for_llm)
   * ``_anonymize`` — ทำให้ไม่ระบุตัวบุคคลได้ (anonymize_dataframe)
+  * ``_synthetic`` (v1.9) — สร้างข้อมูลจำลอง (generate_synthetic_data, privacy_audit_report)
   * ``_prompt`` — สร้าง prompt ภาษาไทย/อังกฤษ (build_prompt)
   * ``_provider`` — เรียก LLM API ของผู้ให้บริการต่าง ๆ (call_llm)
 
@@ -28,6 +30,7 @@ import pandas as pd
 from thaieda.llm._prepare import prepare_for_llm
 from thaieda.llm._prompt import build_prompt
 from thaieda.llm._provider import call_llm
+from thaieda.llm._synthetic import generate_synthetic_data, privacy_audit_report
 
 # ----------------------------------------------------------------------------
 # ค่าที่ export
@@ -37,6 +40,8 @@ __all__ = [
     "prepare_for_llm",
     "build_prompt",
     "call_llm",
+    "generate_synthetic_data",
+    "privacy_audit_report",
 ]
 
 
@@ -69,7 +74,7 @@ def analyze_with_llm(
     Args:
         df: DataFrame ที่จะวิเคราะห์.
         privacy: โหมดความเป็นส่วนตัว —
-            "insight_only" (default) | "anonymized" | "dp_noise" | "full".
+            "insight_only" (default) | "synthetic" | "anonymized" | "dp_noise" | "full".
         provider: ผู้ให้บริการ LLM — "openai" (default) | "anthropic" | "ollama".
         model: ชื่อโมเดล — None = default ของ provider.
         language: ภาษาของ prompt — "th" (default) | "en".

@@ -29,12 +29,12 @@ from thaieda.llm._anonymize import anonymize_dataframe
 # ค่าคงที่
 # ----------------------------------------------------------------------------
 # โหมดที่รองรับ
-_VALID_MODES = frozenset({"insight_only", "anonymized", "dp_noise", "full"})
+_VALID_MODES = frozenset({"insight_only", "synthetic", "anonymized", "dp_noise", "full"})
 
 # ค่า epsilon เริ่มต้นสำหรับ differential privacy (ยิ่งน้อยยิ่งมั่นใจสูง แต่เสียงรบกวนมาก)
 _DEFAULT_EPSILON = 1.0
 
-# ความไว (sensitivity) ของแต่ละสถิติ — ใช้ประมาณค่าสูงสุดที่เปลี่ยนได้เมื่อเพิ่ม/ลบ 1 แถว
+# ค่าความไว (sensitivity) ของแต่ละสถิติ — ใช้ประมาณค่าสูงสุดที่เปลี่ยนได้เมื่อเพิ่ม/ลบ 1 แถว
 _COUNT_SENSITIVITY = 1.0  # count เปลี่ยนได้ 1
 _MEAN_SENSITIVITY = 1.0  # ประมาณ สำหรับค่าใน [0,1] หรือ std ต่ำ (ใช้ค่าประมาณ)
 
@@ -98,6 +98,20 @@ def prepare_for_llm(
             "profile_info": profile_info,
             "data": df_safe,
             "token_map": token_map,
+            "dp_noise": False,
+        }
+
+    if privacy_mode == "synthetic":
+        # v1.9: โหมด synthetic — สร้างข้อมูลจำลองจาก distribution จริง
+        from thaieda.llm._synthetic import generate_synthetic_data
+
+        df_synthetic = generate_synthetic_data(df)
+        return {
+            "mode": "synthetic",
+            "summary": summary,
+            "profile_info": profile_info,
+            "data": df_synthetic,
+            "token_map": None,
             "dp_noise": False,
         }
 
