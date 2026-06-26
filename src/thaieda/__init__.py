@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 
     from thaieda.report import ProfileReport
 
-__version__ = "0.6.0"
+__version__ = "1.5.0"
 __all__ = [
     "profile",
     "ProfileReport",
