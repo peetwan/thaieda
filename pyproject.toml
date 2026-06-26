@@ -129,6 +129,10 @@ exclude = [
   "scratch",
   ".venv-thaieda",
   ".venv-baseline",
+  ".venv-eda-test",
+  ".venv-eda-test2",
+  ".venv-eda-test3",
+  ".venv-*",
   ".git",
 ]
 
