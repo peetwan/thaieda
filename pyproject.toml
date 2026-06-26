@@ -121,6 +121,16 @@ thaieda = "thaieda.cli:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/thaieda"]
 
+[tool.hatch.build.targets.sdist]
+exclude = [
+  "eval",
+  "_tmp_*",
+  "data-example",
+  "scratch",
+  ".venv-thaieda",
+  ".git",
+]
+
 [tool.ruff]
 src = ["src", "tests"]
 line-length = 100
