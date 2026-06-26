@@ -1,0 +1,72 @@
+{
+  "dataset": "C:\\Users\\User\\Desktop\\Hermes_Peet\\scratch\\thaieda\\data-example\\public-datasets\\synthetic-quality-benchmark.csv",
+  "rows": 2000,
+  "cols": 12,
+  "columns": [
+    "id",
+    "price",
+    "quantity",
+    "category",
+    "customer_name",
+    "status",
+    "zip_code",
+    "rating",
+    "order_date",
+    "thai_amount",
+    "category_text",
+    "product_desc"
+  ],
+  "injected_issues": [
+    {
+      "issue": "outliers",
+      "column": "price",
+      "count": 5
+    },
+    {
+      "issue": "missing_values",
+      "column": "quantity",
+      "count": 401
+    },
+    {
+      "issue": "duplicates",
+      "column": "customer_name",
+      "count": 1996
+    },
+    {
+      "issue": "constant_column",
+      "column": "status",
+      "count": 1
+    },
+    {
+      "issue": "type_inconsistency",
+      "column": "zip_code",
+      "count": 50
+    },
+    {
+      "issue": "placeholders",
+      "column": "rating",
+      "count": 180
+    },
+    {
+      "issue": "buddhist_era",
+      "column": "order_date",
+      "count": 2000
+    },
+    {
+      "issue": "thai_numerals",
+      "column": "thai_amount",
+      "count": 500
+    },
+    {
+      "issue": "zero_width_space",
+      "column": "category_text",
+      "count": 100
+    },
+    {
+      "issue": "mojibake",
+      "column": "product_desc",
+      "count": 200
+    }
+  ],
+  "total_issues": 10
+}

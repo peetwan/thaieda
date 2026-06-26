@@ -1,0 +1,182 @@
+{
+  "ThaiEDA": {
+    "gtr": {
+      "detected": 8,
+      "total": 10,
+      "recall": 0.8,
+      "details": [
+        "[YES] outliers (price)",
+        "[YES] missing_values (quantity)",
+        "[YES] duplicates (customer_name)",
+        "[YES] constant_column (status)",
+        "[NO] type_inconsistency (zip_code)",
+        "[YES] placeholders (rating)",
+        "[YES] buddhist_era (order_date)",
+        "[YES] thai_numerals (thai_amount)",
+        "[NO] zero_width_space (category_text)",
+        "[YES] mojibake (product_desc)"
+      ]
+    },
+    "itb": {
+      "count": 10,
+      "total": 11,
+      "breadth": 0.909,
+      "covered": [
+        "cardinality",
+        "constant_column",
+        "correlations",
+        "cross_column_violation",
+        "distribution_skew",
+        "duplicates",
+        "encoding_errors",
+        "missing_values",
+        "outliers",
+        "thai_specific"
+      ]
+    },
+    "tsdr": {
+      "detected": 3,
+      "total": 4,
+      "rate": 0.75,
+      "details": {
+        "buddhist_era": "YES",
+        "thai_numerals": "YES",
+        "zero_width_space": "NO",
+        "mojibake": "YES"
+      }
+    },
+    "rc": {
+      "count": 10,
+      "total": 10,
+      "completeness": 1.0,
+      "found": [
+        "overview",
+        "summary",
+        "insight",
+        "quality",
+        "anomal",
+        "missing",
+        "correlat",
+        "distribution",
+        "column",
+        "type"
+      ]
+    }
+  },
+  "ydata-profiling": {
+    "gtr": {
+      "detected": 7,
+      "total": 10,
+      "recall": 0.7,
+      "details": [
+        "[YES] outliers (price)",
+        "[YES] missing_values (quantity)",
+        "[NO] duplicates (customer_name)",
+        "[YES] constant_column (status)",
+        "[NO] type_inconsistency (zip_code)",
+        "[YES] placeholders (rating)",
+        "[YES] buddhist_era (order_date)",
+        "[NO] thai_numerals (thai_amount)",
+        "[YES] zero_width_space (category_text)",
+        "[YES] mojibake (product_desc)"
+      ]
+    },
+    "itb": {
+      "count": 8,
+      "total": 11,
+      "breadth": 0.727,
+      "covered": [
+        "cardinality",
+        "constant_column",
+        "correlations",
+        "distribution_skew",
+        "encoding_errors",
+        "missing_values",
+        "outliers",
+        "thai_specific"
+      ]
+    },
+    "tsdr": {
+      "detected": 2,
+      "total": 4,
+      "rate": 0.5,
+      "details": {
+        "buddhist_era": "YES",
+        "thai_numerals": "NO",
+        "zero_width_space": "YES",
+        "mojibake": "NO"
+      }
+    },
+    "rc": {
+      "count": 7,
+      "total": 10,
+      "completeness": 0.7,
+      "found": [
+        "overview",
+        "summary",
+        "quality",
+        "missing",
+        "correlat",
+        "column",
+        "type"
+      ]
+    }
+  },
+  "sweetviz": {
+    "gtr": {
+      "detected": 5,
+      "total": 10,
+      "recall": 0.5,
+      "details": [
+        "[YES] outliers (price)",
+        "[YES] missing_values (quantity)",
+        "[YES] duplicates (customer_name)",
+        "[NO] constant_column (status)",
+        "[NO] type_inconsistency (zip_code)",
+        "[YES] placeholders (rating)",
+        "[NO] buddhist_era (order_date)",
+        "[NO] thai_numerals (thai_amount)",
+        "[NO] zero_width_space (category_text)",
+        "[YES] mojibake (product_desc)"
+      ]
+    },
+    "itb": {
+      "count": 8,
+      "total": 11,
+      "breadth": 0.727,
+      "covered": [
+        "cardinality",
+        "correlations",
+        "distribution_skew",
+        "duplicates",
+        "encoding_errors",
+        "missing_values",
+        "outliers",
+        "thai_specific"
+      ]
+    },
+    "tsdr": {
+      "detected": 0,
+      "total": 4,
+      "rate": 0.0,
+      "details": {
+        "buddhist_era": "NO",
+        "thai_numerals": "NO",
+        "zero_width_space": "NO",
+        "mojibake": "NO"
+      }
+    },
+    "rc": {
+      "count": 5,
+      "total": 10,
+      "completeness": 0.5,
+      "found": [
+        "summary",
+        "missing",
+        "correlat",
+        "column",
+        "type"
+      ]
+    }
+  }
+}
