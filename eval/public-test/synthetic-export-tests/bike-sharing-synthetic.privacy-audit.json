@@ -1,0 +1,19 @@
+{
+  "privacy_mode": "synthetic",
+  "overall_risk": "low",
+  "pii_detected": [
+    {
+      "type": "phone_number",
+      "count": 480,
+      "risk": "high",
+      "description": "พบเบอร์โทรศัพท์ 480 รายการ"
+    }
+  ],
+  "n_pii_types": 1,
+  "n_rows": 731,
+  "n_columns": 16,
+  "recommendations": [
+    "พบ PII (เบอร์/อีเมล) — หลีกเลี่ยงโหมด full"
+  ],
+  "data_sent_to_llm": "ข้อมูลจำลองที่มี statistical properties ใกล้เคียง (ไม่มีค่าจริง)"
+}

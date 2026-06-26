@@ -1,0 +1,83 @@
+{
+  "titanic.csv": {
+    "shape": "(891, 12)",
+    "time": 8.92,
+    "html_kb": 814,
+    "n_insights": 30,
+    "n_issues": 3,
+    "n_anomalies": 12,
+    "n_insight_cards": 8
+  },
+  "superstore.csv": {
+    "shape": "(5000, 21)",
+    "time": 19.87,
+    "html_kb": 1635,
+    "n_insights": 30,
+    "n_issues": 2,
+    "n_anomalies": 16,
+    "n_insight_cards": 8
+  },
+  "adult.csv": {
+    "shape": "(5000, 15)",
+    "time": 9.4,
+    "html_kb": 1007,
+    "n_insights": 29,
+    "n_issues": 3,
+    "n_anomalies": 17,
+    "n_insight_cards": 8
+  },
+  "online-shoppers.csv": {
+    "shape": "(5000, 18)",
+    "time": 10.43,
+    "html_kb": 1051,
+    "n_insights": 30,
+    "n_issues": 0,
+    "n_anomalies": 18,
+    "n_insight_cards": 8
+  },
+  "beijing-pm25.csv": {
+    "shape": "(5000, 13)",
+    "time": 6.81,
+    "html_kb": 788,
+    "n_insights": 22,
+    "n_issues": 1,
+    "n_anomalies": 6,
+    "n_insight_cards": 8
+  },
+  "telco-churn.csv": {
+    "shape": "(5000, 21)",
+    "time": 10.22,
+    "html_kb": 861,
+    "n_insights": 11,
+    "n_issues": 0,
+    "n_anomalies": 4,
+    "n_insight_cards": 8
+  },
+  "california-housing.csv": {
+    "shape": "(5000, 10)",
+    "time": 11.85,
+    "html_kb": 946,
+    "n_insights": 30,
+    "n_issues": 0,
+    "n_anomalies": 11,
+    "n_insight_cards": 8
+  },
+  "winequality-red.csv": {
+    "shape": "(1599, 12)",
+    "time": 8.68,
+    "html_kb": 956,
+    "n_insights": 29,
+    "n_issues": 0,
+    "n_anomalies": 16,
+    "n_insight_cards": 8
+  },
+  "synthetic-quality-benchmark.csv": {
+    "shape": "(2000, 12)",
+    "time": 10.65,
+    "html_kb": 1536,
+    "n_insights": 24,
+    "n_issues": 5,
+    "n_anomalies": 7,
+    "n_insight_cards": 7
+  }
+}

@@ -1,0 +1,109 @@
+You are fixing bugs and performance issues in ThaiEDA, a Python AutoEDA library.
+
+Working directory: C:\Users\User\Desktop\Hermes_Peet\scratch\thaieda
+Source code: src/thaieda/
+Python: 3.11.9, pandas 3.0.3
+
+## BUG TO FIX: BD-1 — Regex backreference `\1` broken on pandas 3.x Arrow backend
+
+pandas 3.0.3 uses `string[pyarrow]` as default string dtype. Arrow's regex engine does NOT support `\1` backreferences. This causes "Invalid regular expression: invalid escape sequence: \1" errors in cleaning functions.
+
+### Files to fix:
+
+1. **src/thaieda/clean/__init__.py line 355** — `fix_tone_mark_stacking`:
+   Current: `vectorized=lambda s: s.str.replace(_TONE_STACK_RE.pattern, r"\1", regex=True)`
+   Fix: Use callable instead of `\1` string:
+   ```python
+   vectorized=lambda s: s.str.replace(_TONE_STACK_RE.pattern, lambda m: m.group(1), regex=True)
+   ```
+
+2. **src/thaieda/clean/__init__.py line 331** — `_vec_fix_repeated`:
+   Current: `fixed = work.str.replace(pattern, lambda m: m.group(1) * max_repeat, regex=True)`
+   This already uses a callable — check if it works. If it fails too, cast to object dtype first.
+
+3. **Check ALL other `.str.replace(pattern, r"\1", regex=True)` patterns** in the entire src/thaieda/ directory. Any that use `\1`, `\2`, `\g<1>` as replacement string need to be converted to callables.
+
+4. **Also check**: The `s.astype(str)` call in `_apply_str_transform` (line 115) may produce Arrow string dtype. Consider casting to `object` dtype explicitly where regex is used: `s.astype(object)` instead of `s.astype(str)`.
+
+### Verification:
+After fixing, run this test:
+```python
+import pandas as pd
+s = pd.Series(['่่่', 'ทดสอบ', '้้้'], dtype='string')
+from thaieda.clean import fix_tone_mark_stacking
+result, info = fix_tone_mark_stacking(s)
+print(result.tolist())  # Should be ['่', 'ทดสอบ', '้']
+print(info.rows_affected)  # Should be 2
+```
+
+## PERFORMANCE FIX: PF-1 — Vectorize quality checks
+
+### File: src/thaieda/quality/__init__.py
+
+The function `check_normalization` (line 443) loops through every value and calls `_has_combining_order_issue` which loops through every character. For 40k rows × 540 chars = 21.6M iterations.
+
+### Fixes needed:
+
+1. **`_has_combining_order_issue` (line 422-430)**: Replace per-char loop with regex:
+   - A combining mark at the start of text: `^[่้๊๋็ัืีึึ็]`
+   - A combining mark after a non-base char: use negative lookbehind or just check first char
+   - Simpler: `re.compile(r'^[่้๊๋็ัืีึึ็]')` catches the main case (orphan combining at start)
+   - For mid-string orphans: `re.compile(r'[^ก-ฮ่้๊๋็ัืีึึ็][่้๊๋็ัืีึึ็]')` — combining after non-base
+
+2. **`check_normalization` (line 443)**: Instead of per-row loop, use vectorized operations:
+   ```python
+   # Vectorized check for duplicate tone marks
+   dup_tone_mask = series.str.contains(_DUP_TONE_RE, regex=True, na=False)
+   # Vectorized check for duplicate vowels
+   dup_vowel_mask = series.str.contains(_DUP_VOWEL_RE, regex=True, na=False)
+   # etc.
+   count = int((dup_tone_mask | dup_vowel_mask | ...).sum())
+   ```
+
+3. **`check_zero_width` (line ~289)**: Already uses a loop. Vectorize with `.str.contains()`
+
+4. **`check_whitespace` (line ~340)**: Vectorize with `.str.strip() != series` and `.str.contains(r' {2,}', regex=True)`
+
+5. **`check_thai_numerals` (line ~238)**: Vectorize with `.str.contains(r'[๐-๙]', regex=True, na=False)`
+
+6. **`check_script_composition` (line ~507)**: The per-row loop with `_has_fullwidth` and char counting should be vectorized using `.str.count()` for Thai chars and `.str.contains()` for fullwidth.
+
+### PERFORMANCE FIX: PF-2 — Vectorize anomaly detection
+
+### File: src/thaieda/anomaly/__init__.py
+
+Multiple per-row loops need vectorization:
+
+1. **`_has_orphan_combining` (line ~713-730)**: Replace per-char loop with regex: `re.compile(r'^[่้๊๋็ัืีึึ็]')` or `re.compile(r'[^ก-ฮ][่้๊๋]')`
+
+2. **NFC normalize check (line ~784-785)**: `unicodedata.normalize("NFC", s)` on every row is very slow for long text. 
+   - Fix: Sample max 1000 rows instead of checking all rows
+   - OR: Pre-filter with a fast regex that catches likely NFC issues, then only normalize those
+
+3. **Script composition check (line ~819)**: Replace per-char loop with vectorized `.str.count(r'[ก-ฮ]')` and `.str.count(r'[a-zA-Z]')` to compute Thai/Latin ratios.
+
+4. **Text length anomaly (line ~498)**: Already uses list comprehension — can be vectorized with `.str.len()`
+
+## CODING CONVENTIONS:
+- Python 3.10+ with type hints
+- Thai docstrings/comments
+- No silent fallbacks — fail loudly
+- matplotlib Agg backend
+- Vectorized operations preferred (pandas .str accessors over row-by-row loops)
+- Use contextlib.suppress instead of try/except/pass
+- Keep the same public API — don't change function signatures
+
+## IMPORTANT:
+- Do NOT change function signatures
+- Do NOT add new dependencies
+- Do NOT remove existing functionality
+- Run existing tests after changes: `.venv-thaieda/Scripts/python.exe -m pytest tests/ -x -q` from the project root
+- Make sure ALL existing tests still pass after your changes
+
+## After making changes, run:
+```
+cd "C:\Users\User\Desktop\Hermes_Peet\scratch\thaieda"
+.venv-thaieda/Scripts/python.exe -m pytest tests/ -x -q 2>&1
+```
+
+Report what you changed, which files, and the test results.

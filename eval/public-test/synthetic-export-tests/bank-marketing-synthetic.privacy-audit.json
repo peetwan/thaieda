@@ -1,0 +1,12 @@
+{
+  "privacy_mode": "synthetic",
+  "overall_risk": "low",
+  "pii_detected": [],
+  "n_pii_types": 0,
+  "n_rows": 2000,
+  "n_columns": 21,
+  "recommendations": [
+    "ไม่พบ PII ชัดเจน — ปลอดภัยในทุกโหมด"
+  ],
+  "data_sent_to_llm": "ข้อมูลจำลองที่มี statistical properties ใกล้เคียง (ไม่มีค่าจริง)"
+}

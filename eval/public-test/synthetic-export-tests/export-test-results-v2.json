@@ -1,0 +1,169 @@
+[
+  {
+    "name": "dirty-thai-retail",
+    "shape": "500x8",
+    "time_s": 39.34,
+    "csv_kb": 54.3,
+    "xlsx_kb": 22.9,
+    "pii_types_in_source": 1,
+    "pii_leak_in_synthetic": 0,
+    "stat_diff_pct": [
+      2.1
+    ],
+    "stat_ok": true,
+    "xlsx_roundtrip": true
+  },
+  {
+    "name": "coffee-customer",
+    "shape": "2000x5",
+    "time_s": 0.5,
+    "csv_kb": 72.7,
+    "xlsx_kb": 47.8,
+    "pii_types_in_source": 1,
+    "pii_leak_in_synthetic": 0,
+    "stat_diff_pct": [
+      0.3,
+      0.9
+    ],
+    "stat_ok": true,
+    "xlsx_roundtrip": true
+  },
+  {
+    "name": "coffee-transaction",
+    "shape": "2000x6",
+    "time_s": 0.43,
+    "csv_kb": 67.7,
+    "xlsx_kb": 78.9,
+    "pii_types_in_source": 0,
+    "pii_leak_in_synthetic": 0,
+    "stat_diff_pct": [
+      0.1,
+      0.0,
+      8.0,
+      6.2,
+      63.3
+    ],
+    "stat_ok": false,
+    "xlsx_roundtrip": true
+  },
+  {
+    "name": "coffee-store",
+    "shape": "20x8",
+    "time_s": 0.2,
+    "csv_kb": 1.0,
+    "xlsx_kb": 5.7,
+    "pii_types_in_source": 1,
+    "pii_leak_in_synthetic": 0,
+    "stat_diff_pct": [
+      9.0,
+      1.8,
+      9.6
+    ],
+    "stat_ok": true,
+    "xlsx_roundtrip": true
+  },
+  {
+    "name": "adult",
+    "shape": "2000x15",
+    "time_s": 1.09,
+    "csv_kb": 235.7,
+    "xlsx_kb": 148.8,
+    "pii_types_in_source": 0,
+    "pii_leak_in_synthetic": 0,
+    "stat_diff_pct": [
+      1.6,
+      0.7,
+      0.7,
+      226.1,
+      130.0
+    ],
+    "stat_ok": false,
+    "xlsx_roundtrip": true
+  },
+  {
+    "name": "absenteeism",
+    "shape": "740x21",
+    "time_s": 0.55,
+    "csv_kb": 51.6,
+    "xlsx_kb": 69.3,
+    "pii_types_in_source": 0,
+    "pii_leak_in_synthetic": 0,
+    "stat_diff_pct": [
+      0.6,
+      0.3,
+      5.1,
+      0.8,
+      1.1
+    ],
+    "stat_ok": true,
+    "xlsx_roundtrip": true
+  },
+  {
+    "name": "bike-sharing",
+    "shape": "731x16",
+    "time_s": 1.13,
+    "csv_kb": 88.9,
+    "xlsx_kb": 80.4,
+    "pii_types_in_source": 1,
+    "pii_leak_in_synthetic": 0,
+    "stat_diff_pct": [
+      1.5,
+      0.2,
+      3.6,
+      3.2,
+      90.5
+    ],
+    "stat_ok": false,
+    "xlsx_roundtrip": true
+  },
+  {
+    "name": "bank-marketing",
+    "shape": "2000x21",
+    "time_s": 2.27,
+    "csv_kb": 261.9,
+    "xlsx_kb": 177.5,
+    "pii_types_in_source": 0,
+    "pii_leak_in_synthetic": 0,
+    "stat_diff_pct": [
+      0.5,
+      4.2,
+      7.4,
+      0.0
+    ],
+    "stat_ok": true,
+    "xlsx_roundtrip": true
+  },
+  {
+    "name": "beijing-pm25",
+    "shape": "2000x13",
+    "time_s": 1.35,
+    "csv_kb": 119.4,
+    "xlsx_kb": 130.6,
+    "pii_types_in_source": 0,
+    "pii_leak_in_synthetic": 0,
+    "stat_diff_pct": [
+      0.3,
+      0.0,
+      0.7,
+      1.4,
+      3.0
+    ],
+    "stat_ok": true,
+    "xlsx_roundtrip": true
+  },
+  {
+    "name": "aps-failure",
+    "shape": "2000x171",
+    "time_s": 31.18,
+    "csv_kb": 4294.0,
+    "xlsx_kb": 1310.2,
+    "pii_types_in_source": 1,
+    "pii_leak_in_synthetic": 246,
+    "stat_diff_pct": [
+      1.8,
+      2.2
+    ],
+    "stat_ok": true,
+    "xlsx_roundtrip": true
+  }
+]

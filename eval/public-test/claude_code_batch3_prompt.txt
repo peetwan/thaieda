@@ -1,0 +1,82 @@
+## ThaiEDA Batch 3 — Performance Round 2
+
+### Context
+ThaiEDA v1.5 QA pipeline รัน 14 datasets รอบ 2 เสร็จแล้ว. Batch 2 แก้ P1/P2/Q1/Q2 ครบ แต่ P3 (performance) ยังไม่ถึงเป้า 120s.
+
+### Working directory
+`C:\Users\User\Desktop\Hermes_Peet\scratch\thaieda`
+
+### Test venv
+`.venv-thaieda/Scripts/python.exe` (has thaieda[all] installed)
+Test command: `.venv-thaieda/Scripts/python.exe -m pytest tests/ -x -q`
+Ruff: `.venv-thaieda/Scripts/python.exe -m ruff check src/`
+
+### Current performance (รอบ 2)
+| Dataset | Rows | Cols | Time | Target |
+|---------|------|------|------|--------|
+| aps-failure | 16,000 | 171 | 430.62s | <120s |
+| online-retail | 541,909 | 8 | 376.7s | <120s |
+
+### Bottleneck analysis
+Batch 2 แก้ viz skip + insight_engine sampling แล้ว แต่เวลายังสูง → bottleneck น่าจะอยู่ที่:
+
+**aps-failure (430s, 171 cols × 16K rows)**:
+- `quality/__init__.py` — 171 cols × quality checks = O(cols × rows) อาจช้า
+- `anomaly/__init__.py` — 171 cols × anomaly detection อาจเป็น O(n²) ในบาง check
+- `detect/__init__.py` — 171 cols × type detection อาจช้า
+- `_render_column_context()` — 171 รอบ สร้าง stats/charts ต่อคอลัมน์
+
+**online-retail (377s, 541K rows × 8 cols)**:
+- `quality/__init__.py` — quality checks บน 541K rows อาจช้า
+- `anomaly/__init__.py` — anomaly detection บน 541K rows อาจเป็น O(n) แต่ constant ใหญ่
+- `_detect_strong_correlations` — corr matrix บน 541K rows
+- `_detect_outlier_insights` — z-score บน 541K rows (ควร vectorized แล้ว แต่เช็คอีกครั้ง)
+
+### Defect P3b — Performance Optimization (HIGH)
+
+**Files to investigate**:
+- `src/thaieda/quality/__init__.py` — vectorize checks, skip redundant checks บน wide tables
+- `src/thaieda/anomaly/__init__.py` — vectorize, sample สำหรับ expensive checks
+- `src/thaieda/detect/__init__.py` — batch type detection
+- `src/thaieda/report/__init__.py` — `_render_column_context()` อาจเรียก expensive ops ต่อคอลัมน์
+- `src/thaieda/insight_engine/__init__.py` — ดูว่ามี O(n²) ที่เหลือ
+
+**Fix strategies**:
+
+1. **Wide tables (>100 cols)**:
+   - ถ้า cols > 100 ให้ sample 50% ของ columns สำหรับ quality/anomaly checks (keep ID/datetime/numeric priority)
+   - หรือทำ quality checks แบบ vectorized ทีเดียวทุก column (pandas .apply หรือ .pipe) แทน loop ทีละ column
+   - สำหรับ detect: ถ้า cols > 100 ให้ทำ type detection เฉพาะ first 100 cols + infer ที่เหลือจาก dtype
+
+2. **Tall tables (>100K rows)**:
+   - ถ้า rows > 100K ให้ sample 50K rows สำหรับ quality/anomaly checks ที่ expensive (เช่น outlier detection ที่ใช้ IQR/z-score)
+   - ถ้า rows > 200K ให้ skip timeseries decomposition (ใช้แค่ trend detection แบบ simple linear regression)
+   - สำหรับ correlation: ใช้ `.corr()` บน sample แทน full data (ถ้า rows > 100K)
+
+3. **General**:
+   - ใช้ `df.select_dtypes(include=[...])` แทนการลองทุก column
+   - ใช้ numpy vectorized ops แทน pandas .apply สำหรับ numeric calculations
+   - หลีกเลี่ยง `.iterrows()` และ `.itertuples()` บน large DataFrames
+   - Cache expensive computations ที่ใช้ซ้ำ (เช่น unique counts)
+
+**Target**:
+- aps-failure (171 cols × 16K rows) < 120s
+- online-retail (541K rows × 8 cols) < 120s
+- ทุก dataset อื่น < 60s (ปัจจุบันทุกอัน < 56s แล้ว)
+
+**Constraints**:
+- ห้ามเปลี่ยน API signature หรือ output format
+- ห้ามลบ section จาก report
+- ห้ามทำให้ test พัง (ยกเว้น pre-existing LLM failures)
+- Sampling ต้องมี `random_state=42` เพื่อ reproducibility
+- ถ้า sample ต้องบอกใน notes/warnings ว่า "วิเคราะห์บนตัวอย่าง N/M แถว"
+
+### Instructions
+1. Profile ก่อน — ใช้ `time.perf_counter()` หรือ `cProfile` เพื่อหา bottleneck จริง
+2. แก้ทีละ strategy, run tests หลังแต่ละ fix
+3. ใช้ `.venv-thaieda/Scripts/python.exe -m pytest tests/ -x -q`
+4. ใช้ `.venv-thaieda/Scripts/python.exe -m ruff check src/`
+5. รายงาน: files modified, test results, ruff check, before/after timing สำหรับ aps-failure + online-retail
+6. ห้ามแก้ tests/ โดยไม่จำเป็น
+7. vectorized pandas/numpy ops เสมอ — ห้าม row-by-row loops
+8. ถ้า constraint ขัดกัน prioritize: correctness > performance > completeness

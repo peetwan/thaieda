@@ -1,0 +1,161 @@
+You are adding new opt-in accuracy features to ThaiEDA, a Python AutoEDA library for Thai data.
+
+Working directory: C:\Users\User\Desktop\Hermes_Peet\scratch\thaieda
+Source code: src/thaieda/
+Python: 3.11.9, pandas 3.0.3
+Tests: .venv-thaieda/Scripts/python.exe -m pytest tests/ -x -q
+
+## CRITICAL RULES
+1. All new features are OPT-IN — do NOT change DEFAULT_OPERATIONS or existing default behavior
+2. Do NOT change any existing function signatures
+3. Do NOT add new external dependencies (pythainlp, nlpo3, attacut, ftfy already available)
+4. All new cleaning operations use lazy import for optional deps
+5. Use _apply_str_transform pattern for new cleaning operations (see existing code)
+6. Thai docstrings/comments
+7. Run tests after ALL changes: .venv-thaieda/Scripts/python.exe -m pytest tests/ -x -q
+
+## FEATURES TO ADD
+
+### AC-1: Thai Abbreviation Expansion (opt-in cleaning operation)
+
+Add `expand_abbreviations` to `src/thaieda/clean/__init__.py`:
+
+```python
+def expand_abbreviations(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
+    """ขยายคำย่อภาษาไทย (เช่น กทม. → กรุงเทพมหานคร, บจ. → บริษัทจำกัด).
+    
+    ใช้ pythainlp.util.abbreviation_to_full_text — เป็น opt-in operation
+    ไม่ได้เปิดใช้ใน DEFAULT_OPERATIONS เพราะการขยายคำย่อเปลี่ยนความหมายของข้อความ
+    """
+```
+
+Implementation:
+- Lazy import: `from pythainlp.util import abbreviation_to_full_text`
+- Use _apply_str_transform pattern
+- If pythainlp not available, raise ImportError with helpful message (like existing pythainlp operations)
+- Add to _OPERATIONS registry as "expand_abbreviations"
+- Do NOT add to DEFAULT_OPERATIONS
+- Register in __all__ if there's an __all__ list
+
+### AC-2: Thai Spell Correction (opt-in cleaning operation)
+
+Add `spell_correct` to `src/thaieda/clean/__init__.py`:
+
+```python
+def spell_correct(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
+    """แก้การสะกดคำผิดภาษาไทย (เช่น ขอบคุน → ขอบคุณ, คับ → ครับ).
+    
+    ใช้ pythainlp.spell.correct_sent — เป็น opt-in operation
+    ไม่ได้เปิดใช้ใน DEFAULT_OPERATIONS เพราะ spell correction อาจแก้คำที่ถูกอยู่แล้ว
+    """
+```
+
+Implementation:
+- Lazy import: `from pythainlp.spell import correct_sent` and tokenizer for splitting
+- Tokenize each cell, correct each word, rejoin
+- Use _apply_str_transform pattern (NOT vectorized — spell correction needs per-word logic)
+- If pythainlp not available, raise ImportError
+- Add to _OPERATIONS registry as "spell_correct"
+- Do NOT add to DEFAULT_OPERATIONS
+
+### AC-3: NFKC Full-Width Cleaning (opt-in cleaning operation)
+
+Add `normalize_nfkc` to `src/thaieda/clean/__init__.py`:
+
+```python
+def normalize_nfkc(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
+    """ทำ Unicode normalization แบบ NFKC (แปลง fullwidth → halfwidth, เช่น Ａ→A, ９→9).
+    
+    ใช้ NFKC แทน NFC เพื่อจัดการ full-width characters
+    เป็น opt-in operation เพราะ NFKC เปลี่ยน semantics ของข้อความ
+    """
+```
+
+Implementation:
+- Use `unicodedata.normalize("NFKC", text)` — stdlib, no import needed
+- Use _apply_str_transform with vectorized: `lambda s: s.str.normalize("NFKC")` if available, else map
+- Add to _OPERATIONS registry as "normalize_nfkc"
+- Do NOT add to DEFAULT_OPERATIONS
+
+### AC-4: Tokenizer Selection Modes
+
+Modify `src/thaieda/tokenize/__init__.py`:
+
+Add new auto modes to `get_tokenizer()`:
+- `engine="auto-fast"` — prefer nlpo3 (Rust, 3-4x faster)
+- `engine="auto-quality"` — prefer attacut (neural, better for social media/OOV)
+
+Implementation:
+```python
+_AUTO_FAST_ORDER = ("nlpo3", "pythainlp", "attacut")
+_AUTO_QUALITY_ORDER = ("attacut", "pythainlp", "nlpo3")
+```
+
+When engine="auto-fast", try _AUTO_FAST_ORDER.
+When engine="auto-quality", try _AUTO_QUALITY_ORDER.
+Keep existing "auto" behavior unchanged.
+
+### AC-5: Keyboard Layout Anomaly Detection
+
+Add a quality check in `src/thaieda/quality/__init__.py`:
+
+```python
+def check_keyboard_layout_suspect(series: pd.Series, column: str) -> QualityIssue | None:
+    """ตรวจหาเซลล์ที่สงสัยว่าพิมพ์ผิด keyboard layout (ละตินแต่น่าจะเป็นไทย).
+    
+    ตรวจเฉพาะคอลัมน์ที่มี Thai text เป็นหลัก — หาเซลล์ที่มี Latin chars ผสมอยู่
+    แต่ไม่ใช่การผสมภาษาปกติ (เช่น สวัสดี l;ylfu)
+    """
+```
+
+Implementation:
+- Only run on THAI_TEXT or MIXED_TEXT columns
+- Find cells with Latin alphabetic chars mixed with Thai
+- If cell has >50% Latin alpha chars but column is Thai-majority → suspect
+- Report as QualityIssue (not auto-fix)
+- Add to run_quality_checks text checks (lines 662-670)
+- This is REPORT-ONLY, does NOT modify data
+
+### AC-6: Thai Grapheme Validation
+
+Extend `check_normalization` in `src/thaieda/quality/__init__.py`:
+
+Add detection for:
+- Multiple different tone marks on same base (ก่้ — mai ek + mai tho)
+- Incompatible vowel stacks (e.g., สะเ + สี on same consonant)
+
+Implementation:
+- Add regex: `r"[ก-ฮ][่้๊๋]{2,}"` for multiple different tone marks
+- This is REPORT-ONLY (detect, don't fix)
+- Extend existing check_normalization to include this check
+
+## TESTS
+
+Add tests in appropriate test files:
+- `tests/test_clean.py` — test AC-1, AC-2, AC-3
+- `tests/test_tokenize.py` — test AC-4
+- `tests/test_quality.py` — test AC-5, AC-6
+
+Test patterns:
+```python
+def test_expand_abbreviations():
+    from thaieda.clean import expand_abbreviations
+    s = pd.Series(["กทม.", "บจ.", "ทดสอบ"])
+    result, info = expand_abbreviations(s)
+    assert "กรุงเทพมหานคร" in result.iloc[0]
+    assert info.rows_affected > 0
+```
+
+Make sure to test:
+- Basic functionality
+- Edge cases (empty series, no changes needed)
+- Lazy import (skip test if pythainlp not available)
+- That new operations are NOT in DEFAULT_OPERATIONS
+
+## After making ALL changes, run:
+```
+cd "C:\Users\User\Desktop\Hermes_Peet\scratch\thaieda"
+.venv-thaieda/Scripts/python.exe -m pytest tests/ -x -q 2>&1
+```
+
+Report what you changed, which files, test results, and any issues encountered.

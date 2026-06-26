@@ -1,0 +1,97 @@
+You are improving insight generation for text-heavy datasets in ThaiEDA, a Python AutoEDA library.
+
+Working directory: C:\Users\User\Desktop\Hermes_Peet\scratch\thaieda
+Source code: src/thaieda/
+Python: 3.11.9, pandas 3.0.3
+
+## ISSUE: IN-1 — Insights locked at exactly 7 for text-heavy datasets
+
+All Thai text datasets (2-column: text + rating) get exactly 7 insights. English numeric datasets get 11-679 insights. The problem is that most insight generators require numeric columns, and text datasets have very few.
+
+### File: src/thaieda/insight/__init__.py
+
+Current insight sources (line 780-801):
+1. `_insight_from_quality` — works for text (quality issues)
+2. `_insight_from_anomaly` — works for text (text anomalies)  
+3. `_high_cardinality_text_insights` — works for text
+4. `_distribution_insights` — REQUIRES numeric columns only (line 458: `if ctype != ColumnType.NUMERIC`)
+5. `_correlation_insights` — REQUIRES numeric columns (needs 2+ numeric)
+6. `_type_mismatch_insights` — works but rarely triggers
+7. `_comissing_insights` — works
+8. `_target_insights` — needs target analysis
+9. `_timeseries_insights` — needs datetime
+10. `_duplicate_row_insight` — works
+11. `_cleaning_insight` — works (but was broken by BD-1)
+
+### What to add — TEXT-SPECIFIC INSIGHTS:
+
+Add new functions that generate insights from text metrics and NER results:
+
+1. **`_text_length_distribution_insights`**: From text_metrics, check if text length distribution is unusual:
+   - If avg char length varies significantly across rows (high std) → insight about variability
+   - If there are very short or very long texts (outliers in length) → insight
+   - If median length is very short (<10 chars) → "ข้อมูลเป็นข้อความสั้น ๆ (เช่น social media)"
+   - If median length is very long (>200 chars) → "ข้อมูลเป็นรีวิว/บทความยาว"
+
+2. **`_vocabulary_richness_insight`**: From text_metrics:
+   - If unique_tokens / total_tokens ratio is low (<0.1) → "คำซ้ำเยอะ คำศัพท์หลากหลายต่ำ"
+   - If ratio is high (>0.5) → "คำศัพท์หลากหลายสูง"
+   - This uses `text_metrics.unique_tokens` and `text_metrics.total_tokens`
+
+3. **`_ner_summary_insight`**: From NER results (if available):
+   - If total_entities > 0 → "พบ named entities N ตัว บ่งชี้ข้อมูลมีความหลากหลายของเนื้อหา"
+   - If top entity type is PERSON → "ข้อมูลมีชื่อบุคคลเป็น entities หลัก"
+   - If top entity type is LOCATION → "ข้อมูลเกี่ยวข้องกับสถานที่"
+
+4. **`_sentiment_distribution_insight`**: If there's a rating/sentiment column:
+   - Check distribution skew of ratings
+   - If mostly 5-star → "ส่วนใหญ่เป็นรีวิวเชิงบวก"
+   - If mostly 1-star → "ส่วนใหญ่เป็นรีวิวเชิงลบ — อาจเป็นปัญหาที่ต้องตรวจสอบ"
+   - If bimodal (lots of 1-star and 5-star) → "คะแนนแบ่งเป็น 2 กลุ่มชัดเจน"
+
+5. **`_language_mixing_insight`**: From quality checks or text metrics:
+   - If text has significant Latin script mixing → "พบการผสมภาษาไทย-อังกฤษในข้อมูล"
+
+### Integration:
+Add these to the `summarize_insights` function around line 783-788:
+```python
+insights.extend(_text_length_distribution_insights(text_metrics))
+insights.extend(_vocabulary_richness_insight(text_metrics))
+insights.extend(_ner_summary_insights(df, column_types))
+```
+
+You'll need to pass `text_metrics` to `summarize_insights` (it's already a parameter).
+
+For NER insights, check if NERResult is available in the report context. If the `DatasetReport` class stores NER results, use them. Otherwise, skip NER insights.
+
+### ISSUE: VS-1 — Empty labels in cross-column insight charts
+
+In the HTML reports, cross-column insight sections show "จัดกลุ่มตาม: · ตัววัด: " with empty labels.
+
+Check `src/thaieda/report/__init__.py` for the Jinja template section that renders cross-column insights. The group_by and measure labels are probably not being passed to the template correctly.
+
+### ISSUE: VS-2 — "ไม่มีคำแนะนำการทำความสะอาด" despite quality issues
+
+The cleaning suggestions section shows "ไม่มีคำแนะนำการทำความสะอาด" even when quality checks found issues like zero-width characters and normalization problems.
+
+This may be because:
+1. The `_compute_cleaning_suggestions` method (line 1016) uses `_CLEANABLE_TYPES` which may not include all text types
+2. Or the cleaning dry-run produces no results because the actual cleaning fails (BD-1 bug)
+
+After BD-1 is fixed in batch 1, this may resolve itself. But check if `_CLEANABLE_TYPES` includes `THAI_TEXT` and `TEXT` column types.
+
+## CODING CONVENTIONS:
+- Python 3.10+ with type hints
+- Thai docstrings/comments  
+- No silent fallbacks
+- Vectorized operations preferred
+- Keep same public API
+- Insights should use Insight dataclass with proper severity levels
+
+## After making changes, run:
+```
+cd "C:\Users\User\Desktop\Hermes_Peet\scratch\thaieda"
+.venv-thaieda/Scripts/python.exe -m pytest tests/ -x -q 2>&1
+```
+
+Report what you changed, which files, and test results.

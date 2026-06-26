@@ -1,0 +1,122 @@
+[
+  {
+    "name": "dirty-thai-retail",
+    "shape": "500x8",
+    "time_s": 1.22,
+    "csv_kb": 53.3,
+    "xlsx_kb": 22.9,
+    "json_kb": 121.5,
+    "pii_leak": 0,
+    "csv_ok": true,
+    "xlsx_ok": true,
+    "json_ok": true
+  },
+  {
+    "name": "coffee-customer",
+    "shape": "2000x5",
+    "time_s": 0.28,
+    "csv_kb": 72.7,
+    "xlsx_kb": 47.8,
+    "json_kb": 322.6,
+    "pii_leak": 0,
+    "csv_ok": true,
+    "xlsx_ok": true,
+    "json_ok": true
+  },
+  {
+    "name": "coffee-transaction",
+    "shape": "2000x6",
+    "time_s": 0.24,
+    "csv_kb": 67.7,
+    "xlsx_kb": 78.9,
+    "json_kb": 293.9,
+    "pii_leak": 0,
+    "csv_ok": true,
+    "xlsx_ok": true,
+    "json_ok": true
+  },
+  {
+    "name": "coffee-store",
+    "shape": "20x8",
+    "time_s": 0.06,
+    "csv_kb": 1.0,
+    "xlsx_kb": 5.7,
+    "json_kb": 4.3,
+    "pii_leak": 0,
+    "csv_ok": true,
+    "xlsx_ok": true,
+    "json_ok": true
+  },
+  {
+    "name": "adult",
+    "shape": "2000x15",
+    "time_s": 0.84,
+    "csv_kb": 235.7,
+    "xlsx_kb": 148.8,
+    "json_kb": 794.2,
+    "pii_leak": 0,
+    "csv_ok": true,
+    "xlsx_ok": true,
+    "json_ok": true
+  },
+  {
+    "name": "absenteeism",
+    "shape": "740x21",
+    "time_s": 0.62,
+    "csv_kb": 51.6,
+    "xlsx_kb": 69.3,
+    "json_kb": 372.6,
+    "pii_leak": 0,
+    "csv_ok": true,
+    "xlsx_ok": true,
+    "json_ok": true
+  },
+  {
+    "name": "bike-sharing",
+    "shape": "731x16",
+    "time_s": 0.48,
+    "csv_kb": 88.9,
+    "xlsx_kb": 80.4,
+    "json_kb": 239.4,
+    "pii_leak": 0,
+    "csv_ok": true,
+    "xlsx_ok": true,
+    "json_ok": true
+  },
+  {
+    "name": "bank-marketing",
+    "shape": "2000x21",
+    "time_s": 1.25,
+    "csv_kb": 261.9,
+    "xlsx_kb": 177.5,
+    "json_kb": 951.7,
+    "pii_leak": 0,
+    "csv_ok": true,
+    "xlsx_ok": true,
+    "json_ok": true
+  },
+  {
+    "name": "beijing-pm25",
+    "shape": "2000x13",
+    "time_s": 0.87,
+    "csv_kb": 119.4,
+    "xlsx_kb": 130.6,
+    "json_kb": 420.9,
+    "pii_leak": 0,
+    "csv_ok": true,
+    "xlsx_ok": true,
+    "json_ok": true
+  },
+  {
+    "name": "aps-failure",
+    "shape": "2000x171",
+    "time_s": 37.13,
+    "csv_kb": 4016.7,
+    "xlsx_kb": 1310.7,
+    "json_kb": 9354.8,
+    "pii_leak": 0,
+    "csv_ok": true,
+    "xlsx_ok": true,
+    "json_ok": true
+  }
+]

@@ -10,9 +10,9 @@
     "text_size": 10884
   },
   "evidently": {
-    "time": 0.77,
-    "html_size": 3751300,
-    "text_size": 0
+    "time": 1.14,
+    "html_size": 3748376,
+    "text_size": 323102
   },
   "pygwalker": {
     "time": 0.09,
