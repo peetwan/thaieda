@@ -93,31 +93,135 @@ def generate_synthetic_data(
 # Numeric: fit distribution + sample
 # ------------------------------------------------------------------------------
 def _gen_numeric(series: pd.Series, n: int) -> pd.Series:
-    """สร้าง numeric column จาก fitted distribution."""
+    """สร้าง numeric column จาก fitted distribution — v1.9.3.
+
+    ปรับปรุง v1.9.3:
+      * ตรวจจับ zero-inflated / spike-at-value → แยก spike + tail
+      * เพิ่ม gamma, weibull, beta นอกเหนือจาก normal/lognormal/exponential/uniform
+      * ใช้ quantile sampling เป็น fallback เมื่อไม่มี distribution ไหน fit ดี
+      * clip แบบนุ่มนวล (IQR-based) แทน hard min/max
+    """
     numeric = pd.to_numeric(series, errors="coerce").dropna()
     if len(numeric) < 5:
-        # ข้อมูลน้อยเกินไป — sample แบบ bootstrap
         return pd.Series(numeric.sample(n, replace=True).values)
 
     values = numeric.to_numpy(dtype="float64")
     if values.std() == 0:
         return pd.Series([values[0]] * n)
 
-    # พยายามใช้ scipy fit distributions (เหมือน quality.fit_distributions)
+    # --- v1.9.3: ตรวจจับ spike (zero-inflated หรือ spike ที่ค่าใด ๆ) ---
+    spike_val, spike_rate, tail = _detect_spike(values)
+    if spike_val is not None:
+        return _gen_spike_mixture(spike_val, spike_rate, tail, n, values)
+
+    # --- ไม่มี spike: fit distribution ปกติ ---
     try:
         from scipy import stats as st
     except ImportError:
-        # ไม่มี scipy — sample จาก empirical distribution (bootstrap)
-        return pd.Series(np.random.choice(values, size=n, replace=True))
+        return _gen_quantile_sample(values, n)
 
-    # ทดสอบ 4 distributions แล้วเลือก best fit
+    candidates = _fit_distributions(values, st)
+
+    if not candidates:
+        return _gen_quantile_sample(values, n)
+
+    # เลือก best fit (p-value สูงสุด)
+    best = max(candidates, key=lambda x: x[2])
+    dist_name, params, best_p, _ = best
+
+    # ถ้า best p-value ต่ำมาก → ใช้ quantile sampling แทน
+    if best_p < 0.01:
+        return _gen_quantile_sample(values, n)
+
+    sampled = _sample_from_dist(dist_name, params, n)
+
+    # Clip แบบนุ่มนวล — ใช้ percentile 1/99 แทน hard min/max
+    lo = float(np.percentile(values, 0.5))
+    hi = float(np.percentile(values, 99.5))
+    sampled = np.clip(sampled, lo, hi)
+
+    # ปัดเศษให้เหมือนข้อมูลจริง
+    if values.dtype == int or (values == values.astype(int)).all():
+        sampled = np.round(sampled).astype(int)
+
+    return pd.Series(sampled)
+
+
+def _detect_spike(values: np.ndarray) -> tuple[float | None, float, np.ndarray]:
+    """ตรวจจับ spike ที่ค่าใด ค่า หนึ่ง (มักเป็น 0) — v1.9.3.
+
+    คืนค่า (spike_value, spike_rate, tail_values)
+    ถ้าไม่มี spike → (None, 0.0, values)
+    """
+    vc = pd.Series(values).value_counts(normalize=True)
+    top_val = float(vc.index[0])
+    top_rate = float(vc.iloc[0])
+
+    # spike ถ้าค่าเดียวคิดเป็น >25% ของข้อมูล
+    if top_rate >= 0.25:
+        tail = values[values != top_val]
+        if len(tail) >= 10:  # tail ต้องมีข้อมูลพอ fit distribution
+            return top_val, top_rate, tail
+    return None, 0.0, values
+
+
+def _gen_spike_mixture(
+    spike_val: float, spike_rate: float, tail: np.ndarray, n: int, all_values: np.ndarray
+) -> pd.Series:
+    """สร้างข้อมูลแบบ spike + tail mixture — v1.9.3.
+
+    spike_rate ส่วน → spike_val
+    (1 - spike_rate) ส่วน → sample จาก tail distribution
+    """
+    n_spike = int(n * spike_rate)
+    n_tail = n - n_spike
+
+    # fit distribution ที่ tail
+    try:
+        from scipy import stats as st
+    except ImportError:
+        # ไม่มี scipy → quantile sample tail
+        tail_sampled = _gen_quantile_sample(tail, n_tail)
+    else:
+        candidates = _fit_distributions(tail, st)
+        if candidates:
+            best = max(candidates, key=lambda x: x[2])
+            dist_name, params, best_p, _ = best
+            if best_p < 0.01:
+                tail_sampled = _gen_quantile_sample(tail, n_tail)
+            else:
+                tail_sampled = _sample_from_dist(dist_name, params, n_tail)
+                # clip tail แบบนุ่มนวล
+                lo = float(np.percentile(tail, 0.5))
+                hi = float(np.percentile(tail, 99.5))
+                tail_sampled = np.clip(tail_sampled, lo, hi)
+        else:
+            tail_sampled = _gen_quantile_sample(tail, n_tail)
+
+    # รวม spike + tail
+    result = np.empty(n, dtype="float64")
+    result[:n_spike] = spike_val
+    result[n_spike:] = tail_sampled.to_numpy() if isinstance(tail_sampled, pd.Series) else tail_sampled
+
+    # shuffle
+    np.random.shuffle(result)
+
+    # ปัดเศษ
+    if all_values.dtype == int or (all_values == all_values.astype(int)).all():
+        result = np.round(result).astype(int)
+
+    return pd.Series(result)
+
+
+def _fit_distributions(values: np.ndarray, st: Any) -> list[tuple[str, Any, float, float]]:
+    """fit 6 distributions แล้วคืน candidates list — v1.9.3."""
     candidates: list[tuple[str, Any, float, float]] = []
 
     # Normal
     try:
         mu, sigma = st.norm.fit(values)
         ks_stat, p_val = st.kstest(values, "norm", args=(mu, sigma))
-        candidates.append(("normal", (mu, sigma), p_val, float(ks_stat)))
+        candidates.append(("normal", (mu, sigma), float(p_val), float(ks_stat)))
     except Exception:
         pass
 
@@ -126,16 +230,34 @@ def _gen_numeric(series: pd.Series, n: int) -> pd.Series:
         try:
             shape, loc, scale = st.lognorm.fit(values, floc=0)
             ks_stat, p_val = st.kstest(values, "lognorm", args=(shape, loc, scale))
-            candidates.append(("lognormal", (shape, loc, scale), p_val, float(ks_stat)))
+            candidates.append(("lognormal", (shape, loc, scale), float(p_val), float(ks_stat)))
         except Exception:
             pass
 
-    # Exponential (ต้องไม่ติดลบ)
+    # Exponential
     if (values >= 0).all():
         try:
             loc, scale = st.expon.fit(values)
             ks_stat, p_val = st.kstest(values, "expon", args=(loc, scale))
-            candidates.append(("exponential", (loc, scale), p_val, float(ks_stat)))
+            candidates.append(("exponential", (loc, scale), float(p_val), float(ks_stat)))
+        except Exception:
+            pass
+
+    # Gamma (ต้องไม่ติดลบ) — เพิ่ม v1.9.3
+    if (values >= 0).all() and len(values) >= 20:
+        try:
+            a, loc, scale = st.gamma.fit(values, floc=0)
+            ks_stat, p_val = st.kstest(values, "gamma", args=(a, loc, scale))
+            candidates.append(("gamma", (a, loc, scale), float(p_val), float(ks_stat)))
+        except Exception:
+            pass
+
+    # Weibull (ต้องไม่ติดลบ) — เพิ่ม v1.9.3
+    if (values >= 0).all() and len(values) >= 20:
+        try:
+            c, loc, scale = st.weibull_min.fit(values, floc=0)
+            ks_stat, p_val = st.kstest(values, "weibull_min", args=(c, loc, scale))
+            candidates.append(("weibull", (c, loc, scale), float(p_val), float(ks_stat)))
         except Exception:
             pass
 
@@ -143,38 +265,58 @@ def _gen_numeric(series: pd.Series, n: int) -> pd.Series:
     try:
         loc, scale = st.uniform.fit(values)
         ks_stat, p_val = st.kstest(values, "uniform", args=(loc, scale))
-        candidates.append(("uniform", (loc, scale), p_val, float(ks_stat)))
+        candidates.append(("uniform", (loc, scale), float(p_val), float(ks_stat)))
     except Exception:
         pass
 
-    if not candidates:
-        return pd.Series(np.random.choice(values, size=n, replace=True))
+    return candidates
 
-    # เลือก best fit (p-value สูงสุด)
-    best = max(candidates, key=lambda x: x[2])
-    dist_name, params, _, _ = best
 
-    # Sample จาก best-fit distribution
+def _sample_from_dist(dist_name: str, params: Any, n: int) -> np.ndarray:
+    """sample จาก distribution ตามชื่อ — v1.9.3."""
     if dist_name == "normal":
         mu, sigma = params
-        sampled = np.random.normal(mu, sigma, n)
+        return np.random.normal(mu, sigma, n)
     elif dist_name == "lognormal":
         shape, loc, scale = params
-        sampled = np.random.lognormal(mean=np.log(scale), sigma=shape, size=n) + loc
+        return np.random.lognormal(mean=np.log(scale), sigma=shape, size=n) + loc
     elif dist_name == "exponential":
         loc, scale = params
-        sampled = np.random.exponential(scale, n) + loc
+        return np.random.exponential(scale, n) + loc
+    elif dist_name == "gamma":
+        a, loc, scale = params
+        from scipy import stats as st
+        return st.gamma.rvs(a, loc=loc, scale=scale, size=n)
+    elif dist_name == "weibull":
+        c, loc, scale = params
+        from scipy import stats as st
+        return st.weibull_min.rvs(c, loc=loc, scale=scale, size=n)
     elif dist_name == "uniform":
         loc, scale = params
-        sampled = np.random.uniform(loc, loc + scale, n)
+        return np.random.uniform(loc, loc + scale, n)
     else:
-        sampled = np.random.choice(values, size=n, replace=True)
+        return np.random.choice(params[0] if isinstance(params, (list, np.ndarray)) else np.array([0]), size=n)
 
-    # Clip ให้อยู่ใน range ของข้อมูลจริง (กัน outlier จาก distribution)
-    lo, hi = float(values.min()), float(values.max())
-    sampled = np.clip(sampled, lo, hi)
 
-    # ปัดเศษให้เหมือนข้อมูลจริง
+def _gen_quantile_sample(values: np.ndarray, n: int) -> pd.Series:
+    """sample จาก empirical quantiles + noise เล็กน้อย — v1.9.3.
+
+    ปลอดภัยกว่า bootstrap เพราะไม่คัดลอกค่าจริง —
+    sample quantile แล้วเติม noise เล็กน้อยให้ไม่ตรงค่าจริง
+    """
+    # sample quantile จาก empirical CDF
+    quantiles = np.random.uniform(0.001, 0.999, n)
+    sampled = np.quantile(values, quantiles)
+
+    # เติม noise เล็กน้อย (1% ของ std) เพื่อ privacy — ไม่คัดลอกค่าจริง
+    noise = np.random.normal(0, max(values.std() * 0.01, 1e-6), n)
+    sampled = sampled + noise
+
+    # clip ให้ไม่ติดลบถ้าข้อมูลเดิมไม่ติดลบ
+    if (values >= 0).all():
+        sampled = np.maximum(sampled, 0)
+
+    # ปัดเศษ
     if values.dtype == int or (values == values.astype(int)).all():
         sampled = np.round(sampled).astype(int)
 
