@@ -194,7 +194,7 @@ def _gen_categorical(series: pd.Series, n: int) -> pd.Series:
 
     # v1.9: ตรวจ PII ในค่า — ถ้าเป็น phone/email/ID ให้แทนด้วย placeholder
     pii_patterns = [
-        r"(?:\+?66|0)\d[\d\s\-]{7,12}",  # phone
+        r"(?:\+66|0\d{2}-\d{3}-\d{4}|0\d{9})",  # phone (แม่นยำกว่า)
         r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",  # email
         r"\d{1,2}-\d{4}-\d{4,5}-\d{2}-\d",  # Thai ID
     ]
@@ -295,15 +295,15 @@ def privacy_audit_report(
     pii_types: list[dict[str, Any]] = []
     n_rows = len(df)
 
-    # รวม text ทั้งหมดสำหรับ regex scan
+    # รวม text ทั้งหมดสำหรับ regex scan — เฉพาะ string/object columns (ไม่ใช่ numeric)
     text_cols = df.select_dtypes(include=["object", "string"]).columns
     text_parts: list[str] = []
     for col in text_cols:
         text_parts.extend(df[col].dropna().astype(str).tolist()[:1000])
     all_text = " ".join(text_parts)
 
-    # Phone numbers (Thai + international)
-    phone_pattern = r"(?:\+?66|0)\d[\d\s\-]{7,12}"
+    # Phone numbers (Thai + international) — ต้องมี - หรือ +66 เพื่อกัน false positive
+    phone_pattern = r"(?:\+66|0\d{2}-\d{3}-\d{4}|0\d{9})"
     phone_count = len(re.findall(phone_pattern, all_text))
     if phone_count > 0:
         pii_types.append({
