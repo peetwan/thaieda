@@ -19,7 +19,7 @@ ThaiEDA answers one simple question: **"Can I trust this dataset, and what shoul
 - **Repository:** [github.com/peetwan/thaieda](https://github.com/peetwan/thaieda)
 - **PyPI:** [pypi.org/project/thaieda](https://pypi.org/project/thaieda/)
 - **License:** Apache-2.0
-- **Current version:** v2.1.0
+- **Current version:** v2.2.0
 
 ---
 
@@ -46,41 +46,30 @@ ThaiEDA answers one simple question: **"Can I trust this dataset, and what shoul
 pip install thaieda
 ```
 
-ไลบรารีหลักขนาดเล็กกะทัดรัด (Core dependencies): `pandas`, `numpy`, `matplotlib`, `Jinja2`
+ตั้งแต่เวอร์ชัน `v2.2.0` เป็นต้นไป แพ็กเกจและ dependencies ทั้งหมดจะถูกติดตั้งพร้อมใช้งานโดยอัตโนมัติ:
 
-หรือติดตั้งแพ็กเกจส่วนเสริมอื่น ๆ ตามความต้องการ:
+| แพ็กเกจหลัก (Core Packages) | คำอธิบายการใช้งาน |
+|-------------------------|----------------|
+| `pandas`, `numpy`, `matplotlib`, `Jinja2` | การวิเคราะห์พื้นฐาน, การคำนวณโครงสร้างข้อมูล และรายงาน HTML |
+| `pythainlp`, `nlpo3`, `attacut` | การตัดคำภาษาไทย (ตัดคำธรรมดา, ตัดคำความเร็วสูงด้วย Rust และ Deep Learning) |
+| `plotly`, `wordcloud` | การสร้างแผนภูมิโต้ตอบได้และ word cloud |
+| `ftfy` | การแก้ไขปัญหาตัวอักษรไทยผิดเพี้ยน (mojibake) |
+| `scikit-learn` | การเติมค่าว่างและการตรวจจับค่าผิดปกติด้วย Machine Learning |
+| `scipy` | การวิเคราะห์ทางสถิติและความสัมพันธ์ของตัวแปรเป้าหมาย |
+| `statsmodels` | การแยกองค์ประกอบของอนุกรมเวลา (Timeseries Decomposition) |
+| `python-crfsuite` | ระบบจดจำเอนทิตีภาษาไทย (Thai Named Entity Recognition) |
+| `rapidfuzz` | การค้นหาข้อมูลกลุ่มที่ใกล้เคียงกันด้วย Fuzzy Matching |
+| `chardet` | การตรวจสอบรหัสอักขระ (encoding) ของไฟล์โดยอัตโนมัติ |
+| `openpyxl`, `pyarrow` | การอ่านและเขียนไฟล์ Excel และ Parquet |
+| `litellm` | การสรุปวิเคราะห์และประมวลผลข้อมูลร่วมกับ LLM |
+
+### แพ็กเกจสำหรับการพัฒนา / Development Dependencies
+
+สำหรับการทดสอบและพัฒนาโครงการ สามารถติดตั้งเพิ่มเติมได้ด้วย:
 
 ```bash
-# ตัดคำไทย + กราฟ + Excel/Parquet
-pip install "thaieda[thai,viz,excel,parquet]"
-
-# สถิติเต็มรูปแบบ (p-values, ANOVA, chi-square)
-pip install "thaieda[stats]"
-
-# ทุกอย่างในคำสั่งเดียว
-pip install "thaieda[all]"
+pip install "thaieda[dev]"
 ```
-
-### Optional dependencies / ส่วนเสริม
-
-| Extra | Packages | ใช้เมื่อ |
-|-------|----------|----------|
-| `thai` | pythainlp | ใช้สำหรับการตัดคำภาษาไทย (แนะนำ) |
-| `fast` | nlpo3 | ช่วยในการตัดคำภาษาไทยด้วยความเร็วสูง (พัฒนาด้วยภาษา Rust) |
-| `dl` | attacut | ใช้สำหรับการตัดคำภาษาไทยด้วยแบบจำลอง Deep Learning |
-| `viz` | plotly, wordcloud | ใช้สร้างกราฟแบบโต้ตอบได้ (interactive) และแผนภาพกลุ่มคำ (word cloud) |
-| `fix` | ftfy | ใช้แก้ไขปัญหาการแสดงผลตัวอักษรผิดเพี้ยน (`clean.normalize_encoding`) |
-| `ml` | scikit-learn | ใช้สำหรับตรวจจับค่าผิดปกติด้วย Machine Learning และการเติมค่าว่างที่ขาดหาย |
-| `stats` | scipy | ใช้คำนวณค่า p-value สำหรับวิเคราะห์ความสัมพันธ์กับตัวแปรเป้าหมาย (target analysis) |
-| `timeseries` | statsmodels | ใช้สำหรับการแยกองค์ประกอบของอนุกรมเวลา (STL decomposition) |
-| `ner` | pythainlp, python-crfsuite | ระบบจดจำและจำแนกประเภทเอนทิตีภาษาไทย (Thai Named Entity Recognition) |
-| `fuzzy` | rapidfuzz | ใช้ค้นหาและจับคู่ข้อมูลกลุ่ม (categorical) ที่ใกล้เคียงกันด้วย Fuzzy Matching |
-| `detect` | chardet | ตรวจสอบรหัสอักขระ (encoding) ของไฟล์โดยอัตโนมัติ (`read_data`) |
-| `excel` | openpyxl | รองรับการอ่านและเขียนไฟล์ตารางคำนวณ Excel (`.xlsx`) |
-| `parquet` | pyarrow | รองรับการอ่านและเขียนไฟล์ข้อมูลประเภท Parquet |
-| `llm` | litellm | ใช้สำหรับเชื่อมต่อกับโมเดลภาษาขนาดใหญ่ (LLM) ในการวิเคราะห์ข้อมูล |
-| `all` | ทุกอย่างด้านบน | ติดตั้งแพ็กเกจเสริมทั้งหมดที่มีอยู่ |
-| `dev` | pytest, ruff, mypy, … | แพ็กเกจสำหรับการพัฒนาและรันชุดทดสอบ (tests) |
 
 ---
 
@@ -416,7 +405,7 @@ src/thaieda/
 ## คำถามที่พบบ่อย / FAQ
 
 **เมื่อพบปัญหาแผนภูมิแสดงผลเป็นรูปสี่เหลี่ยมแทนตัวอักษรภาษาไทย?**
-สามารถแก้ไขได้โดยการติดตั้งแพ็กเกจเสริม `pip install "thaieda[viz]"` และตรวจสอบว่าระบบปฏิบัติการของคุณติดตั้งฟอนต์ภาษาไทยเรียบร้อยแล้ว โดยตัวระบบ ThaiEDA จะกำหนดฟอนต์สำรอง (Fallback font) เพื่อแสดงผลภาษาไทยให้อัตโนมัติ
+สามารถแก้ไขได้โดยตรวจสอบว่าระบบปฏิบัติการของคุณติดตั้งฟอนต์ภาษาไทยเรียบร้อยแล้ว โดยตัวระบบ ThaiEDA จะกำหนดฟอนต์สำรอง (Fallback font) เพื่อแสดงผลภาษาไทยให้อัตโนมัติ
 
 **ข้อมูลในชุดข้อมูลจะถูกอัปโหลดหรือส่งออกไปภายนอกเครื่องคอมพิวเตอร์หรือไม่?**
 ไม่เลย — การทำงานทุกขั้นตอนประมวลผลภายในเครื่องคอมพิวเตอร์ของคุณเอง (Local) ยกเว้นในกรณีที่คุณสั่งเปิดการใช้งานโมเดลภาษาขนาดใหญ่โดยตั้งค่าพารามิเตอร์ `llm=True` โดยตรงเท่านั้น และสามารถเลือกใช้โหมด `privacy="insight_only"` หรือเชื่อมต่อกับ Ollama ที่รันแบบ Local เพื่อรักษาความปลอดภัยและความเป็นส่วนตัวของข้อมูลขั้นสูงสุดได้

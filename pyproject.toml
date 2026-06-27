@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "thaieda"
-version = "2.1.1"
+version = "2.2.0"
 description = "AutoEDA สำหรับข้อมูลภาษาไทย — Exploratory data analysis that speaks Thai"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -37,45 +37,12 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Information Analysis",
 ]
 
-# Slim core dependencies — optional NLP/ML/I/O backends live in extras.
+# Core dependencies — all features are now included by default
 dependencies = [
     "pandas>=2.0",
     "numpy>=1.24",
     "matplotlib>=3.7",
     "jinja2>=3.1",
-]
-
-[project.optional-dependencies]
-# Thai word tokenization (แนะนำ)
-thai = ["pythainlp>=5.0"]
-# Fast tokenizer (Rust-based)
-fast = ["nlpo3>=1.2"]
-# Deep learning tokenizer
-dl = ["attacut>=1.0"]
-# Word cloud and interactive visualization
-viz = ["plotly>=5.18.0", "wordcloud>=1.9"]
-# Encoding/mojibake repair (clean.normalize_encoding)
-fix = ["ftfy>=6.0"]
-# ML-based anomaly detection (Isolation Forest / LOF)
-ml = ["scikit-learn>=1.3"]
-# Statistical target analysis (proper p-values for correlation/ANOVA/chi-square)
-stats = ["scipy>=1.11"]
-# Timeseries decomposition (STL trend/seasonal/residual via statsmodels)
-timeseries = ["statsmodels>=0.14"]
-# Thai Named Entity Recognition (pythainlp + a CRF backend for the 'thainer' engine)
-ner = ["pythainlp>=5.0", "python-crfsuite>=0.9"]
-# Fast fuzzy matching for categorical near-duplicates (faster than difflib)
-fuzzy = ["rapidfuzz>=3.0"]
-# Automatic encoding detection for read_data (thaieda.io)
-detect = ["chardet>=5.0"]
-# Excel I/O
-excel = ["openpyxl>=3.1"]
-# Parquet I/O
-parquet = ["pyarrow>=14.0"]
-# LLM Q&A (v0.3+)
-llm = ["litellm>=1.0"]
-# ติดตั้งทุกอย่างในคำสั่งเดียว — pip install thaieda[all]
-all = [
     "pythainlp>=5.0",
     "nlpo3>=1.2",
     "attacut>=1.0",
@@ -92,6 +59,36 @@ all = [
     "openpyxl>=3.1",
     "pyarrow>=14.0",
 ]
+
+[project.optional-dependencies]
+# Thai word tokenization (แนะนำ)
+thai = [] # included in core
+# Fast tokenizer (Rust-based)
+fast = [] # included in core
+# Deep learning tokenizer
+dl = [] # included in core
+# Word cloud and interactive visualization
+viz = [] # included in core
+# Encoding/mojibake repair (clean.normalize_encoding)
+fix = [] # included in core
+# ML-based anomaly detection (Isolation Forest / LOF)
+ml = [] # included in core
+# Statistical target analysis (proper p-values for correlation/ANOVA/chi-square)
+stats = [] # included in core
+# Timeseries decomposition (STL trend/seasonal/residual via statsmodels)
+timeseries = [] # included in core
+# Thai Named Entity Recognition (pythainlp + a CRF backend for the 'thainer' engine)
+ner = [] # included in core
+# Fast fuzzy matching for categorical near-duplicates (faster than difflib)
+fuzzy = [] # included in core
+# Automatic encoding detection for read_data (thaieda.io)
+detect = [] # included in core
+# Excel I/O
+excel = [] # included in core
+# Parquet I/O
+parquet = [] # included in core
+# LLM Q&A (v0.3+)
+llm = [] # included in core
 # Development dependencies
 dev = [
     "pytest>=7.0",
