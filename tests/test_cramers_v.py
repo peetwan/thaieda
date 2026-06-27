@@ -1,9 +1,9 @@
 """Test Cramér's V effect size — v1.8."""
+
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from thaieda.analysis import _cramers_v, analyze_target
 
@@ -36,8 +36,11 @@ class TestCramersV:
         n = 200
         # สร้าง categorical × categorical ที่มี association
         a = np.random.choice(["X", "Y"], size=n)
-        b = np.where(a == "X", np.random.choice(["P", "Q"], size=n, p=[0.8, 0.2]),
-                      np.random.choice(["P", "Q"], size=n, p=[0.2, 0.8]))
+        b = np.where(
+            a == "X",
+            np.random.choice(["P", "Q"], size=n, p=[0.8, 0.2]),
+            np.random.choice(["P", "Q"], size=n, p=[0.2, 0.8]),
+        )
         df = pd.DataFrame({"a": a, "b": b})
         results = analyze_target(df, "b")
         chi_results = [r for r in results if r.association_type == "chi_square"]

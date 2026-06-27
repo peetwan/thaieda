@@ -336,7 +336,7 @@ def _gesd_test(
         # วิธีง่าย: รันใหม่และเก็บ indices
         work2 = values.copy()
         idx2 = np.arange(n)
-        for i in range(num_outliers):
+        for _i in range(num_outliers):
             mean = float(work2.mean())
             std = float(work2.std(ddof=1))
             if std == 0:

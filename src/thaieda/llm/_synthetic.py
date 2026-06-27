@@ -11,9 +11,9 @@ Pipeline สร้าง DataFrame ที่มีคุณสมบัติท
   * Text → สร้าง placeholder ตาม pattern (ไม่ส่งข้อความจริง)
   * ไม่มี row ไหนซ้ำข้อมูลจริง — เป็น synthetic 100%
 """
+
 from __future__ import annotations
 
-import math
 from typing import Any
 
 import numpy as np
@@ -201,7 +201,9 @@ def _gen_spike_mixture(
     # รวม spike + tail
     result = np.empty(n, dtype="float64")
     result[:n_spike] = spike_val
-    result[n_spike:] = tail_sampled.to_numpy() if isinstance(tail_sampled, pd.Series) else tail_sampled
+    result[n_spike:] = (
+        tail_sampled.to_numpy() if isinstance(tail_sampled, pd.Series) else tail_sampled
+    )
 
     # shuffle
     np.random.shuffle(result)
@@ -286,16 +288,20 @@ def _sample_from_dist(dist_name: str, params: Any, n: int) -> np.ndarray:
     elif dist_name == "gamma":
         a, loc, scale = params
         from scipy import stats as st
+
         return st.gamma.rvs(a, loc=loc, scale=scale, size=n)
     elif dist_name == "weibull":
         c, loc, scale = params
         from scipy import stats as st
+
         return st.weibull_min.rvs(c, loc=loc, scale=scale, size=n)
     elif dist_name == "uniform":
         loc, scale = params
         return np.random.uniform(loc, loc + scale, n)
     else:
-        return np.random.choice(params[0] if isinstance(params, (list, np.ndarray)) else np.array([0]), size=n)
+        return np.random.choice(
+            params[0] if isinstance(params, (list, np.ndarray)) else np.array([0]), size=n
+        )
 
 
 def _gen_quantile_sample(values: np.ndarray, n: int) -> pd.Series:
@@ -340,7 +346,9 @@ def _gen_categorical(series: pd.Series, n: int) -> pd.Series:
         r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",  # email
         r"\d{1,2}-\d{4}-\d{4,5}-\d{2}-\d",  # Thai ID
     ]
-    all_text = " ".join(str(v) for v in values if v is not None and not (isinstance(v, float) and np.isnan(v)))
+    all_text = " ".join(
+        str(v) for v in values if v is not None and not (isinstance(v, float) and np.isnan(v))
+    )
     has_pii = any(re.search(p, all_text) for p in pii_patterns)
 
     if has_pii:
@@ -369,10 +377,7 @@ def _gen_datetime(series: pd.Series, n: int) -> pd.Series:
 
     if date_range == 0:
         # ทุก row มีวันที่เดียวกัน — สุ่มใน ±1 วัน
-        delta = pd.Timedelta(seconds=1)
-        sampled = date_min + pd.to_timedelta(
-            np.random.uniform(-1, 1, n), unit="s"
-        )
+        sampled = date_min + pd.to_timedelta(np.random.uniform(-1, 1, n), unit="s")
         return pd.Series(sampled)
 
     # Sample แบบ uniform ใน date range (preserves temporal coverage)
@@ -448,58 +453,66 @@ def privacy_audit_report(
     phone_pattern = r"(?:\+66|0\d{2}-\d{3}-\d{4}|0\d{9})"
     phone_count = len(re.findall(phone_pattern, all_text))
     if phone_count > 0:
-        pii_types.append({
-            "type": "phone_number",
-            "count": phone_count,
-            "risk": "high",
-            "description": f"พบเบอร์โทรศัพท์ {phone_count} รายการ",
-        })
+        pii_types.append(
+            {
+                "type": "phone_number",
+                "count": phone_count,
+                "risk": "high",
+                "description": f"พบเบอร์โทรศัพท์ {phone_count} รายการ",
+            }
+        )
 
     # Email
     email_pattern = r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
     email_count = len(re.findall(email_pattern, all_text))
     if email_count > 0:
-        pii_types.append({
-            "type": "email",
-            "count": email_count,
-            "risk": "high",
-            "description": f"พบอีเมล {email_count} รายการ",
-        })
+        pii_types.append(
+            {
+                "type": "email",
+                "count": email_count,
+                "risk": "high",
+                "description": f"พบอีเมล {email_count} รายการ",
+            }
+        )
 
     # Thai national ID (x-xxxx-xxxxx-xx-x)
     id_pattern = r"\d{1,2}-\d{4}-\d{4,5}-\d{2}-\d"
     id_count = len(re.findall(id_pattern, all_text))
     if id_count > 0:
-        pii_types.append({
-            "type": "thai_national_id",
-            "count": id_count,
-            "risk": "critical",
-            "description": f"พบเลขบัตรประชาชน {id_count} รายการ",
-        })
+        pii_types.append(
+            {
+                "type": "thai_national_id",
+                "count": id_count,
+                "risk": "critical",
+                "description": f"พบเลขบัตรประชาชน {id_count} รายการ",
+            }
+        )
 
     # IP address
     ip_pattern = r"\b(?:\d{1,3}\.){3}\d{1,3}\b"
     ip_count = len(re.findall(ip_pattern, all_text))
     if ip_count > 0:
-        pii_types.append({
-            "type": "ip_address",
-            "count": ip_count,
-            "risk": "medium",
-            "description": f"พบ IP address {ip_count} รายการ",
-        })
+        pii_types.append(
+            {
+                "type": "ip_address",
+                "count": ip_count,
+                "risk": "medium",
+                "description": f"พบ IP address {ip_count} รายการ",
+            }
+        )
 
     # Thai address keywords
     addr_keywords = ["ตำบล", "อำเภอ", "จังหวัด", "ต.", "อ.", "จ.", "ถนน", "ซอย", "ม."]
-    addr_count = sum(
-        1 for kw in addr_keywords if kw in all_text
-    )
+    addr_count = sum(1 for kw in addr_keywords if kw in all_text)
     if addr_count > 0:
-        pii_types.append({
-            "type": "thai_address",
-            "count": addr_count,
-            "risk": "medium",
-            "description": f"พบที่อยู่ไทย {addr_count} keyword(s)",
-        })
+        pii_types.append(
+            {
+                "type": "thai_address",
+                "count": addr_count,
+                "risk": "medium",
+                "description": f"พบที่อยู่ไทย {addr_count} keyword(s)",
+            }
+        )
 
     # Risk assessment ตาม mode
     mode_risk = {
@@ -595,22 +608,16 @@ def export_synthetic_data(
         try:
             synthetic.to_excel(path, index=False, engine="openpyxl")
         except ImportError as e:
-            raise ImportError(
-                f"ต้องติดตั้ง openpyxl สำหรับ .xlsx: pip install openpyxl\n{e}"
-            ) from e
+            raise ImportError(f"ต้องติดตั้ง openpyxl สำหรับ .xlsx: pip install openpyxl\n{e}") from e
     elif suffix == ".json":
         synthetic.to_json(path, orient="records", force_ascii=False, indent=2)
     elif suffix == ".parquet":
         try:
             synthetic.to_parquet(path, index=False)
         except ImportError as e:
-            raise ImportError(
-                f"ต้องติดตั้ง pyarrow สำหรับ .parquet: pip install pyarrow\n{e}"
-            ) from e
+            raise ImportError(f"ต้องติดตั้ง pyarrow สำหรับ .parquet: pip install pyarrow\n{e}") from e
     else:
-        raise ValueError(
-            f"ไม่รองรับนามสกุล {suffix!r} — รองรับ: .csv, .xlsx, .json, .parquet"
-        )
+        raise ValueError(f"ไม่รองรับนามสกุล {suffix!r} — รองรับ: .csv, .xlsx, .json, .parquet")
 
     file_size_kb = round(path.stat().st_size / 1024, 1)
 
@@ -627,9 +634,7 @@ def export_synthetic_data(
         audit_path = path.with_suffix(".privacy-audit.json")
         import json
 
-        audit_path.write_text(
-            json.dumps(audit, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
+        audit_path.write_text(json.dumps(audit, indent=2, ensure_ascii=False), encoding="utf-8")
         result["audit_path"] = str(audit_path)
         result["audit_risk"] = audit["overall_risk"]
         result["n_pii_types"] = audit["n_pii_types"]

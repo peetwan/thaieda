@@ -1,9 +1,9 @@
 """Test distribution fitting + KS test — v1.8."""
+
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from thaieda.quality import fit_distributions
 

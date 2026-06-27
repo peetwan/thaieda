@@ -297,7 +297,10 @@ def _associate(
             strength_th = "ความสัมพันธ์ปานกลาง"
         else:
             strength_th = "ความสัมพันธ์ชัดเจน"
-        desc = f"Chi-square ระหว่าง '{col}' กับ '{target_name}' = {chi2:.3f} — {_sig_th(p, alpha)} (Cramér's V = {v:.3f}, {strength_th})"
+        desc = (
+            f"Chi-square ระหว่าง '{col}' กับ '{target_name}' = {chi2:.3f} — "
+            f"{_sig_th(p, alpha)} (Cramér's V = {v:.3f}, {strength_th})"
+        )
         return TargetAssociation(col, target_name, "chi_square", chi2, p, desc, effect_size=v)
 
     return None

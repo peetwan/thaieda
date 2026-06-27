@@ -955,9 +955,7 @@ def detect_missing_mechanism(df: pd.DataFrame) -> MissingMechanismResult | None:
 
     evidence: dict[str, Any] = {
         "total_missing": total_missing,
-        "missing_by_column": {
-            str(k): int(v) for k, v in missing_cols.items()
-        },
+        "missing_by_column": {str(k): int(v) for k, v in missing_cols.items()},
     }
 
     # ตรวจ correlation ของ missing indicators ระหว่างคอลัมน์
@@ -975,11 +973,13 @@ def detect_missing_mechanism(df: pd.DataFrame) -> MissingMechanismResult | None:
             for col_b in cols_with_missing[i + 1 :]:
                 r = corr.loc[col_a, col_b]
                 if pd.notna(r) and abs(r) > 0.3:
-                    high_corr_pairs.append({
-                        "col_a": str(col_a),
-                        "col_b": str(col_b),
-                        "correlation": round(float(r), 3),
-                    })
+                    high_corr_pairs.append(
+                        {
+                            "col_a": str(col_a),
+                            "col_b": str(col_b),
+                            "correlation": round(float(r), 3),
+                        }
+                    )
         evidence["co_missing_correlations"] = high_corr_pairs
     else:
         high_corr_pairs = []
@@ -1006,30 +1006,44 @@ def detect_missing_mechanism(df: pd.DataFrame) -> MissingMechanismResult | None:
                 continue
             r = miss_vals.corr(obs_vals)
             if pd.notna(r) and abs(r) > 0.2:
-                mar_evidence.append({
-                    "missing_col": str(miss_col),
-                    "predictor_col": str(val_col),
-                    "correlation": round(float(r), 3),
-                })
+                mar_evidence.append(
+                    {
+                        "missing_col": str(miss_col),
+                        "predictor_col": str(val_col),
+                        "correlation": round(float(r), 3),
+                    }
+                )
     evidence["mar_indicators"] = mar_evidence
 
     # ตัดสินใจ mechanism
     if n_missing_cols == df.shape[1] and missing_pct > 50:
         # ทุกคอลัมน์มี missing สูง → MNAR_likely
         mechanism = "MNAR_likely"
-        desc = "High missing rate across all columns suggests data may be MNAR (Missing Not at Random)."
+        desc = (
+            "High missing rate across all columns suggests data may be "
+            "MNAR (Missing Not at Random)."
+        )
         desc_th = "อัตราค่าว่างสูงทุกคอลัมน์ ข้อมูลอาจเป็น MNAR (ค่าว่างขึ้นกับค่าตัวเอง)"
     elif mar_evidence:
         mechanism = "MAR_likely"
-        desc = f"Missing patterns correlated with observed values ({len(mar_evidence)} pairs) — likely MAR (Missing at Random)."
+        desc = (
+            f"Missing patterns correlated with observed values "
+            f"({len(mar_evidence)} pairs) — likely MAR (Missing at Random)."
+        )
         desc_th = f"รูปแบบค่าว่างมีความสัมพันธ์กับค่าที่สังเกตได้ ({len(mar_evidence)} คู่) — น่าจะเป็น MAR"
     elif high_corr_pairs:
         mechanism = "MAR_likely"
-        desc = f"Co-missingness detected ({len(high_corr_pairs)} column pairs) — missing values cluster together."
+        desc = (
+            f"Co-missingness detected ({len(high_corr_pairs)} column pairs) — "
+            "missing values cluster together."
+        )
         desc_th = f"พบค่าว่างเกิดพร้อมกัน ({len(high_corr_pairs)} คู่คอลัมน์) — ค่าว่างกลุ่มติดกัน"
     else:
         mechanism = "MCAR"
-        desc = "No correlation between missing patterns and observed data — consistent with MCAR (Missing Completely at Random)."
+        desc = (
+            "No correlation between missing patterns and observed data — "
+            "consistent with MCAR (Missing Completely at Random)."
+        )
         desc_th = "ไม่พบความสัมพันธ์ระหว่างรูปแบบค่าว่างกับข้อมูล — สอดคล้องกับ MCAR (สุ่มสมบูรณ์)"
 
     return MissingMechanismResult(
@@ -1111,12 +1125,14 @@ def fit_distributions(series: pd.Series, column: str) -> DistributionFitResult |
     try:
         mu, sigma = st.norm.fit(values)
         ks_stat, p_val = st.kstest(values, "norm", args=(mu, sigma))
-        all_fits.append({
-            "distribution": "normal",
-            "ks_statistic": float(ks_stat),
-            "p_value": float(p_val),
-            "parameters": {"mean": float(mu), "std": float(sigma)},
-        })
+        all_fits.append(
+            {
+                "distribution": "normal",
+                "ks_statistic": float(ks_stat),
+                "p_value": float(p_val),
+                "parameters": {"mean": float(mu), "std": float(sigma)},
+            }
+        )
     except Exception:
         pass
 
@@ -1125,12 +1141,14 @@ def fit_distributions(series: pd.Series, column: str) -> DistributionFitResult |
         try:
             shape, loc, scale = st.lognorm.fit(values, floc=0)
             ks_stat, p_val = st.kstest(values, "lognorm", args=(shape, loc, scale))
-            all_fits.append({
-                "distribution": "lognormal",
-                "ks_statistic": float(ks_stat),
-                "p_value": float(p_val),
-                "parameters": {"shape": float(shape), "loc": float(loc), "scale": float(scale)},
-            })
+            all_fits.append(
+                {
+                    "distribution": "lognormal",
+                    "ks_statistic": float(ks_stat),
+                    "p_value": float(p_val),
+                    "parameters": {"shape": float(shape), "loc": float(loc), "scale": float(scale)},
+                }
+            )
         except Exception:
             pass
 
@@ -1139,12 +1157,14 @@ def fit_distributions(series: pd.Series, column: str) -> DistributionFitResult |
         try:
             loc, scale = st.expon.fit(values)
             ks_stat, p_val = st.kstest(values, "expon", args=(loc, scale))
-            all_fits.append({
-                "distribution": "exponential",
-                "ks_statistic": float(ks_stat),
-                "p_value": float(p_val),
-                "parameters": {"loc": float(loc), "scale": float(scale)},
-            })
+            all_fits.append(
+                {
+                    "distribution": "exponential",
+                    "ks_statistic": float(ks_stat),
+                    "p_value": float(p_val),
+                    "parameters": {"loc": float(loc), "scale": float(scale)},
+                }
+            )
         except Exception:
             pass
 
@@ -1152,12 +1172,14 @@ def fit_distributions(series: pd.Series, column: str) -> DistributionFitResult |
     try:
         loc, scale = st.uniform.fit(values)
         ks_stat, p_val = st.kstest(values, "uniform", args=(loc, scale))
-        all_fits.append({
-            "distribution": "uniform",
-            "ks_statistic": float(ks_stat),
-            "p_value": float(p_val),
-            "parameters": {"loc": float(loc), "scale": float(scale)},
-        })
+        all_fits.append(
+            {
+                "distribution": "uniform",
+                "ks_statistic": float(ks_stat),
+                "p_value": float(p_val),
+                "parameters": {"loc": float(loc), "scale": float(scale)},
+            }
+        )
     except Exception:
         pass
 
@@ -1181,7 +1203,10 @@ def fit_distributions(series: pd.Series, column: str) -> DistributionFitResult |
         desc = f"'{column}' follows {best_name} distribution (KS p={best['p_value']:.4f})."
         desc_th = f"'{column}' ตาม{fit_th} (KS p={best['p_value']:.4f})"
     else:
-        desc = f"'{column}' does not follow any tested distribution well (best: {best_name}, p={best['p_value']:.4f})."
+        desc = (
+            f"'{column}' does not follow any tested distribution well "
+            f"(best: {best_name}, p={best['p_value']:.4f})."
+        )
         desc_th = f"'{column}' ไม่ตรงกับการกระจายใดที่ทดสอบ (ดีที่สุด: {fit_th}, p={best['p_value']:.4f})"
 
     return DistributionFitResult(

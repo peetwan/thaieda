@@ -1286,8 +1286,8 @@ def _recompute_one(
 
 
 # v2.0: รูปแบบ insight ใหม่ — Simpson's paradox + target leakage
-from thaieda.insight_engine._leakage import detect_target_leakage
-from thaieda.insight_engine._paradox import detect_simpsons_paradox
+from thaieda.insight_engine._leakage import detect_target_leakage  # noqa: E402
+from thaieda.insight_engine._paradox import detect_simpsons_paradox  # noqa: E402
 
 __all__ = [
     "Perspective",

@@ -1,9 +1,9 @@
 """Test missing data mechanism detection — v1.8."""
+
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from thaieda.quality import detect_missing_mechanism
 
@@ -15,12 +15,14 @@ class TestMCAR:
         """Missing กระจายสุ่ม → MCAR."""
         np.random.seed(42)
         n = 500
-        df = pd.DataFrame({
-            "a": np.random.randn(n),
-            "b": np.random.randn(n),
-            "c": np.random.randn(n),
-            "d": np.random.randn(n),
-        })
+        df = pd.DataFrame(
+            {
+                "a": np.random.randn(n),
+                "b": np.random.randn(n),
+                "c": np.random.randn(n),
+                "d": np.random.randn(n),
+            }
+        )
         # สุ่มทำ missing ~5% แบบ independent
         for col in df.columns:
             mask = np.random.random(n) < 0.05
@@ -33,11 +35,13 @@ class TestMCAR:
 
     def test_no_missing_returns_none(self):
         """ไม่มี missing → None."""
-        df = pd.DataFrame({
-            "a": range(100),
-            "b": range(100),
-            "c": range(100),
-        })
+        df = pd.DataFrame(
+            {
+                "a": range(100),
+                "b": range(100),
+                "c": range(100),
+            }
+        )
         result = detect_missing_mechanism(df)
         assert result is None
 
@@ -49,12 +53,14 @@ class TestMAR:
         """Missing ใน col A correlated กับค่าใน col B → MAR_likely."""
         np.random.seed(42)
         n = 500
-        df = pd.DataFrame({
-            "value": np.random.randn(n) * 10 + 50,
-            "age": np.random.randint(20, 60, size=n),
-            "score": np.random.uniform(0, 100, size=n),
-            "income": np.random.randn(n) * 1000 + 30000,
-        })
+        df = pd.DataFrame(
+            {
+                "value": np.random.randn(n) * 10 + 50,
+                "age": np.random.randint(20, 60, size=n),
+                "score": np.random.uniform(0, 100, size=n),
+                "income": np.random.randn(n) * 1000 + 30000,
+            }
+        )
         # age > 40 มักมี missing ใน value (MAR pattern with numeric predictor)
         old_mask = df["age"] > 40
         miss_mask = np.random.random(n) < 0.6
@@ -73,11 +79,13 @@ class TestMNAR:
         """ทุกคอลัมน์มี missing สูง → MNAR_likely."""
         np.random.seed(42)
         n = 200
-        df = pd.DataFrame({
-            "a": np.random.randn(n),
-            "b": np.random.randn(n),
-            "c": np.random.randn(n),
-        })
+        df = pd.DataFrame(
+            {
+                "a": np.random.randn(n),
+                "b": np.random.randn(n),
+                "c": np.random.randn(n),
+            }
+        )
         # ทำ missing 70% ทุกคอลัมน์
         for col in df.columns:
             mask = np.random.random(n) < 0.7
@@ -94,11 +102,13 @@ class TestInsufficientData:
 
     def test_too_few_rows(self):
         """น้อยกว่า 50 แถว → None."""
-        df = pd.DataFrame({
-            "a": [1, 2, np.nan, 4, 5],
-            "b": [1, np.nan, 3, 4, 5],
-            "c": [1, 2, 3, np.nan, 5],
-        })
+        df = pd.DataFrame(
+            {
+                "a": [1, 2, np.nan, 4, 5],
+                "b": [1, np.nan, 3, 4, 5],
+                "c": [1, 2, 3, np.nan, 5],
+            }
+        )
         result = detect_missing_mechanism(df)
         assert result is None
 
@@ -106,10 +116,12 @@ class TestInsufficientData:
         """น้อยกว่า 3 คอลัมน์ → None."""
         np.random.seed(42)
         n = 100
-        df = pd.DataFrame({
-            "a": np.random.randn(n),
-            "b": np.random.randn(n),
-        })
+        df = pd.DataFrame(
+            {
+                "a": np.random.randn(n),
+                "b": np.random.randn(n),
+            }
+        )
         df.loc[df.index[:5], "a"] = np.nan
         result = detect_missing_mechanism(df)
         assert result is None
@@ -118,11 +130,13 @@ class TestInsufficientData:
         """to_dict ต้องมี fields ครบ."""
         np.random.seed(42)
         n = 500
-        df = pd.DataFrame({
-            "a": np.random.randn(n),
-            "b": np.random.randn(n),
-            "c": np.random.randn(n),
-        })
+        df = pd.DataFrame(
+            {
+                "a": np.random.randn(n),
+                "b": np.random.randn(n),
+                "c": np.random.randn(n),
+            }
+        )
         mask = np.random.random(n) < 0.05
         df.loc[mask, "a"] = np.nan
 

@@ -1,9 +1,9 @@
 """Test Generalized ESD test for multiple outlier detection — v1.8."""
+
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from thaieda.anomaly import _gesd_test, detect_numeric_outliers
 

@@ -1,12 +1,12 @@
 """Test Spearman rank correlation in insight engine — v1.8."""
+
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
-from thaieda.insight_engine import _detect_strong_correlations
 from thaieda.detect import ColumnType
+from thaieda.insight_engine import _detect_strong_correlations
 
 
 class TestSpearmanCorrelation:
@@ -16,7 +16,7 @@ class TestSpearmanCorrelation:
         """y = x⁵ สำหรับ x ~ N(0,1) → Pearson ≈ 0.49 แต่ Spearman = 1.0."""
         np.random.seed(42)
         x = np.random.randn(200)
-        y = x ** 5  # monotonic แต่ non-linear มาก — Pearson ต่ำ แต่ Spearman สูง
+        y = x**5  # monotonic แต่ non-linear มาก — Pearson ต่ำ แต่ Spearman สูง
         df = pd.DataFrame({"x": x, "y": y})
         measures = {
             "x": {"type": ColumnType.NUMERIC},

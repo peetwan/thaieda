@@ -1,4 +1,5 @@
 """Test export_synthetic_data — v1.9.1."""
+
 from __future__ import annotations
 
 import json
@@ -9,7 +10,6 @@ import pandas as pd
 import pytest
 
 from thaieda.llm import export_synthetic_data
-from thaieda.llm._synthetic import export_synthetic_data as export_direct
 
 
 class TestExportSyntheticData:
@@ -18,11 +18,13 @@ class TestExportSyntheticData:
     @pytest.fixture
     def sample_df(self):
         np.random.seed(42)
-        return pd.DataFrame({
-            "id": range(200),
-            "value": np.random.randn(200) * 10 + 50,
-            "category": np.random.choice(["A", "B", "C"], 200),
-        })
+        return pd.DataFrame(
+            {
+                "id": range(200),
+                "value": np.random.randn(200) * 10 + 50,
+                "category": np.random.choice(["A", "B", "C"], 200),
+            }
+        )
 
     def test_export_csv(self, sample_df, tmp_path):
         """export เป็น CSV."""
@@ -92,10 +94,12 @@ class TestExportSyntheticData:
     def test_no_real_values_in_export(self, tmp_path):
         """ข้อมูลที่ export ต้องไม่มี PII จริง."""
         np.random.seed(42)
-        df = pd.DataFrame({
-            "phone": [f"081-234-{i:04d}" for i in range(100)],
-            "email": [f"user{i}@test.com" for i in range(100)],
-        })
+        df = pd.DataFrame(
+            {
+                "phone": [f"081-234-{i:04d}" for i in range(100)],
+                "email": [f"user{i}@test.com" for i in range(100)],
+            }
+        )
         path = tmp_path / "synthetic.csv"
         export_synthetic_data(df, str(path), include_audit=False)
         read = pd.read_csv(path)

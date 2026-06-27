@@ -6,17 +6,17 @@
   - _gen_quantile_sample: empirical quantile sampling + noise
   - _fit_distributions: fit 6 distributions (normal/lognormal/expon/gamma/weibull/uniform)
 """
+
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from thaieda.llm._synthetic import (
     _detect_spike,
-    _gen_spike_mixture,
-    _gen_quantile_sample,
     _fit_distributions,
+    _gen_quantile_sample,
+    _gen_spike_mixture,
     generate_synthetic_data,
 )
 
@@ -127,6 +127,7 @@ class TestFitDistributions:
     def test_fits_normal(self):
         """ข้อมูล normal → normal fit ดีที่สุด."""
         from scipy import stats as st
+
         np.random.seed(42)
         vals = np.random.randn(200)
         candidates = _fit_distributions(vals, st)
@@ -137,6 +138,7 @@ class TestFitDistributions:
     def test_fits_gamma(self):
         """ข้อมูล gamma → gamma อยู่ใน candidates."""
         from scipy import stats as st
+
         np.random.seed(42)
         vals = st.gamma.rvs(2, size=200)
         candidates = _fit_distributions(vals, st)
@@ -146,6 +148,7 @@ class TestFitDistributions:
     def test_handles_negative_values(self):
         """ข้อมูลติดลบ → ไม่ fit gamma/weibull/lognormal."""
         from scipy import stats as st
+
         np.random.seed(42)
         vals = np.random.randn(100)  # มีค่าติดลบ
         candidates = _fit_distributions(vals, st)
@@ -161,9 +164,11 @@ class TestEndToEndSkewed:
     def test_zero_inflated_column(self):
         """คอลัมน์ zero-inflated → mean ใกล้เคียง."""
         np.random.seed(42)
-        df = pd.DataFrame({
-            "capital_gain": [0] * 180 + list(np.random.lognormal(5, 2, 20)),
-        })
+        df = pd.DataFrame(
+            {
+                "capital_gain": [0] * 180 + list(np.random.lognormal(5, 2, 20)),
+            }
+        )
         synth = generate_synthetic_data(df, random_seed=42)
         real_mean = df["capital_gain"].mean()
         synth_mean = synth["capital_gain"].mean()
