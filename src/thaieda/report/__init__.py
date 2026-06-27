@@ -717,24 +717,16 @@ class ProfileReport:
         """ตัดกราฟที่สำคัญน้อยสุดให้อยู่ในงบทั้งจำนวน (``_MAX_CHARTS_PER_REPORT``) และ
         ขนาดรวม (``_MAX_CHART_BYTES``) — กัน HTML บวมเกิน 2MB หรือกราฟเยอะจนเบราว์เซอร์ค้าง (P2).
 
-        ลำดับการตัด (จากสำคัญน้อยไปมาก): กราฟ value-counts ต่อคอลัมน์ → histogram การกระจาย
-        ต่อคอลัมน์ → ACF/decomposition ของอนุกรมเวลา (เก็บกราฟเส้นไว้) → กราฟต่อคอลัมน์ข้อความ →
-        กราฟเส้นอนุกรมเวลาที่เหลือ. กราฟระดับชุดข้อมูล (correlation/box/violin/missing) และกราฟ
-        insight เชิงธุรกิจจะถูกเก็บไว้เสมอ (สำคัญต่อการตัดสินใจ)
+        ลำดับการตัด (จากสำคัญน้อยไปมา): ACF/decomposition ของอนุกรมเวลา (เก็บกราฟเส้นไว้) →
+        กราฟต่อคอลัมน์ข้อความ → กราฟเส้นอนุกรมเวลาที่เหลือ → กราฟ value-counts/histogram
+        ต่อคอลัมน์ (เก็บไว้สำหรับ Columns tab ให้นานที่สุด). กราฟระดับชุดข้อมูล
+        (correlation/box/violin/missing) และกราฟ insight เชิงธุรกิจจะถูกเก็บไว้เสมอ
         """
         if not self._over_chart_budget():
             return
         dropped = 0
 
-        # 1) ตัด value-counts แล้ว distribution ต่อคอลัมน์ (สำคัญน้อยสุด)
-        for prefix in ("valuecounts::", "distribution::"):
-            for key in [k for k in self._dataset_charts if k.startswith(prefix)]:
-                if not self._over_chart_budget():
-                    break
-                del self._dataset_charts[key]
-                dropped += 1
-
-        # 2) ตัด ACF แล้ว decomposition ของอนุกรมเวลา (เก็บกราฟเส้น 'line' ไว้ — สำคัญสุด)
+        # 1) ตัด ACF แล้ว decomposition ของอนุกรมเวลา (เก็บกราฟเส้นไว้ — สำคัญสุด)
         for sub in ("acf", "decomposition"):
             for col in list(self._timeseries_charts):
                 if not self._over_chart_budget():
@@ -750,6 +742,14 @@ class ProfileReport:
                 if store[col]:
                     dropped += len(store[col])
                     store[col] = {}
+
+        # 4) สุดท้าย ถ้ายังเกิน ตัด value-counts แล้ว distribution ต่อคอลัมน์
+        for prefix in ("valuecounts::", "distribution::"):
+            for key in [k for k in self._dataset_charts if k.startswith(prefix)]:
+                if not self._over_chart_budget():
+                    break
+                del self._dataset_charts[key]
+                dropped += 1
 
         if dropped:
             self._notes.append(
@@ -1704,6 +1704,7 @@ class ProfileReport:
         plotly_heatmap = ""
         try:
             from thaieda.viz._interactive import create_correlation_heatmap_interactive
+
             num_df = self.df.select_dtypes(include="number")
             if len(num_df.columns) >= 2:
                 plotly_heatmap = create_correlation_heatmap_interactive(num_df)

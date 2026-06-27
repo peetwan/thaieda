@@ -493,10 +493,16 @@ def _name_is_id_or_fk(series: pd.Series) -> bool:
     return name == "id" or name.endswith("_id")
 
 
+_ID_LIKE_KEYWORDS = ("postal", "zipcode", "zip_code", "zip")
+
+
 def _name_hints_id(series: pd.Series) -> bool:
-    """ชื่อคอลัมน์บอกใบ้ว่าเป็น ID หรือไม่ (เช่น 'id', 'user_id')."""
+    """ชื่อคอลัมน์บอกใบ้ว่าเป็น ID หรือไม่ (เช่น 'id', 'user_id', 'postal code')."""
     name = str(series.name).lower() if series.name is not None else ""
-    return _name_is_id_or_fk(series) or name.endswith("id")
+    if _name_is_id_or_fk(series) or name.endswith("id"):
+        return True
+    # รหัสไปรษณีย์ (postal code, zip) เป็น identifier ไม่ใช่ measure ทางสถิติ
+    return any(kw in name for kw in _ID_LIKE_KEYWORDS)
 
 
 def _looks_like_id(series: pd.Series, non_null: pd.Series) -> bool:
