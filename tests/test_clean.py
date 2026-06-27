@@ -143,6 +143,31 @@ def test_fix_repeated_chars_skips_product_codes():
     assert result2.rows_affected == 0
 
 
+def test_fix_repeated_chars_protects_embedded_product_codes():
+    # เคสที่ฝังรหัสสินค้าในข้อความยาวๆ ที่ต้องไม่ถูกตัด
+    cases = [
+        ("รหัส AAAA-1111 สินค้าหมด", "รหัส AAAA-1111 สินค้าหมด"),
+        ("สินค้า PROD-00001 ราคา 100", "สินค้า PROD-00001 ราคา 100"),
+        ("SKU-AAAA111 ราคา 555", "SKU-AAAA111 ราคา 555"),
+        ("รหัสสินค้า XXXX-9999 ลดราคา", "รหัสสินค้า XXXX-9999 ลดราคา"),
+        ("อ้างอิง CODE-1111-A ในใบเสร็จ", "อ้างอิง CODE-1111-A ในใบเสร็จ"),
+        ("รหัส AAAA111 และ BBBB222", "รหัส AAAA111 และ BBBB222"),
+        # ข้อความไทยที่ซ้ำยังถูกตัด แต่รหัสสินค้าไม่ถูกตัด
+        ("รหัส AAAA-1111 สินค้าหมดดดด", "รหัส AAAA-1111 สินค้าหมดดด"),
+        # พฤติกรรมเดิมยังทำงานปกติ
+        ("55555", "555"),
+        ("มากกกกกก", "มากกก"),
+        ("ๆๆๆ", "ๆ"),
+    ]
+
+    for inp, expected in cases:
+        s = pd.Series([inp])
+        cleaned, _ = fix_repeated_chars(s, max_repeat=3)
+        got = cleaned.iloc[0]
+        msg = f"Failed for input: {inp!r}, expected {expected!r} but got {got!r}"
+        assert got == expected, msg
+
+
 # ------------------------------------------------------------- tone marks
 def test_fix_tone_mark_stacking():
     s = pd.Series(["น้้ำ", "ปกติ"])

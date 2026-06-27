@@ -340,6 +340,7 @@ def _fix_repeated_str(
     column_name: str | None = None,
     column_type: str | None = None,
 ) -> str:
+    """ยุบอักขระซ้ำและไม้ยมกซ้ำในสตริง โดยข้ามรหัสสินค้าหรือ ID ที่ฝังในข้อความ."""
     if _should_skip_repeated_char_fix(
         text,
         skip_id_like=skip_id_like,
@@ -347,11 +348,37 @@ def _fix_repeated_str(
         column_type=column_type,
     ):
         return text
-    # ยุบไม้ยมกที่ซ้ำ (ๆๆๆ) ให้เหลือตัวเดียว — การเขียน ๆ ซ้ำไม่มีความหมาย
-    text = _YAMOK_REPEAT_RE.sub("ๆ", text)
-    # ยุบอักขระอื่นที่ซ้ำเกิน max_repeat ให้เหลือ max_repeat ตัว (เช่น 55555 -> 555)
+
+    # แยกข้อความเป็น tokens โดยใช้ whitespace
+    tokens = re.split(r"(\s+)", text)
     pattern = re.compile(r"(.)\1{" + str(max_repeat) + r",}")
-    return pattern.sub(lambda m: m.group(1) * max_repeat, text)
+    result_tokens: list[str] = []
+
+    for token in tokens:
+        if not token:
+            continue
+        # ข้าม token ที่เป็น whitespace
+        if not token.strip():
+            result_tokens.append(token)
+            continue
+
+        # ตรวจสอบ ID-like ในระดับ token
+        is_id_like = skip_id_like and bool(
+            _ID_LIKE_RE.match(token)
+            or _HYPHENATED_ID_RE.match(token)
+            or _ALL_CAPS_ID_RE.match(token)
+        )
+
+        if is_id_like:
+            result_tokens.append(token)
+        else:
+            # ยุบไม้ยมกซ้ำ (ๆๆๆ) ให้เหลือตัวเดียว
+            t_fixed = _YAMOK_REPEAT_RE.sub("ๆ", token)
+            # ยุบอักขระซ้ำเกิน max_repeat
+            t_fixed = pattern.sub(lambda m: m.group(1) * max_repeat, t_fixed)
+            result_tokens.append(t_fixed)
+
+    return "".join(result_tokens)
 
 
 def _should_skip_repeated_char_fix(
@@ -395,19 +422,15 @@ def _vec_fix_repeated(
     column_type: str | None = None,
 ) -> pd.Series:
     """รุ่นเวกเตอร์ของ _fix_repeated_str — ยุบไม้ยมกซ้ำ แล้วยุบอักขระซ้ำเกิน max_repeat."""
-    skip = s.map(
-        lambda val: _should_skip_repeated_char_fix(
+    return s.map(
+        lambda val: _fix_repeated_str(
             val,
+            max_repeat,
             skip_id_like=skip_id_like,
             column_name=column_name,
             column_type=column_type,
         )
     )
-    work = s.mask(skip, "")
-    work = work.str.replace(_YAMOK_REPEAT_RE.pattern, "ๆ", regex=True)
-    pattern = r"(.)\1{" + str(max_repeat) + r",}"
-    fixed = work.str.replace(pattern, lambda m: m.group(1) * max_repeat, regex=True)
-    return fixed.where(~skip, s)
 
 
 def fix_repeated_chars(
