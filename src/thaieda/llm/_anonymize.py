@@ -211,6 +211,7 @@ def _replace_ner_entities(
 
     if local_keys:
         import re
+
         # เรียงตามความยาวเพื่อป้องกันการจับคู่ส่วนย่อยก่อนส่วนเต็ม
         local_keys = sorted(list(set(local_keys)), key=len, reverse=True)
         pattern = "|".join(re.escape(k) for k in local_keys)

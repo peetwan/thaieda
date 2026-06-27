@@ -379,9 +379,7 @@ def _gen_categorical(
 # ------------------------------------------------------------------------------
 # Datetime: sample จาก range + frequency
 # ------------------------------------------------------------------------------
-def _gen_datetime(
-    series: pd.Series, n: int, rng: np.random.Generator | None = None
-) -> pd.Series:
+def _gen_datetime(series: pd.Series, n: int, rng: np.random.Generator | None = None) -> pd.Series:
     """สร้าง datetime column จาก date range + frequency pattern."""
     if rng is None:
         rng = np.random.default_rng()
