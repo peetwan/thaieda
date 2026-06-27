@@ -15,8 +15,18 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from thaieda.detect import ColumnType, _detect_language, script_ratio
-from thaieda.quality._thai_id import validate_thai_id, validate_thai_id_column
+from thaieda.detect import (
+    _THAI_PHONE_RE,
+    ColumnType,
+    _clean_phone_str,
+    _detect_language,
+    _name_hints_id,
+    script_ratio,
+)
+from thaieda.detect import (
+    _looks_like_phone_column as _detect_looks_like_phone_column,
+)
+from thaieda.quality._thai_id import check_thai_id, validate_thai_id, validate_thai_id_column
 
 # ----------------------------------------------------------------------------
 # ค่าคงที่
@@ -168,12 +178,20 @@ def check_buddhist_era(
     if len(check_values) == 0:
         return None
 
-    # ตรวจ CE จากค่าทั้งหมด (ไม่ใช่แค่ check_values) เพื่อตัดสินใจ mixed
-    all_year_values = date_like_values + year_only_values
+    year_re = re.compile(r"\b(\d{4})\b")
+    # ตรวจ CE จากทุกค่า (รวม date strings เช่น 2024-02-20) เพื่อตัดสิน mixed → critical
     ce_seen = len(ce_year_values) > 0
+    if not ce_seen:
+        for v in values:
+            for m in year_re.finditer(v):
+                year = int(m.group(1))
+                if 1900 <= year <= 2100:
+                    ce_seen = True
+                    break
+            if ce_seen:
+                break
 
     be_examples: list[str] = []
-    year_re = re.compile(r"\b(\d{4})\b")
 
     # v0.8: vectorize — ใช้ .str.extractall แทนการวนลูป
     try:
@@ -183,6 +201,8 @@ def check_buddhist_era(
         if extracted.empty:
             return None
         years = pd.to_numeric(extracted[0], errors="coerce").dropna()
+        if years.between(1900, 2100).any():
+            ce_seen = True
         be_match_mask = (years >= _BE_MIN) & (years <= _BE_MAX)
         if not be_match_mask.any():
             return None
@@ -214,9 +234,10 @@ def check_buddhist_era(
         if be_count == 0:
             return None
 
+    all_year_values = date_like_values + year_only_values
     total = len(all_year_values) + len(ce_year_values)
     # critical ถ้าปนกัน (ทั้ง พ.ศ. และ ค.ศ.), warning ถ้าเป็น พ.ศ. ล้วน
-    mixed = ce_seen and be_count < total
+    mixed = ce_seen and be_count > 0 and ce_seen
     severity = "critical" if mixed else "warning"
 
     return QualityIssue(
@@ -676,6 +697,17 @@ _TEXT_TYPES = {
     ColumnType.MIXED_TEXT,
     ColumnType.CATEGORICAL,
 }
+# คอลัมน์ที่ควรรัน string-based checks (รวม phone + pandas 3.x str dtype)
+_STRINGISH_TYPES = _TEXT_TYPES | {ColumnType.PHONE_NUMBER}
+
+
+def _is_stringish_column(series: pd.Series, ctype: ColumnType) -> bool:
+    """True ถ้าคอลัมน์เก็บค่าแบบข้อความ (object/str/phone) — รองรับ pandas 3.x str dtype."""
+    return (
+        ctype in _STRINGISH_TYPES
+        or pd.api.types.is_string_dtype(series)
+        or series.dtype == object
+    )
 # ประเภทคอลัมน์ที่อาจมีปี
 _YEAR_TYPES = {ColumnType.NUMERIC, ColumnType.DATETIME}
 
@@ -736,6 +768,157 @@ def check_infinite_values(series: pd.Series, column: str) -> QualityIssue | None
     )
 
 
+# ค่าที่มีตัวเลขพอจะน่าจะเป็นเบอร์ (หลังลบสัญลักษณ์)
+_PHONE_DIGIT_RE = re.compile(r"\d{9,12}")
+_UNIQUE_KEY_RATIO = 0.95
+
+
+def _looks_like_phone_column(series: pd.Series) -> bool:
+    """True ถ้าชื่อหรือค่าบ่งว่าเป็นคอลัมน์เบอร์โทร (ใช้ logic เดียวกับ detect)."""
+    values = _non_null_str(series)
+    if values.empty:
+        return False
+    return _detect_looks_like_phone_column(series, values.head(200).tolist())
+
+
+def check_phone_format(series: pd.Series, column: str) -> QualityIssue | None:
+    """ตรวจเบอร์โทรที่ดูเป็นเบอร์แต่รูปแบบไม่ถูกต้องหลัง normalize."""
+    if not _looks_like_phone_column(series):
+        return None
+    values = _non_null_str(series)
+    if values.empty:
+        return None
+    invalid = 0
+    examples: list[str] = []
+    for val in values:
+        cleaned = _clean_phone_str(val)
+        if _PHONE_DIGIT_RE.search(cleaned) and not _THAI_PHONE_RE.match(cleaned):
+            invalid += 1
+            if len(examples) < 3:
+                examples.append(val)
+    if invalid == 0:
+        return None
+    total = len(values)
+    return QualityIssue(
+        check_name="phone_format",
+        severity="warning",
+        column=column,
+        count=invalid,
+        percentage=_pct(invalid, total),
+        description=f"{invalid} phone-like value(s) do not match Thai phone format (0XXXXXXXXX)",
+        description_th=f"พบ {invalid} ค่าที่ดูเป็นเบอร์โทรแต่รูปแบบไม่ถูก (ควรเป็น 0XXXXXXXXX)",
+        examples=examples,
+        suggestion="Normalize phones with normalize_phone_numbers() or thaieda.clean()",
+        suggestion_th="ทำความสะอาดเบอร์ด้วย normalize_phone_numbers() หรือ thaieda.clean()",
+    )
+
+
+def check_schema_hints(
+    series: pd.Series,
+    column: str,
+    *,
+    ctype: ColumnType,
+) -> QualityIssue | None:
+    """แนะนำ schema hints: near-unique key, dtype mismatch, empty column."""
+    non_null = series.dropna()
+    total = len(series)
+    if total == 0:
+        return None
+
+    if series.isna().all():
+        return QualityIssue(
+            check_name="empty_column",
+            severity="info",
+            column=column,
+            count=total,
+            percentage=100.0,
+            description="Column is entirely empty (100% missing)",
+            description_th="คอลัมน์ว่างทั้งหมด (100% missing)",
+            examples=[],
+            suggestion="Drop this column or investigate why it has no data",
+            suggestion_th="พิจารณาลบคอลัมน์หรือตรวจสอบว่าทำไมไม่มีข้อมูล",
+        )
+
+    n = len(non_null)
+    if n >= 5 and _name_hints_id(series):
+        unique_ratio = non_null.nunique() / n
+        if _UNIQUE_KEY_RATIO <= unique_ratio < 1.0:
+            dup_count = n - int(non_null.nunique())
+            return QualityIssue(
+                check_name="near_unique_key",
+                severity="warning",
+                column=column,
+                count=dup_count,
+                percentage=_pct(dup_count, n),
+                description=(
+                    f"Column name suggests an ID/key but {dup_count} duplicate value(s) exist "
+                    f"({unique_ratio * 100:.1f}% unique)"
+                ),
+                description_th=(
+                    f"ชื่อคอลัมน์บ่งว่าเป็น ID/คีย์ แต่มีค่าซ้ำ {dup_count} รายการ "
+                    f"(unique {unique_ratio * 100:.1f}%)"
+                ),
+                examples=non_null.astype(str).value_counts().head(3).index.tolist(),
+                suggestion="Verify primary key integrity or rename if not an identifier",
+                suggestion_th="ตรวจสอบความ unique ของคีย์หรือเปลี่ยนชื่อถ้าไม่ใช่ identifier",
+            )
+
+    if (
+        ctype != ColumnType.EMPTY
+        and (pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series))
+        and n > 0
+    ):
+        coerced = pd.to_numeric(
+            non_null.astype(str).str.replace(",", "", regex=False),
+            errors="coerce",
+        )
+        numeric_ratio = coerced.notna().sum() / n
+        if numeric_ratio > 0.80:
+            return QualityIssue(
+                check_name="dtype_mismatch",
+                severity="info",
+                column=column,
+                count=int(coerced.notna().sum()),
+                percentage=numeric_ratio * 100.0,
+                description=(
+                    f"{numeric_ratio * 100:.0f}% of values parse as numeric "
+                    "but column is stored as text"
+                ),
+                description_th=(
+                    f"ค่า {numeric_ratio * 100:.0f}% แปลงเป็นตัวเลขได้ แต่คอลัมน์เก็บเป็นข้อความ"
+                ),
+                examples=non_null.astype(str).head(3).tolist(),
+                suggestion="Use coerce_numeric_column() or thaieda.clean() to convert dtype",
+                suggestion_th="ใช้ coerce_numeric_column() หรือ thaieda.clean() เพื่อแปลง dtype",
+            )
+
+    return None
+
+
+def check_duplicate_rows(df: pd.DataFrame) -> QualityIssue | None:
+    """ตรวจแถวซ้ำทั้ง dataset."""
+    n = len(df)
+    if n == 0:
+        return None
+    dup_count = int(df.duplicated(keep=False).sum())
+    if dup_count == 0:
+        return None
+    pct = _pct(dup_count, n)
+    severity = "warning" if pct >= 1.0 else "info"
+    return QualityIssue(
+        check_name="duplicate_rows",
+        severity=severity,
+        column="_dataset_",
+        count=dup_count,
+        percentage=pct,
+        description=f"{dup_count} row(s) involved in duplicate groups ({pct:.1f}%)",
+        description_th=f"พบแถวที่เกี่ยวข้องกับการซ้ำ {dup_count} แถว ({pct:.1f}%)",
+        examples=[],
+        suggestion="Use remove_duplicate_rows() or thaieda.clean(remove_duplicates=True)",
+        suggestion_th="ใช้ remove_duplicate_rows() หรือ thaieda.clean(remove_duplicates=True)",
+    )
+
+
 def run_quality_checks(
     df: pd.DataFrame,
     column_types: dict[str, ColumnType],
@@ -762,6 +945,8 @@ def run_quality_checks(
             issues.append(issue)
 
         if ctype == ColumnType.EMPTY:
+            if (issue := check_schema_hints(series, col_name, ctype=ctype)) is not None:
+                issues.append(issue)
             continue
 
         column_language = str(language_columns.get(col_name, "numeric"))
@@ -788,10 +973,10 @@ def run_quality_checks(
         ):
             issues.append(issue)
 
-        # เลขไทย — ทุกคอลัมน์ที่เป็น string-ish (ข้อความ + อาจเป็นเลขไทยใน object)
+        # เลขไทย — ทุกคอลัมน์ที่เป็น string-ish (ข้อความ/เบอร์ + pandas 3.x str dtype)
         if (
             should_run_thai
-            and (ctype in _TEXT_TYPES or series.dtype == object)
+            and _is_stringish_column(series, ctype)
             and (issue := check_thai_numerals(series, col_name)) is not None
         ):
             issues.append(issue)
@@ -814,7 +999,7 @@ def run_quality_checks(
                 issues.append(issue)
 
         # v0.8: placeholder/dash แทน NaN
-        if (ctype in _TEXT_TYPES or series.dtype == object) and (
+        if _is_stringish_column(series, ctype) and (
             issue := check_placeholder_values(series, col_name)
         ) is not None:
             issues.append(issue)
@@ -822,6 +1007,23 @@ def run_quality_checks(
         # v0.8: constant column (zero variance) — flag เพื่อให้ user รู้ว่าไม่มีประโยชน์
         if (issue := check_constant_column(series, col_name)) is not None:
             issues.append(issue)
+
+        # Thai national ID validation
+        if (
+            issue := check_thai_id(series, col_name, is_id_type=(ctype == ColumnType.ID))
+        ) is not None:
+            issues.append(issue)
+
+        # Phone format validation
+        if (issue := check_phone_format(series, col_name)) is not None:
+            issues.append(issue)
+
+        # Schema hints (near-unique key, dtype mismatch, empty column)
+        if (issue := check_schema_hints(series, col_name, ctype=ctype)) is not None:
+            issues.append(issue)
+
+    if (issue := check_duplicate_rows(df)) is not None:
+        issues.append(issue)
 
     issues.sort(key=lambda i: (SEVERITY_ORDER.get(i.severity, 99), -i.percentage))
     return issues
@@ -1253,13 +1455,16 @@ def fit_distributions(series: pd.Series, column: str) -> DistributionFitResult |
 
 from thaieda.quality._score import (  # noqa: E402 — import หลัง QualityIssue เพื่อเลี่ยง circular import
     QualityBreakdown,
+    QualityComparisonResult,
     QualityScoreResult,
+    compute_quality_comparison,
     compute_quality_score,
 )
 
 __all__ = [
     "QualityIssue",
     "QualityBreakdown",
+    "QualityComparisonResult",
     "QualityScoreResult",
     "MissingMechanismResult",
     "DistributionFitResult",
@@ -1274,9 +1479,14 @@ __all__ = [
     "check_infinite_values",
     "check_placeholder_values",
     "check_constant_column",
+    "check_thai_id",
+    "check_phone_format",
+    "check_schema_hints",
+    "check_duplicate_rows",
     "run_quality_checks",
     "normalize_thai_digits",
     "compute_quality_score",
+    "compute_quality_comparison",
     "validate_thai_id",
     "validate_thai_id_column",
     "detect_missing_mechanism",

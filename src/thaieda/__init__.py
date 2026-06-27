@@ -129,6 +129,40 @@ class EDAResult:
         return self.report.quality_issues
 
     @property
+    def quality_issues_before(self):
+        """ปัญหาคุณภาพก่อนทำความสะอาด (เมื่อ clean=True)."""
+        return self.report.quality_issues_before
+
+    @property
+    def quality_comparison(self):
+        """เปรียบเทียบคุณภาพก่อน/หลัง clean — None ถ้า clean=False."""
+        return self.report.quality_comparison
+
+    @property
+    def quality_score(self):
+        """คะแนนคุณภาพหลัง clean (0–100) — None ถ้าไม่มี comparison."""
+        comparison = self.report.quality_comparison
+        if comparison is None:
+            from thaieda.quality import compute_quality_score
+
+            overview = self.report.overview
+            result = compute_quality_score(
+                self.report.quality_issues,
+                int(overview.get("columns", 0)),
+                int(overview.get("rows", 0)),
+            )
+            return result
+        return {
+            "score": comparison["score_after"],
+            "grade": comparison["grade_after"],
+        }
+
+    @property
+    def cleaning_report(self):
+        """สรุปผล clean() v2.0 — None ถ้า clean=False."""
+        return self.report.cleaning_report
+
+    @property
     def anomalies(self):
         """รายการความผิดปกติที่ตรวจพบ."""
         return self.report.anomalies
@@ -175,6 +209,9 @@ def run(
     df: pd.DataFrame,
     *,
     clean: bool = True,
+    handle_missing: str = "flag",
+    remove_duplicates: bool = True,
+    downcast: bool = True,
     lang: str = "th",
     tokenizer_engine: str = "auto",
     make_charts: bool = True,
@@ -206,6 +243,9 @@ def run(
     Args:
         df: DataFrame ที่จะวิเคราะห์.
         clean: ทำความสะอาดข้อความก่อนวิเคราะห์ (default: True).
+        handle_missing: กลยุทธ์จัดการ missing เมื่อ clean=True (default: "flag").
+        remove_duplicates: ลบแถวซ้ำเมื่อ clean=True (default: True).
+        downcast: ลด dtype เมื่อ clean=True (default: True).
         lang: ภาษาของรายงาน — "th" (default) | "en".
         tokenizer_engine: เครื่องมือตัดคำ — "auto" (default) | "pythainlp" | "nlpo3" | "attacut".
         make_charts: สร้างกราฟ (default: True — ตั้ง False เพื่อความเร็ว).
@@ -254,6 +294,9 @@ def run(
         make_charts=make_charts,
         target_column=target_column,
         clean=clean,
+        handle_missing=handle_missing,
+        remove_duplicates=remove_duplicates,
+        downcast=downcast,
         timeseries=timeseries,
         insights_engine=insights_engine,
         insights_top=insights_top,

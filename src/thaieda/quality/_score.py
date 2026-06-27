@@ -158,8 +158,63 @@ def compute_quality_score(
     )
 
 
+def _count_by_severity(issues: list[QualityIssue]) -> QualityBreakdown:
+    """นับจำนวน issue ตาม severity."""
+    critical_count = sum(1 for i in issues if i.severity == "critical")
+    warning_count = sum(1 for i in issues if i.severity == "warning")
+    info_count = sum(1 for i in issues if i.severity == "info")
+    weighted_score = (
+        critical_count * _SEVERITY_WEIGHTS["critical"]
+        + warning_count * _SEVERITY_WEIGHTS["warning"]
+        + info_count * _SEVERITY_WEIGHTS["info"]
+    )
+    return QualityBreakdown(
+        critical_count=critical_count,
+        warning_count=warning_count,
+        info_count=info_count,
+        weighted_score=weighted_score,
+    )
+
+
+class QualityComparisonResult(TypedDict):
+    """เปรียบเทียบคุณภาพข้อมูลก่อน/หลังทำความสะอาด."""
+
+    before: QualityBreakdown
+    after: QualityBreakdown
+    score_before: int
+    score_after: int
+    grade_before: str
+    grade_after: str
+    fixed_checks: list[str]
+
+
+def compute_quality_comparison(
+    issues_before: list[QualityIssue],
+    issues_after: list[QualityIssue],
+    n_columns: int,
+    n_rows: int,
+) -> QualityComparisonResult:
+    """เปรียบเทียบคะแนนและรายการ check ก่อน/หลัง clean."""
+    score_before = compute_quality_score(issues_before, n_columns, n_rows)
+    score_after = compute_quality_score(issues_after, n_columns, n_rows)
+    before_keys = {(i.check_name, i.column) for i in issues_before}
+    after_keys = {(i.check_name, i.column) for i in issues_after}
+    fixed_checks = sorted(f"{check}:{col}" for check, col in before_keys - after_keys)
+    return QualityComparisonResult(
+        before=_count_by_severity(issues_before),
+        after=_count_by_severity(issues_after),
+        score_before=score_before["score"],
+        score_after=score_after["score"],
+        grade_before=score_before["grade"],
+        grade_after=score_after["grade"],
+        fixed_checks=fixed_checks,
+    )
+
+
 __all__ = [
     "QualityBreakdown",
+    "QualityComparisonResult",
     "QualityScoreResult",
+    "compute_quality_comparison",
     "compute_quality_score",
 ]

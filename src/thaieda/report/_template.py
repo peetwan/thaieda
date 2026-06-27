@@ -714,6 +714,26 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
 
   <!-- TAB: QUALITY -->
   <div id="tab-quality" class="tab-panel">
+  {% if quality_comparison %}
+  <h2 id="quality-comparison">{{ L('quality_before_after') }}</h2>
+  <div class="panel">
+    <table>
+      <tr><th></th><th>{{ L('critical') }}</th><th>{{ L('warning') }}</th><th>{{ L('info') }}</th><th>{{ L('quality_score_before') }}/{{ L('quality_score_after') }}</th></tr>
+      <tr><td>{{ L('before') }}</td><td>{{ quality_comparison.before.critical_count }}</td><td>{{ quality_comparison.before.warning_count }}</td><td>{{ quality_comparison.before.info_count }}</td><td><b>{{ quality_comparison.score_before }}</b> ({{ quality_comparison.grade_before }})</td></tr>
+      <tr><td>{{ L('after') }}</td><td>{{ quality_comparison.after.critical_count }}</td><td>{{ quality_comparison.after.warning_count }}</td><td>{{ quality_comparison.after.info_count }}</td><td><b>{{ quality_comparison.score_after }}</b> ({{ quality_comparison.grade_after }})</td></tr>
+    </table>
+    {% if quality_comparison.fixed_checks %}
+    <div class="note">{{ L('quality_fixed_checks') }}: <span class="mono">{{ quality_comparison.fixed_checks|join(', ') }}</span></div>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if cleaning_plan and cleaning_plan.actions %}
+  <h2 id="cleaning-plan">{{ L('cleaning_plan') }}</h2>
+  <div class="panel">
+    <div><b>{{ L('cleaning_plan_actions') }}:</b> {{ cleaning_plan.actions|join(', ') }}</div>
+    {% if cleaning_plan.skipped %}<div class="ng">{{ L('cleaning_plan_skipped') }}: {{ cleaning_plan.skipped|join(', ') }}</div>{% endif %}
+  </div>
+  {% endif %}
   <!-- ============ QUALITY ISSUES ============ -->
   <h2 id="quality">{{ L('quality_issues') }} <span class="ng">({{ quality_issues|length }})</span></h2>
   {% if quality_issues %}

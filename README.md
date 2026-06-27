@@ -275,6 +275,28 @@ ThaiEDA does not replace generic profiling packages; it complements them by hand
 
 ---
 
+## 📊 Eval & Quality Benchmarks
+
+ThaiEDA ships a reproducible eval suite under [`eval/`](eval/) that measures real library behavior on labeled fixtures (not hand-tuned marketing numbers). Run it with:
+
+```bash
+PYTHONPATH="src" python eval/run_eval.py
+```
+
+Latest results ([full report](eval/results/REPORT.md), thaieda 2.0.0 · pandas 3.0.3):
+
+| Scenario | What it measures | Result |
+| :--- | :--- | :--- |
+| **S1** Thai quality detection | Recall / precision / severity on `dirty-thai-labeled.csv` + clean control | **1.00 / 1.00 / 1.00** ✅ |
+| **S2** Relationship discovery | PK/FK precision & recall on Coffee-Chain fixtures | **P/R/F1 = 1.00** ✅ |
+| **S3** Insight honesty | Noise on random data, determinism, tautology, planted signal | **All pass** ✅ |
+
+The one-liner smoke test (`eval/run_oneliner_smoke.py`) runs `thaieda.run(clean=True, downcast=True)` on all eval fixtures — **12/12 pass**.
+
+Golden regression datasets live in `tests/fixtures/dirty_datasets/` (9 pytest cases).
+
+---
+
 ## 🛠️ Development & Contributing
 
 To run the test suite and verify formatting, use the following commands:

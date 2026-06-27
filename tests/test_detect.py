@@ -192,6 +192,12 @@ def test_normalize_phone_number_thai_numerals():
     assert normalize_phone_number("๐๘๑๒๓๔๕๖๗๘") == "0812345678"
 
 
+def test_normalize_phone_number_int_missing_leading_zero():
+    """CSV อ่าน 0801234567 เป็น int 801234567 — เติม 0 นำหน้า"""
+    assert normalize_phone_number(801234567) == "0801234567"
+    assert normalize_phone_number("801234567") == "0801234567"
+
+
 def test_normalize_phone_number_not_phone():
     """ค่าที่ไม่ใช่เบอร์ → คืนค่าเดิม"""
     assert normalize_phone_number("hello") == "hello"

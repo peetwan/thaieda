@@ -82,6 +82,16 @@ LABELS: dict[str, dict[str, str]] = {
     "icat_timeseries": {"en": "Timeseries", "th": "อนุกรมเวลา"},
     "icat_business": {"en": "Business", "th": "เชิงธุรกิจ"},
     "quality_issues": {"en": "Data Quality Issues", "th": "ปัญหาคุณภาพข้อมูล"},
+    "quality_before_after": {
+        "en": "Data Quality: Before vs After Cleaning",
+        "th": "คุณภาพข้อมูล: ก่อน vs หลังทำความสะอาด",
+    },
+    "quality_score_before": {"en": "Score before", "th": "คะแนนก่อน"},
+    "quality_score_after": {"en": "Score after", "th": "คะแนนหลัง"},
+    "quality_fixed_checks": {"en": "Resolved checks", "th": "รายการที่แก้ไขแล้ว"},
+    "cleaning_plan": {"en": "Cleaning Plan", "th": "แผนการทำความสะอาด"},
+    "cleaning_plan_actions": {"en": "Recommended actions", "th": "การทำความสะอาดที่แนะนำ"},
+    "cleaning_plan_skipped": {"en": "Skipped (not needed)", "th": "ข้าม (ไม่จำเป็น)"},
     # --- v0.6: cross-column insight engine (ข้อค้นพบจากการผสมคอลัมน์) ---
     "business_insights": {
         "en": "Cross-Column Insights",
@@ -153,6 +163,9 @@ LABELS: dict[str, dict[str, str]] = {
     "rows_affected": {"en": "Rows Affected", "th": "แถวที่ได้รับผลกระทบ"},
     "before": {"en": "Before", "th": "ก่อน"},
     "after": {"en": "After", "th": "หลัง"},
+    "critical": {"en": "Critical", "th": "วิกฤต"},
+    "warning": {"en": "Warning", "th": "เตือน"},
+    "info": {"en": "Info", "th": "ข้อมูล"},
     # --- cleaning diff (การทำความสะอาดที่ดำเนินการจริง) ---
     "cleaning_diff": {"en": "Data Cleaning Applied", "th": "การทำความสะอาด"},
     "total_cells_changed": {"en": "Total cells changed", "th": "รวมเซลล์ที่เปลี่ยน"},

@@ -566,6 +566,9 @@ def _clean_phone_str(value: str) -> str:
     s = re.sub(r"[-\s()\.]", "", s)
     if s.startswith("+66"):
         s = "0" + s[3:]
+    # CSV อ่าน 0801234567 เป็น int → 801234567 (9 หลัก) — เติม 0 นำหน้าเบอร์มือถือไทย
+    if s.isdigit() and len(s) == 9 and s[0] in "689":
+        s = "0" + s
     return s
 
 

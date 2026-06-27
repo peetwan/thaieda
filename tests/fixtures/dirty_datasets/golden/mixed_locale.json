@@ -1,0 +1,51 @@
+{
+  "name": "mixed_locale",
+  "rows_before_cleaning": 4,
+  "rows_after_cleaning": 4,
+  "score_before": 80,
+  "score_after": 97,
+  "grade_before": "B",
+  "grade_after": "A",
+  "before_counts": {
+    "critical_count": 0,
+    "warning_count": 1,
+    "info_count": 1,
+    "weighted_score": 1.2
+  },
+  "after_counts": {
+    "critical_count": 0,
+    "warning_count": 0,
+    "info_count": 1,
+    "weighted_score": 0.2
+  },
+  "fixed_checks": [
+    "phone_format:phone"
+  ],
+  "issues_before": [
+    {
+      "check_name": "phone_format",
+      "column": "phone",
+      "severity": "warning",
+      "count": 1
+    },
+    {
+      "check_name": "dtype_mismatch",
+      "column": "amount",
+      "severity": "info",
+      "count": 4
+    }
+  ],
+  "issues_after": [
+    {
+      "check_name": "dtype_mismatch",
+      "column": "amount",
+      "severity": "info",
+      "count": 4
+    }
+  ],
+  "cleaning_plan_actions": [],
+  "cleaning_operations": [
+    "coerce_numeric",
+    "downcast_dtypes"
+  ]
+}

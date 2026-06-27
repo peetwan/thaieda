@@ -129,11 +129,11 @@ class TestCleanOption:
     """ทดสอบการทำความสะอาด."""
 
     def test_clean_true_cleans_dataframe(self, sample_df):
-        """clean=True ต้องทำความสะอาดข้อมูล (เลขไทย → อารบิก)."""
+        """clean=True ต้องทำความสะอาดข้อมูล (เลขไทย → อารบิก + coerce numeric)."""
         result = thaieda.run(sample_df, clean=True)
-        # เลขไทยในคอลัมน์ price ต้องถูกแปลง
-        assert "๑๒๐" not in list(result.cleaned_df["price"])
-        assert "120" in list(result.cleaned_df["price"])
+        # เลขไทยในคอลัมน์ price ต้องถูกแปลง (v2.0 pipeline อาจ coerce เป็น numeric)
+        assert "๑๒๐" not in result.cleaned_df["price"].astype(str).tolist()
+        assert 120 in result.cleaned_df["price"].tolist()
 
     def test_clean_false_preserves_data(self, sample_df):
         """clean=False ต้องไม่แก้ข้อมูล."""
@@ -145,6 +145,19 @@ class TestCleanOption:
         """clean=True ต้องมี cleaning_diff."""
         result = thaieda.run(sample_df, clean=True)
         assert len(result.report.cleaning_diff) >= 1
+
+    def test_clean_has_cleaning_report(self, sample_df):
+        """clean=True ต้องมี cleaning_report จาก clean() v2.0."""
+        result = thaieda.run(sample_df, clean=True, make_charts=False, narrative=False)
+        assert result.cleaning_report is not None
+        assert result.report.cleaning_plan is not None
+
+    def test_clean_has_quality_comparison(self, sample_df):
+        """clean=True ต้องมี quality_comparison ก่อน/หลัง."""
+        result = thaieda.run(sample_df, clean=True, make_charts=False, narrative=False)
+        assert result.quality_comparison is not None
+        assert result.quality_score is not None
+        assert "score" in result.quality_score
 
     def test_clean_duplicate_rows_are_visible_in_overview(self):
         df = pd.DataFrame({"value": ["a", "a", "b"]})
@@ -374,3 +387,29 @@ class TestLanguageOption:
         result = thaieda.run(sample_df, make_charts=False)
         html = result.to_html()
         assert "ภาพรวม" in html
+
+
+# ----------------------------------------------------------------------------
+# 12. clean + downcast บนคอลัมน์วันที่แบบ category (regression)
+# ----------------------------------------------------------------------------
+class TestCategoricalDatetimeDowncast:
+    """หลัง downcast คอลัมน์ date อาจเป็น category — one-liner ต้องไม่ crash."""
+
+    def test_clean_thai_fixture_with_downcast(self):
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parents[1] / "eval" / "fixtures" / "clean-thai.csv"
+        if not path.exists():
+            pytest.skip("eval fixture not present")
+        df = pd.read_csv(path)
+        result = thaieda.run(
+            df,
+            clean=True,
+            downcast=True,
+            make_charts=False,
+            narrative=False,
+            timeseries=False,
+            insights_engine=False,
+        )
+        assert result.overview["rows"] > 0
+        assert result.quality_comparison is not None

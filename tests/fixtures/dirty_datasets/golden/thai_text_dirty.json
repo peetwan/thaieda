@@ -1,0 +1,63 @@
+{
+  "name": "thai_text_dirty",
+  "rows_before_cleaning": 4,
+  "rows_after_cleaning": 4,
+  "score_before": 17,
+  "score_after": 83,
+  "grade_before": "F",
+  "grade_after": "B",
+  "before_counts": {
+    "critical_count": 1,
+    "warning_count": 2,
+    "info_count": 0,
+    "weighted_score": 5.0
+  },
+  "after_counts": {
+    "critical_count": 0,
+    "warning_count": 1,
+    "info_count": 0,
+    "weighted_score": 1.0
+  },
+  "fixed_checks": [
+    "thai_numerals:price",
+    "zero_width_chars:review"
+  ],
+  "issues_before": [
+    {
+      "check_name": "zero_width_chars",
+      "column": "review",
+      "severity": "critical",
+      "count": 1
+    },
+    {
+      "check_name": "thai_numerals",
+      "column": "price",
+      "severity": "warning",
+      "count": 2
+    },
+    {
+      "check_name": "normalization",
+      "column": "review",
+      "severity": "warning",
+      "count": 1
+    }
+  ],
+  "issues_after": [
+    {
+      "check_name": "normalization",
+      "column": "review",
+      "severity": "warning",
+      "count": 1
+    }
+  ],
+  "cleaning_plan_actions": [
+    "zwspace",
+    "numerals"
+  ],
+  "cleaning_operations": [
+    "coerce_numeric",
+    "downcast_dtypes",
+    "normalize_thai_numerals",
+    "remove_zero_width_chars"
+  ]
+}

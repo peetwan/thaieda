@@ -18,18 +18,16 @@ from thaieda import __version__
 from thaieda._validation import ensure_unique_column_names
 from thaieda.analysis import TargetAssociation, analyze_target
 from thaieda.anomaly import AnomalyIssue, detect_anomalies
-from thaieda.clean import (
-    CleaningResult,
-    clean_thai_text,
-    handle_missing_values,
-    remove_duplicate_rows,
-)
+from thaieda.clean import CleaningResult, clean_thai_text
+from thaieda.clean._pipeline import CleaningReport
+from thaieda.clean._pipeline import clean as clean_dataframe
+from thaieda.clean._smart import CleaningPlan, plan_cleaning
 from thaieda.detect import ColumnType, _detect_language, detect_all
 from thaieda.i18n import TECHNICAL_TO_PLAIN, label
 from thaieda.insight import Insight, InsightSummary, generate_insights
 from thaieda.insight_engine import InsightEngineResult, discover_insights
 from thaieda.ner import NERResult, extract_entities, ner_available
-from thaieda.quality import QualityIssue, run_quality_checks
+from thaieda.quality import QualityIssue, compute_quality_comparison, run_quality_checks
 from thaieda.report._template import REPORT_TEMPLATE
 from thaieda.text import TextMetrics, text_metrics
 from thaieda.timeseries import (
@@ -471,6 +469,9 @@ class ProfileReport:
         make_charts: bool = True,
         target_column: str | None = None,
         clean: bool = False,
+        handle_missing: str = "flag",
+        remove_duplicates: bool = True,
+        downcast: bool = True,
         timeseries: bool = True,
         insights_engine: bool = True,
         insights_top: int = 8,
@@ -491,6 +492,9 @@ class ProfileReport:
         self.target_column = target_column
         # clean=True: ทำความสะอาดข้อความก่อนวิเคราะห์ และเก็บ diff (ก่อน/หลัง) ไว้แสดงในรายงาน
         self.clean = clean
+        self.handle_missing = handle_missing
+        self.remove_duplicates = remove_duplicates
+        self.downcast = downcast
         # timeseries=True: ตรวจหา datetime column แล้ววิเคราะห์คอลัมน์ตัวเลขเป็นอนุกรมเวลาอัตโนมัติ
         self.timeseries = timeseries
         # insights_engine=True: ค้นหาข้อค้นพบจากการผสมคอลัมน์ (group-by + aggregate + scoring)
@@ -502,10 +506,14 @@ class ProfileReport:
         self._ran = False
         self._column_types: dict[str, ColumnType] = {}
         self._quality_issues: list[QualityIssue] = []
+        self._quality_issues_before: list[QualityIssue] = []
+        self._quality_comparison: dict[str, Any] | None = None
         self._anomalies: list[AnomalyIssue] = []
         self._cleaning: list[CleaningResult] = []
         # cleaning_diff: การทำความสะอาดที่ "ลงมือทำจริง" (เมื่อ clean=True) — ต่างจาก _cleaning (dry-run)
         self._cleaning_diff: list[CleaningResult] = []
+        self._cleaning_report: CleaningReport | None = None
+        self._cleaning_plan: CleaningPlan | None = None
         self._text_metrics: dict[str, TextMetrics] = {}
         self._ner: dict[str, NERResult] = {}
         self._target_associations: list[TargetAssociation] = []
@@ -592,10 +600,23 @@ class ProfileReport:
     # ------------------------------------------------------------------ run
     def run(self) -> ProfileReport:
         """รันการวิเคราะห์ทั้งหมด (idempotent — เรียกซ้ำได้)."""
-        # ถ้า clean=True ทำความสะอาดข้อความก่อน แล้ววิเคราะห์ข้อมูลที่สะอาดแล้ว (เก็บ diff ไว้แสดง)
         if self.clean:
+            raw_df = self.df.copy()
+            self._emit_progress("prog_detect")
+            pre_data_type = _detect_data_type(raw_df)
+            pre_column_types = detect_all(raw_df)
+            self._emit_progress("prog_quality")
+            self._quality_issues_before = run_quality_checks(
+                raw_df,
+                pre_column_types,
+                language_info=pre_data_type.get("language"),
+            )
+            self._cleaning_plan = plan_cleaning(self.df)
             self._emit_progress("prog_clean")
             self._apply_cleaning()
+        else:
+            self._quality_issues_before = []
+            self._quality_comparison = None
 
         self._emit_progress("prog_detect")
         self._data_type = _detect_data_type(self.df)
@@ -609,6 +630,13 @@ class ProfileReport:
             self._column_types,
             language_info=self._data_type.get("language"),
         )
+        if self.clean:
+            self._quality_comparison = compute_quality_comparison(
+                self._quality_issues_before,
+                self._quality_issues,
+                len(self.df.columns),
+                self._rows_before_cleaning,
+            )
 
         # text metrics
         thai_cols = [c for c, t in self._column_types.items() if t in _TEXT_METRIC_TYPES]
@@ -974,52 +1002,28 @@ class ProfileReport:
         return out
 
     def _apply_cleaning(self) -> None:
-        """ทำความสะอาดข้อมูลจริง — ลบแถวซ้ำ, จัดการ missing, และทำความสะอาดข้อความ.
-
-        ใช้ DEFAULT_OPERATIONS ของ clean_thai_text (แก้ encoding/zw/ช่องว่าง/normalize ฯลฯ)
-        เก็บเฉพาะการดำเนินการที่มีผล (>0 แถว) ไว้ใน self._cleaning_diff เพื่อแสดงก่อน/หลังในรายงาน
-        """
+        """ทำความสะอาดข้อมูลจริงด้วย clean() v2.0 — เก็บ CleaningReport สำหรับ audit."""
         self._rows_before_cleaning = len(self.df)
-        cleaned_df = self.df.copy()
-        diffs: list[CleaningResult] = []
-
         try:
-            cleaned_df, dup_result = remove_duplicate_rows(cleaned_df)
-            if dup_result.rows_affected > 0:
-                diffs.append(dup_result)
-        except Exception as exc:  # noqa: BLE001 — การลบแถวซ้ำพังไม่ควรล้มทั้งรายงาน
-            self._notes.append(f"duplicate-row cleaning failed: {exc}")
-
-        for col in cleaned_df.columns:
-            series = cleaned_df[col]
-            try:
-                cleaned_series, missing_result = handle_missing_values(series, strategy="flag")
-            except Exception as exc:  # noqa: BLE001 — การจัดการ missing พังไม่ควรล้มทั้งรายงาน
-                self._notes.append(f"missing-value cleaning failed for '{col}': {exc}")
-                continue
-            cleaned_df[col] = cleaned_series
-            if missing_result.rows_affected > 0:
-                diffs.append(missing_result)
-
-        for col in cleaned_df.columns:
-            series = cleaned_df[col]
-            # ทำความสะอาดเฉพาะคอลัมน์ข้อความ — ข้ามตัวเลข/วันที่/บูลีน
-            if (
-                pd.api.types.is_numeric_dtype(series)
-                or pd.api.types.is_datetime64_any_dtype(series)
-                or pd.api.types.is_bool_dtype(series)
-            ):
-                continue
-            try:
-                cleaned, results = clean_thai_text(series)
-            except Exception as exc:  # noqa: BLE001 — การทำความสะอาดพังไม่ควรล้มทั้งรายงาน
-                self._notes.append(f"cleaning failed for '{col}' (dtype {series.dtype}): {exc}")
-                continue
-            cleaned_df[col] = cleaned
-            diffs.extend(r for r in results if r.rows_affected > 0)
-        self.df = cleaned_df
-        self._rows_after_cleaning = len(cleaned_df)
-        self._cleaning_diff = diffs
+            cleaned_df, report = clean_dataframe(
+                self.df,
+                handle_missing=self.handle_missing,
+                remove_duplicates=self.remove_duplicates,
+                fix_dates=True,
+                fix_numerals=True,
+                fix_encoding=True,
+                downcast=self.downcast,
+            )
+            self.df = cleaned_df
+            self._cleaning_report = report
+            self._cleaning_diff = report.operations_run
+            self._rows_after_cleaning = report.rows_after
+            for warning in report.warnings:
+                self._notes.append(warning)
+        except Exception as exc:  # noqa: BLE001 — การทำความสะอาดพังไม่ควรล้มทั้งรายงาน
+            self._notes.append(f"data cleaning failed: {exc}")
+            self._rows_after_cleaning = len(self.df)
+            self._cleaning_report = None
 
     def _compute_cleaning_suggestions(self) -> list[CleaningResult]:
         """ลองทำความสะอาดคอลัมน์ข้อความแบบ dry-run และเก็บเฉพาะการดำเนินการที่มีผล (>0 แถว)."""
@@ -1123,8 +1127,10 @@ class ProfileReport:
                 )
         elif ctype == ColumnType.DATETIME:
             # format="mixed": parse แต่ละค่าแยกกัน เลี่ยง UserWarning "Could not infer format" (U1)
-            dt = pd.to_datetime(series, errors="coerce", format="mixed").dropna()
-            if len(dt) > 0:
+            # หลัง downcast คอลัมน์วันที่อาจเป็น category — แปลงเป็น str ก่อน parse
+            # เพื่อไม่ให้ pd.to_datetime คืน category แล้ว .min() พัง (unordered)
+            dt = pd.to_datetime(series.astype(str), errors="coerce", format="mixed").dropna()
+            if len(dt) > 0 and pd.api.types.is_datetime64_any_dtype(dt):
                 stats["min"] = str(dt.min())
                 stats["max"] = str(dt.max())
         elif ctype in (ColumnType.CATEGORICAL, ColumnType.ID):
@@ -1212,6 +1218,30 @@ class ProfileReport:
         return self._cleaning_diff
 
     @property
+    def cleaning_report(self) -> CleaningReport | None:
+        """สรุปผล clean() v2.0 — None ถ้า clean=False หรือ cleaning ล้มเหลว."""
+        self._ensure_ran()
+        return self._cleaning_report
+
+    @property
+    def cleaning_plan(self) -> CleaningPlan | None:
+        """แผนการทำความสะอาดจาก plan_cleaning() — None ถ้า clean=False."""
+        self._ensure_ran()
+        return self._cleaning_plan
+
+    @property
+    def quality_issues_before(self) -> list[QualityIssue]:
+        """ปัญหาคุณภาพก่อนทำความสะอาด (มีค่าเมื่อ clean=True)."""
+        self._ensure_ran()
+        return self._quality_issues_before
+
+    @property
+    def quality_comparison(self) -> dict[str, Any] | None:
+        """เปรียบเทียบคุณภาพก่อน/หลัง clean — None ถ้า clean=False."""
+        self._ensure_ran()
+        return self._quality_comparison
+
+    @property
     def insights(self) -> InsightSummary | None:
         """สรุปข้อค้นพบสำคัญอัตโนมัติ (InsightSummary) — None ถ้ายังไม่ได้รัน."""
         self._ensure_ran()
@@ -1280,11 +1310,22 @@ class ProfileReport:
                 self._insight_engine.to_dict() if self._insight_engine is not None else None
             ),
             "quality_issues": [i.to_dict() for i in self._quality_issues],
+            "quality_issues_before": [i.to_dict() for i in self._quality_issues_before],
             "anomalies": [a.to_dict() for a in self._anomalies],
             "cleaning_suggestions": [c.to_dict() for c in self._cleaning],
             "columns": columns,
             "notes": self._notes,
         }
+        if self._quality_comparison is not None:
+            result["quality_comparison"] = self._quality_comparison
+        if self._cleaning_report is not None:
+            result["cleaning_report"] = self._cleaning_report.to_dict()
+        if self._cleaning_plan is not None:
+            result["cleaning_plan"] = {
+                "actions": self._cleaning_plan.actions,
+                "skipped": self._cleaning_plan.skipped,
+                "details": self._cleaning_plan.details,
+            }
         if self._cleaning_diff:
             result["cleaning_diff"] = [c.to_dict() for c in self._cleaning_diff]
         if self._ner:
@@ -1822,6 +1863,14 @@ class ProfileReport:
                 "most_impactful_rows": top.rows_affected,
             }
 
+        cleaning_plan = None
+        if self._cleaning_plan is not None:
+            cleaning_plan = {
+                "actions": self._cleaning_plan.actions,
+                "skipped": self._cleaning_plan.skipped,
+                "details": self._cleaning_plan.details,
+            }
+
         context = {
             "lang": lang,
             "L": L,
@@ -1839,6 +1888,8 @@ class ProfileReport:
             "insight_section": insight_section,
             "business_section": business_section,
             "quality_issues": quality_issues,
+            "quality_comparison": self._quality_comparison,
+            "cleaning_plan": cleaning_plan,
             "anomalies": anomalies,
             "cleaning_diff": cleaning_diff,
             "cleaning_diff_summary": cleaning_diff_summary,
@@ -1897,6 +1948,9 @@ def profile(
     make_charts: bool = True,
     target_column: str | None = None,
     clean: bool = False,
+    handle_missing: str = "flag",
+    remove_duplicates: bool = True,
+    downcast: bool = True,
     timeseries: bool = True,
     insights_engine: bool = True,
     insights_top: int = 8,
@@ -1916,6 +1970,9 @@ def profile(
         make_charts=make_charts,
         target_column=target_column,
         clean=clean,
+        handle_missing=handle_missing,
+        remove_duplicates=remove_duplicates,
+        downcast=downcast,
         timeseries=timeseries,
         insights_engine=insights_engine,
         insights_top=insights_top,

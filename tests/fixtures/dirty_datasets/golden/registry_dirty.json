@@ -1,0 +1,65 @@
+{
+  "name": "registry_dirty",
+  "rows_before_cleaning": 10,
+  "rows_after_cleaning": 9,
+  "score_before": 56,
+  "score_after": 66,
+  "grade_before": "F",
+  "grade_after": "D",
+  "before_counts": {
+    "critical_count": 1,
+    "warning_count": 1,
+    "info_count": 1,
+    "weighted_score": 4.2
+  },
+  "after_counts": {
+    "critical_count": 1,
+    "warning_count": 0,
+    "info_count": 1,
+    "weighted_score": 3.2
+  },
+  "fixed_checks": [
+    "duplicate_rows:_dataset_"
+  ],
+  "issues_before": [
+    {
+      "check_name": "thai_id",
+      "column": "citizen_id",
+      "severity": "critical",
+      "count": 9
+    },
+    {
+      "check_name": "duplicate_rows",
+      "column": "_dataset_",
+      "severity": "warning",
+      "count": 2
+    },
+    {
+      "check_name": "constant_column",
+      "column": "name",
+      "severity": "info",
+      "count": 10
+    }
+  ],
+  "issues_after": [
+    {
+      "check_name": "thai_id",
+      "column": "citizen_id",
+      "severity": "critical",
+      "count": 8
+    },
+    {
+      "check_name": "constant_column",
+      "column": "name",
+      "severity": "info",
+      "count": 9
+    }
+  ],
+  "cleaning_plan_actions": [
+    "duplicates"
+  ],
+  "cleaning_operations": [
+    "downcast_dtypes",
+    "remove_duplicate_rows"
+  ]
+}

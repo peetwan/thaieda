@@ -147,9 +147,18 @@ def test_clean_flag_produces_diff(sample_df):
 def test_clean_flag_cleans_dataframe(sample_df):
     r = profile(sample_df, clean=True)
     r.run()
-    # เลขไทยในคอลัมน์ price ต้องถูกแปลงเป็นเลขอารบิกแล้ว
-    assert "๑๒๐" not in list(r.df["price"])
-    assert "120" in list(r.df["price"])
+    # เลขไทยในคอลัมน์ price ต้องถูกแปลง (v2.0 pipeline อาจ coerce เป็น numeric)
+    assert "๑๒๐" not in r.df["price"].astype(str).tolist()
+    assert 120 in r.df["price"].tolist()
+
+
+def test_clean_quality_comparison_in_dict(sample_df):
+    r = profile(sample_df, clean=True)
+    assert r.quality_comparison is not None
+    assert r.quality_comparison["score_after"] >= 0
+    d = r.to_dict()
+    assert "quality_comparison" in d
+    assert "quality_issues_before" in d
 
 
 def test_clean_diff_in_html_and_dict(sample_df):

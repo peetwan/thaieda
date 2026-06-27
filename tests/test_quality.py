@@ -8,9 +8,13 @@ from thaieda.detect import ColumnType
 from thaieda.quality import (
     QualityIssue,
     check_buddhist_era,
+    check_duplicate_rows,
     check_keyboard_layout_suspect,
     check_normalization,
+    check_phone_format,
+    check_schema_hints,
     check_script_composition,
+    check_thai_id,
     check_thai_numerals,
     check_zero_width,
     run_quality_checks,
@@ -44,6 +48,14 @@ def test_buddhist_era_in_date_strings():
     issue = check_buddhist_era(s, "date")
     assert issue is not None
     assert issue.count == 3
+
+
+def test_buddhist_era_mixed_date_strings_is_critical():
+    """พ.ศ.ปน ค.ศ. ใน date strings (เช่น 2567-01-15 กับ 2024-02-20) → critical."""
+    s = pd.Series(["2567-01-15", "2023-09-12", "2567-11-02", "2024-02-20"])
+    issue = check_buddhist_era(s, "date")
+    assert issue is not None
+    assert issue.severity == "critical"
 
 
 # ----------------------------------------------------------- Thai numerals
@@ -233,3 +245,91 @@ def test_run_quality_checks_clean_data_few_issues():
     issues = run_quality_checks(df, types)
     # ข้อมูลสะอาด ไม่ควรมีปัญหาวิกฤต
     assert all(i.severity != "critical" for i in issues)
+
+
+# ----------------------------------------------------------- Thai ID
+def test_thai_id_invalid_checksum_critical():
+    s = pd.Series(["1100700000001", "1100700000002"])
+    issue = check_thai_id(s, "citizen_id", is_id_type=False)
+    assert issue is not None
+    assert issue.check_name == "thai_id"
+    assert issue.severity == "critical"
+    assert issue.count == 1
+
+
+def test_thai_id_wrong_format_warning():
+    s = pd.Series(["12345", "67890"])
+    issue = check_thai_id(s, "id_card", is_id_type=False)
+    assert issue is not None
+    assert issue.severity == "warning"
+
+
+def test_thai_id_not_checked_for_unrelated_column():
+    s = pd.Series(["1100700000002"])
+    assert check_thai_id(s, "note", is_id_type=False) is None
+
+
+# ----------------------------------------------------------- duplicate rows
+def test_duplicate_rows_detected():
+    df = pd.DataFrame({"a": [1, 1, 2]})
+    issue = check_duplicate_rows(df)
+    assert issue is not None
+    assert issue.check_name == "duplicate_rows"
+    assert issue.column == "_dataset_"
+
+
+# ----------------------------------------------------------- phone format
+def test_phone_format_invalid():
+    s = pd.Series(["0812345678", "081-234-567", "0999999999"])
+    s.name = "phone"
+    issue = check_phone_format(s, "phone")
+    assert issue is not None
+    assert issue.check_name == "phone_format"
+
+
+def test_phone_format_valid_none():
+    s = pd.Series(["0812345678", "0823456789"])
+    s.name = "mobile"
+    assert check_phone_format(s, "mobile") is None
+
+
+def test_phone_format_int_missing_leading_zero():
+    """CSV อ่าน 0801234567 เป็น int 801234567 — ไม่ควร false positive บนข้อมูลสะอาด."""
+    s = pd.Series([801234567, 812345678, 823456789])
+    s.name = "phone"
+    assert check_phone_format(s, "phone") is None
+
+
+def test_thai_numerals_on_phone_column():
+    """PHONE_NUMBER dtype ต้องถูกตรวจ thai_numerals (pandas 3.x str dtype)."""
+    from thaieda.detect import detect_all
+
+    s = pd.Series(["0812345678", "๐๘-๑๒๓-๔๕๖๗", "0898765432"], dtype="string", name="phone")
+    df = s.to_frame()
+    types = detect_all(df)
+    issues = run_quality_checks(df, types)
+    checks = [i.check_name for i in issues if i.column == "phone"]
+    assert "thai_numerals" in checks
+
+
+# ----------------------------------------------------------- schema hints
+def test_schema_near_unique_key():
+    s = pd.Series(list(range(100)) + [1, 2])
+    s.name = "user_id"
+    issue = check_schema_hints(s, "user_id", ctype=ColumnType.ID)
+    assert issue is not None
+    assert issue.check_name == "near_unique_key"
+
+
+def test_schema_dtype_mismatch():
+    s = pd.Series(["100", "200", "300", "400", "500"])
+    issue = check_schema_hints(s, "amount", ctype=ColumnType.CATEGORICAL)
+    assert issue is not None
+    assert issue.check_name == "dtype_mismatch"
+
+
+def test_schema_empty_column():
+    s = pd.Series([None, None, None])
+    issue = check_schema_hints(s, "empty_col", ctype=ColumnType.EMPTY)
+    assert issue is not None
+    assert issue.check_name == "empty_column"

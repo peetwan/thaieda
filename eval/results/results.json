@@ -1,22 +1,21 @@
 {
   "meta": {
-    "thaieda_version": "0.6.0",
+    "thaieda_version": "2.0.0",
     "pandas_version": "3.0.3"
   },
   "s1_thai_quality": {
-    "recall": 0.8,
+    "recall": 1.0,
     "precision": 1.0,
-    "f1": 0.8889,
+    "f1": 1.0,
     "severity_accuracy": 1.0,
     "true_positives": [
       "city:zero_width_chars",
       "date:buddhist_era",
+      "phone:thai_numerals",
       "price:thai_numerals",
       "product_name:zero_width_chars"
     ],
-    "false_negatives": [
-      "phone:thai_numerals"
-    ],
+    "false_negatives": [],
     "false_positives": [],
     "silent_corruption": {
       "column": "city",
@@ -48,12 +47,8 @@
     "noise_insight_count": 0,
     "noise_comparison_trend": 0,
     "deterministic": true,
-    "tautology_count": 3,
-    "tautology_cards": [
-      "Postal Code ตาม Region (comparison)",
-      "Postal Code ตาม State (comparison)",
-      "Postal Code ตาม State (outstanding)"
-    ],
+    "tautology_count": 0,
+    "tautology_cards": [],
     "tautology_note": "",
     "planted_signal_found": true
   }

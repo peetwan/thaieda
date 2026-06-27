@@ -1,0 +1,103 @@
+{
+  "name": "full_dirty",
+  "rows_before_cleaning": 4,
+  "rows_after_cleaning": 3,
+  "score_before": 0,
+  "score_after": 30,
+  "grade_before": "F",
+  "grade_after": "F",
+  "before_counts": {
+    "critical_count": 3,
+    "warning_count": 4,
+    "info_count": 0,
+    "weighted_score": 13.0
+  },
+  "after_counts": {
+    "critical_count": 2,
+    "warning_count": 1,
+    "info_count": 0,
+    "weighted_score": 7.0
+  },
+  "fixed_checks": [
+    "duplicate_rows:_dataset_",
+    "phone_format:phone",
+    "thai_numerals:price",
+    "zero_width_chars:review"
+  ],
+  "issues_before": [
+    {
+      "check_name": "buddhist_era",
+      "column": "year",
+      "severity": "critical",
+      "count": 3
+    },
+    {
+      "check_name": "thai_id",
+      "column": "citizen_id",
+      "severity": "critical",
+      "count": 2
+    },
+    {
+      "check_name": "zero_width_chars",
+      "column": "review",
+      "severity": "critical",
+      "count": 1
+    },
+    {
+      "check_name": "thai_numerals",
+      "column": "price",
+      "severity": "warning",
+      "count": 3
+    },
+    {
+      "check_name": "duplicate_rows",
+      "column": "_dataset_",
+      "severity": "warning",
+      "count": 2
+    },
+    {
+      "check_name": "normalization",
+      "column": "review",
+      "severity": "warning",
+      "count": 1
+    },
+    {
+      "check_name": "phone_format",
+      "column": "phone",
+      "severity": "warning",
+      "count": 1
+    }
+  ],
+  "issues_after": [
+    {
+      "check_name": "thai_id",
+      "column": "citizen_id",
+      "severity": "critical",
+      "count": 2
+    },
+    {
+      "check_name": "buddhist_era",
+      "column": "year",
+      "severity": "critical",
+      "count": 2
+    },
+    {
+      "check_name": "normalization",
+      "column": "review",
+      "severity": "warning",
+      "count": 1
+    }
+  ],
+  "cleaning_plan_actions": [
+    "zwspace",
+    "numerals",
+    "duplicates"
+  ],
+  "cleaning_operations": [
+    "coerce_numeric",
+    "downcast_dtypes",
+    "normalize_thai_numerals",
+    "remove_duplicate_rows",
+    "remove_zero_width_chars"
+  ]
+}
