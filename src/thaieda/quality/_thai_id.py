@@ -105,18 +105,35 @@ def validate_thai_id_column(series: pd.Series) -> dict:
     }
 
 
-# ชื่อคอลัมน์ที่บ่งว่าเป็นเลขบัตรประชาชน
+# ชื่อคอลัมน์ที่บ่งว่าเป็นเลขบัตรประชาชน (เฉพาะเจาะจง — ไม่ match SeniorCitizen ฯลฯ)
 _ID_COLUMN_NAME_RE = re.compile(
-    r"id_card|citizen|national|เลขบัตร|บัตรประชาชน",
+    r"(?:^|_)(?:id_card|citizen_id|national_id|thai_id|pid|cid)(?:$|_)|"
+    r"เลขบัตร|บัตรประชาชน",
     re.IGNORECASE,
 )
 # ค่าที่ดูเหมือนพยายามเป็นเลขบัตร (มีตัวเลข 10–13 หลัก)
 _ID_ATTEMPT_RE = re.compile(r"^\d{10,13}$")
 
 
+def _is_binary_low_cardinality(series: pd.Series) -> bool:
+    """True ถ้าคอลัมน์เป็น 0/1 หรือ boolean — ไม่ใช่เลขบัตร."""
+    non_null = series.dropna()
+    if non_null.empty or non_null.nunique() > 2:
+        return False
+    if pd.api.types.is_bool_dtype(series):
+        return True
+    if pd.api.types.is_numeric_dtype(series):
+        return True
+    str_vals = non_null.astype(str).str.strip().str.lower()
+    return set(str_vals.unique()).issubset({"0", "1", "true", "false", "yes", "no"})
+
+
 def _should_check_thai_id_column(column: str, series: pd.Series, *, is_id_type: bool) -> bool:
     """True ถ้าคอลัมน์น่าจะเป็นเลขบัตรประชาชน."""
-    if _ID_COLUMN_NAME_RE.search(str(column)):
+    if _is_binary_low_cardinality(series):
+        return False
+    has_name_hint = bool(_ID_COLUMN_NAME_RE.search(str(column)))
+    if has_name_hint:
         return True
     if not is_id_type:
         return False
@@ -124,8 +141,14 @@ def _should_check_thai_id_column(column: str, series: pd.Series, *, is_id_type: 
     if non_null.empty:
         return False
     str_vals = non_null.astype(str).str.strip()
-    digit13 = str_vals.str.match(_ID_RE).sum()
-    return digit13 / len(str_vals) >= 0.30
+    digit13_mask = str_vals.str.match(_ID_RE)
+    digit13_count = int(digit13_mask.sum())
+    if digit13_count / len(str_vals) < 0.30:
+        return False
+    # ต้องมีสัดส่วน checksum ผ่านสูงพอ — กัน false positive จากเลขสุ่ม 13 หลัก
+    sample = str_vals[digit13_mask].head(100)
+    valid = sum(1 for v in sample if validate_thai_id(v))
+    return valid >= max(1, int(len(sample) * 0.5))
 
 
 def check_thai_id(

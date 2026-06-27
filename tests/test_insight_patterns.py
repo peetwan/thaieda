@@ -143,3 +143,23 @@ class TestTargetLeakage:
         res = detect_target_leakage(df, "target")
         scores = [d["score"] for d in res]
         assert scores == sorted(scores, reverse=True)
+
+    def test_suspected_proxy_has_tier_and_severity(self):
+        rng = _rng(9)
+        n = 250
+        target = rng.randint(0, 2, n)
+        feat = target.astype(float) * 1.5 + rng.normal(0, 0.9, n)
+        df = pd.DataFrame({"historical_rate": feat, "target": target})
+        res = detect_target_leakage(df, "target")
+        proxy = [d for d in res if d["kind"] == "suspected_proxy"]
+        if proxy:
+            assert proxy[0]["tier"] == "warning"
+            assert proxy[0]["severity"] == "warning"
+
+    def test_tier_a_has_critical_tier(self):
+        rng = _rng(10)
+        t = rng.normal(size=200)
+        df = pd.DataFrame({"dup": t, "target": t})
+        res = detect_target_leakage(df, "target")
+        assert res[0]["tier"] == "critical"
+        assert res[0]["severity"] == "critical"

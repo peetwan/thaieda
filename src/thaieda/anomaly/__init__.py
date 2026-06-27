@@ -1188,13 +1188,38 @@ def _type_mixing_anomaly(series: pd.Series, col: str) -> AnomalyIssue | None:
     )
 
 
+_NON_DATE_NAME_HINTS = frozenset(
+    {"ticket", "charge", "charges", "amount", "price", "cost", "fee", "code", "num", "number"}
+)
+_DATE_NAME_HINTS = frozenset({"date", "time", "dt", "timestamp", "วันที่", "เวลา"})
+
+
+def _column_suggests_date(col: str) -> bool:
+    name = str(col).strip().lower()
+    return any(h in name for h in _DATE_NAME_HINTS)
+
+
+def _column_suggests_non_date_measure(col: str) -> bool:
+    name = str(col).strip().lower()
+    return any(h in name for h in _NON_DATE_NAME_HINTS) and not _column_suggests_date(col)
+
+
 def _mixed_date_format_anomaly(series: pd.Series, col: str) -> AnomalyIssue | None:
+    if _column_suggests_non_date_measure(col):
+        return None
     items = _positional_items(series)
     total = len(items)
     if total < _MIN_STAT_SAMPLE:
         return None
     date_items = [(pos, v) for pos, v in items if _DATE_LIKE_RE.search(v)]
     if len(date_items) / total < 0.6:
+        return None
+    parsed = pd.to_datetime([v for _, v in date_items], errors="coerce", format="mixed")
+    parse_rate = float(parsed.notna().mean()) if len(date_items) else 0.0
+    if parse_rate < 0.50:
+        return None
+    unique_ratio = series.dropna().nunique() / total
+    if unique_ratio > 0.80 and parse_rate < 0.85:
         return None
     sig_counts: Counter[str] = Counter(_date_signature(v) for _, v in date_items)
     # ต้องมีอย่างน้อย 2 รูปแบบที่ต่างกัน

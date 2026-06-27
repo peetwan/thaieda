@@ -86,18 +86,18 @@ def test_mostly_missing_skips_fill():
 
 
 def test_high_na_warns_but_fills():
-    # 50% ค่าว่าง — ยังเติม แต่แนบคำเตือน > 40%
+    # 50% ค่าว่าง — flag บันทึกแต่ไม่เติม + แนบคำเตือน > 40%
     s = pd.Series([1.0, 2.0, 3.0, 4.0, 5.0, np.nan, np.nan, np.nan, np.nan, np.nan], name="x")
     out, result = handle_missing_values(s, "flag")
     assert "> 40%" in result.description_th
-    assert int(out.isna().sum()) == 0  # ถูกเติมแล้ว
+    assert int(out.isna().sum()) == 5  # คง NaN ไว้
 
 
 def test_normal_na_unchanged_behavior():
-    # < 40% ค่าว่าง — พฤติกรรมเดิม ไม่มีคำเตือน
+    # < 40% ค่าว่าง — flag ไม่เติม ไม่มีคำเตือน mostly_missing
     s = pd.Series([1.0, np.nan, 3.0], name="col")
     out, result = handle_missing_values(s, "flag")
-    assert out.iloc[1] == 0
+    assert pd.isna(out.iloc[1])
     assert "40%" not in result.description_th
     assert "mostly_missing" not in result.description_th
 

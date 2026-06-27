@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import defaultdict
 from collections.abc import Callable
 from typing import Any
 
@@ -26,6 +27,7 @@ from thaieda.detect import ColumnType, _detect_language, detect_all
 from thaieda.i18n import TECHNICAL_TO_PLAIN, label
 from thaieda.insight import Insight, InsightSummary, generate_insights
 from thaieda.insight_engine import InsightEngineResult, discover_insights
+from thaieda.insight_engine._leakage import detect_target_leakage
 from thaieda.ner import NERResult, extract_entities, ner_available
 from thaieda.quality import QualityIssue, compute_quality_comparison, run_quality_checks
 from thaieda.report._template import REPORT_TEMPLATE
@@ -115,6 +117,21 @@ _CONDITIONAL_MISSING_RE = re.compile(
     r"(holiday|event|promotion|promo|campaign|เทศกาล|วันหยุด|เหตุการณ์)",
     re.IGNORECASE,
 )
+_ML_TABULAR_COLUMN_RE = re.compile(
+    r"(click|ctr|impression|campaign|ad_|user_|session|conversion|target|label)",
+    re.IGNORECASE,
+)
+_GROUPABLE_CHECKS = frozenset(
+    {
+        "placeholder_values",
+        "constant_column",
+        "missing_values",
+        "high_null",
+        "thai_numerals",
+        "zero_width_chars",
+    }
+)
+_DISTRIBUTION_INSIGHT_CATEGORIES = frozenset({"distribution", "structure"})
 
 
 def _is_index_artifact_column(name: str) -> bool:
@@ -159,6 +176,11 @@ def _is_low_cardinality_code_or_boolean(series: pd.Series, name: str) -> bool:
 def _is_conditional_missing_column(name: str) -> bool:
     """ชื่อคอลัมน์ที่มักว่างตามเงื่อนไข เช่น holiday_name/event_name."""
     return bool(_CONDITIONAL_MISSING_RE.search(str(name)))
+
+
+def _localized_text(lang: str, *, th: str, en: str) -> str:
+    """เลือกข้อความตามภาษารายงาน."""
+    return en if lang == "en" else th
 
 
 _DATA_TYPE_GUIDANCE: dict[str, dict[str, Any]] = {
@@ -206,10 +228,34 @@ _DATA_TYPE_GUIDANCE: dict[str, dict[str, Any]] = {
         "label": "Mixed Data",
         "label_th": "ข้อมูลผสม",
         "summary": "ข้อมูลนี้มีหลายลักษณะผสมกัน ควรแยกวิเคราะห์ตามกลุ่มคอลัมน์ก่อนสรุปภาพรวม",
+        "summary_en": "This dataset mixes several patterns — analyze column groups separately before drawing conclusions.",
         "focus": [
             "แบ่งคอลัมน์เป็น ID/วันที่/ตัวเลข/ข้อความก่อนทำ EDA",
             "เริ่มจากคุณภาพข้อมูลและความหมายของคีย์หลัก",
             "เลือกกราฟและสถิติตามชนิดคอลัมน์ ไม่ใช้วิธีเดียวกับทุกคอลัมน์",
+        ],
+        "focus_en": [
+            "Split columns into ID/date/numeric/text before EDA",
+            "Start with data quality and primary key meaning",
+            "Pick charts and stats by column type — one size does not fit all",
+        ],
+    },
+    "ml_tabular": {
+        "label": "ML Tabular Data",
+        "label_th": "ข้อมูลตารางสำหรับ ML",
+        "summary": "ข้อมูลนี้เหมาะกับการสร้างโมเดลตาราง — มี target, ฟีเจอร์หลายคอลัมน์ และมักเป็น event/impression rows",
+        "summary_en": "This looks like tabular ML data — a target column, many features, and event/impression-style rows.",
+        "focus": [
+            "ตรวจ target leakage และ baseline (CTR/class balance) ก่อนเทรน",
+            "ตัด ID columns และฟีเจอร์ที่สัมพันธ์กับ target สูงเกินจริง",
+            "แยก train/validation ตามเวลาเมื่อมี datetime — อย่า shuffle มั่ว",
+            "จัดการ missing/placeholder ก่อน feature engineering",
+        ],
+        "focus_en": [
+            "Check target leakage and baseline (CTR/class balance) before training",
+            "Drop ID columns and features that correlate suspiciously with the target",
+            "Use time-based train/validation splits when datetime exists",
+            "Handle missing values and placeholders before feature engineering",
         ],
     },
 }
@@ -232,7 +278,11 @@ def _plain_language(text: str) -> str:
     return out
 
 
-def _detect_data_type(df: pd.DataFrame) -> dict[str, Any]:
+def _detect_data_type(
+    df: pd.DataFrame,
+    target_column: str | None = None,
+    lang: str = "th",
+) -> dict[str, Any]:
     """จำแนกประเภทข้อมูลก่อน EDA เพื่อบอกคนอ่านว่าควรสำรวจแบบไหน.
 
     ใช้ heuristic จากชื่อคอลัมน์ + dtype + รูปแบบข้อมูล โดยตั้งใจให้ conservative:
@@ -334,7 +384,28 @@ def _detect_data_type(df: pd.DataFrame) -> dict[str, Any]:
         "registry": 0,
         "survey": 0,
         "timeseries": 0,
+        "ml_tabular": 0,
     }
+
+    if target_column and target_column in df.columns:
+        scores["ml_tabular"] += 4
+        target_vals = df[target_column].dropna()
+        nunique_target = int(target_vals.nunique()) if len(target_vals) else 0
+        if nunique_target <= 2:
+            scores["ml_tabular"] += 3
+        elif nunique_target <= 10:
+            scores["ml_tabular"] += 1
+    if len(id_cols) >= 2:
+        scores["ml_tabular"] += 2
+    elif id_cols:
+        scores["ml_tabular"] += 1
+    feature_like = [c for c in col_names if c not in id_cols and c != target_column]
+    if len(feature_like) >= 5:
+        scores["ml_tabular"] += 2
+    if rows >= 100:
+        scores["ml_tabular"] += 1
+    if any(_ML_TABULAR_COLUMN_RE.search(c) for c in col_names):
+        scores["ml_tabular"] += 2
 
     if transaction_cols:
         scores["transaction"] += 3
@@ -383,16 +454,19 @@ def _detect_data_type(df: pd.DataFrame) -> dict[str, Any]:
 
     best_type, best_score = max(scores.items(), key=lambda kv: kv[1])
     strong_types = [k for k, v in scores.items() if v >= 5]
-    if best_score < 4 or (
+    if target_column and scores.get("ml_tabular", 0) >= 6:
+        best_type = "ml_tabular"
+    elif best_score < 4 or (
         len(strong_types) >= 2 and max(scores.values()) - sorted(scores.values())[-2] <= 1
     ):
         best_type = "mixed"
 
     config = _DATA_TYPE_GUIDANCE[best_type]
-    focus = list(config["focus"])
+    focus = list(config.get("focus_en" if lang == "en" else "focus", config["focus"]))
     thai_recommendations: list[str] = []
     language_impact = ""
-    if detected_language == "thai":
+    show_thai_specific = detected_language in {"thai", "mixed"} and lang != "en"
+    if detected_language == "thai" and lang != "en":
         thai_recommendations = [
             "เปิดการตรวจปี พ.ศ. และการแปลงศักราชให้สม่ำเสมอ",
             "ตรวจเลขไทย (๐–๙) และ normalize เป็นเลขอารบิกก่อนคำนวณ",
@@ -401,17 +475,23 @@ def _detect_data_type(df: pd.DataFrame) -> dict[str, Any]:
         language_impact = (
             "ข้อมูลมีภาษาไทยเด่น จึงเปิด Thai-specific checks เช่น พ.ศ., เลขไทย และ normalization"
         )
-    elif detected_language == "mixed":
+    elif detected_language == "mixed" and lang != "en":
         thai_recommendations = [
             "ตรวจทั้งกติกาภาษาไทยและอังกฤษ เพราะข้อมูลมีสองภาษา",
             "แยกคอลัมน์ไทย/อังกฤษก่อนทำ text analytics หรือ tokenization",
             "ตรวจ พ.ศ., เลขไทย, encoding และรูปแบบวันที่ทั้งสองภาษา",
         ]
         language_impact = "ข้อมูลผสมไทย+อังกฤษ ควรตรวจคุณภาพและทำความสะอาดทั้งสองภาษา"
-    elif detected_language == "english":
-        language_impact = "ข้อมูลเป็นอังกฤษล้วน จึงข้าม Thai-specific checks อัตโนมัติ"
+    elif detected_language == "english" or lang == "en":
+        language_impact = "English-only data — Thai-specific checks are skipped automatically."
+        if lang == "th":
+            language_impact = "ข้อมูลเป็นอังกฤษล้วน จึงข้าม Thai-specific checks อัตโนมัติ"
     else:
-        language_impact = "ไม่พบข้อความชัดเจน เน้นวิเคราะห์ตัวเลข/วันที่และข้าม Thai-specific checks"
+        language_impact = (
+            "No clear text detected — focus on numeric/date columns; Thai checks skipped."
+            if lang == "en"
+            else "ไม่พบข้อความชัดเจน เน้นวิเคราะห์ตัวเลข/วันที่และข้าม Thai-specific checks"
+        )
     if thai_recommendations:
         focus.extend(thai_recommendations)
 
@@ -438,12 +518,14 @@ def _detect_data_type(df: pd.DataFrame) -> dict[str, Any]:
         "key": best_type,
         "label": config["label"],
         "label_th": config["label_th"],
-        "summary": config["summary"],
+        "summary": config.get("summary_en" if lang == "en" else "summary", config["summary"]),
+        "summary_th": config["summary"],
+        "summary_en": config.get("summary_en", config["summary"]),
         "focus": focus,
         "language": language_info,
         "language_impact": language_impact,
-        "thai_recommendations": thai_recommendations,
-        "show_thai_specific": detected_language in {"thai", "mixed"},
+        "thai_recommendations": thai_recommendations if show_thai_specific else [],
+        "show_thai_specific": show_thai_specific,
         "evidence": evidence[:5],
         "scores": scores,
         "signals": {
@@ -454,6 +536,124 @@ def _detect_data_type(df: pd.DataFrame) -> dict[str, Any]:
             "text_columns": text_response_cols,
             "index_artifact_columns": index_artifact_cols,
         },
+    }
+
+
+def _build_target_baseline(df: pd.DataFrame, target_col: str, lang: str = "th") -> dict[str, Any] | None:
+    """สรุป baseline ของ target — CTR/class balance สำหรับ binary targets."""
+    if target_col not in df.columns:
+        return None
+    series = df[target_col].dropna()
+    if series.empty:
+        return None
+    n = int(len(series))
+    vc = series.value_counts()
+    is_binary = int(vc.shape[0]) == 2
+    class_counts = [(str(k), int(v)) for k, v in vc.head(10).items()]
+    out: dict[str, Any] = {
+        "target_column": target_col,
+        "n_non_null": n,
+        "n_unique": int(series.nunique()),
+        "is_binary": is_binary,
+        "class_counts": class_counts,
+    }
+    if is_binary:
+        # Positive rate = P(positive class), e.g. CTR for clicked=True — not majority-class share.
+        if pd.api.types.is_bool_dtype(series):
+            rate = float(series.mean())
+        else:
+            num = pd.to_numeric(series, errors="coerce")
+            if num.notna().all() and int(num.nunique()) == 2:
+                rate = float(num.mean())
+            else:
+                _POS = {1, True, "1", "true", "True", "yes", "Yes", "Y", "y"}
+                _NEG = {0, False, "0", "false", "False", "no", "No", "N", "n"}
+                vals = set(vc.index)
+                if vals & _POS:
+                    rate = float(sum(vc.get(v, 0) for v in vals if v in _POS)) / n
+                elif vals & _NEG:
+                    rate = float(sum(vc.get(v, 0) for v in vals if v not in _NEG)) / n
+                else:
+                    rate = float(vc.iloc[-1]) / n  # minority as positive fallback
+        out["positive_rate_pct"] = round(rate * 100.0, 2)
+        out["minority_rate_pct"] = round((1.0 - rate) * 100.0, 2)
+        if 0.4 <= rate <= 0.6:
+            balance = "balanced"
+            balance_th = "สมดุล"
+        else:
+            balance = "imbalanced"
+            balance_th = "ไม่สมดุล"
+        out["balance"] = balance
+        out["balance_label"] = balance if lang == "en" else balance_th
+    return out
+
+
+def _build_modeling_blueprint_context(
+    df: pd.DataFrame,
+    *,
+    target_column: str,
+    lang: str,
+    column_types: dict[str, ColumnType],
+    target_associations: list[TargetAssociation],
+    leakage_findings: list[dict[str, Any]],
+    target_baseline: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """ประกอบ context สำหรับส่วน Modeling Blueprint ใน HTML."""
+    id_cols = sorted(
+        str(c)
+        for c in df.columns
+        if _is_id_like_column(str(c), column_types.get(str(c)))
+        and str(c) != target_column
+    )
+    leakage_features = {str(f["feature"]) for f in leakage_findings}
+    strong: list[dict[str, Any]] = []
+    for assoc in target_associations:
+        col = assoc.column
+        if col == target_column or col in id_cols or col in leakage_features:
+            continue
+        score = assoc.effect_size or abs(assoc.score or 0.0)
+        if score < 0.05:
+            continue
+        strong.append(
+            {
+                "column": col,
+                "association_type": assoc.association_type,
+                "score": assoc.score,
+                "effect_size": assoc.effect_size,
+                "description": assoc.description_th,
+            }
+        )
+        if len(strong) >= 8:
+            break
+
+    next_steps_th = [
+        "ตัดคอลัมน์ ID และฟีเจอร์ที่สงสัย leakage ออกจากชุดฟีเจอร์",
+        "จัดการค่าว่างและ placeholder ตามที่รายงานด้านคุณภาพ",
+        "แยกชุด train/validation (แบบตามเวลาถ้ามี datetime)",
+        "เทียบ baseline โมเดลกับอัตรา positive/CTR ก่อนเพิ่มความซับซ้อน",
+    ]
+    next_steps_en = [
+        "Drop ID columns and leakage suspects from the feature set",
+        "Handle missing values and placeholders flagged in quality checks",
+        "Split train/validation (time-based when datetime exists)",
+        "Benchmark against the target baseline before adding model complexity",
+    ]
+    if leakage_findings:
+        next_steps_th.insert(0, "ตรวจสอบฟีเจอร์ที่สงสัย leakage ด้วยตา — อย่าใช้เป็นฟีเจอร์เทรน")
+        next_steps_en.insert(0, "Manually review leakage suspects — do not use as features")
+
+    return {
+        "target_baseline": target_baseline,
+        "leakage": [
+            {
+                **f,
+                "description": f["description_en"] if lang == "en" else f["description_th"],
+            }
+            for f in leakage_findings
+        ],
+        "strong_features": strong,
+        "columns_to_drop": id_cols,
+        "next_steps": next_steps_en if lang == "en" else next_steps_th,
     }
 
 
@@ -476,12 +676,15 @@ class ProfileReport:
         insights_engine: bool = True,
         insights_top: int = 8,
         progress: Callable[[str], None] | None = None,
+        report_mode: str = "explore",
     ) -> None:
         if not isinstance(df, pd.DataFrame):
             raise TypeError("ProfileReport expects a pandas DataFrame.")
         ensure_unique_column_names(df, context="ProfileReport")
         if target_column is not None and target_column not in df.columns:
             raise KeyError(f"target_column {target_column!r} not found in DataFrame.")
+        if report_mode not in {"explore", "blueprint"}:
+            raise ValueError(f"report_mode must be 'explore' or 'blueprint', got {report_mode!r}")
         self.df = df
         self._rows_before_cleaning = len(df)
         self._rows_after_cleaning = len(df)
@@ -500,10 +703,14 @@ class ProfileReport:
         # insights_engine=True: ค้นหาข้อค้นพบจากการผสมคอลัมน์ (group-by + aggregate + scoring)
         self.insights_engine = insights_engine
         self.insights_top = insights_top
+        self.report_mode = report_mode
         # progress: callback(ข้อความ) เรียกระหว่างแต่ละขั้นตอน — ใช้แสดงความคืบหน้าบนไฟล์ใหญ่
         self._progress_cb = progress
 
         self._ran = False
+        self._raw_overview: dict[str, Any] | None = None
+        self._leakage_findings: list[dict[str, Any]] = []
+        self._target_baseline: dict[str, Any] | None = None
         self._column_types: dict[str, ColumnType] = {}
         self._quality_issues: list[QualityIssue] = []
         self._quality_issues_before: list[QualityIssue] = []
@@ -602,8 +809,9 @@ class ProfileReport:
         """รันการวิเคราะห์ทั้งหมด (idempotent — เรียกซ้ำได้)."""
         if self.clean:
             raw_df = self.df.copy()
+            self._raw_overview = self._compute_overview_for_df(raw_df)
             self._emit_progress("prog_detect")
-            pre_data_type = _detect_data_type(raw_df)
+            pre_data_type = _detect_data_type(raw_df, target_column=self.target_column, lang=self.lang)
             pre_column_types = detect_all(raw_df)
             self._emit_progress("prog_quality")
             self._quality_issues_before = run_quality_checks(
@@ -617,9 +825,12 @@ class ProfileReport:
         else:
             self._quality_issues_before = []
             self._quality_comparison = None
+            self._raw_overview = self._compute_overview_for_df(self.df)
 
         self._emit_progress("prog_detect")
-        self._data_type = _detect_data_type(self.df)
+        self._data_type = _detect_data_type(
+            self.df, target_column=self.target_column, lang=self.lang
+        )
         self._column_types = detect_all(self.df)
         self._refine_column_types_for_report()
         self._mark_ignored_columns()
@@ -800,6 +1011,13 @@ class ProfileReport:
         """
         if not self.timeseries:
             return
+        if self.report_mode == "blueprint" or self._data_type.get("key") == "ml_tabular":
+            self._notes.append(
+                "timeseries analysis skipped (blueprint/ml_tabular — event rows are not a time series)"
+                if self.lang == "en"
+                else "ข้าม timeseries (blueprint/ml_tabular — แถว event ไม่ใช่อนุกรมเวลา)"
+            )
+            return
         try:
             ts_cols = detect_timeseries_columns(self.df)
         except Exception as exc:  # noqa: BLE001 — การตรวจ timeseries พังไม่ควรล้มทั้งรายงาน
@@ -965,9 +1183,18 @@ class ProfileReport:
             return
         try:
             self._target_associations = analyze_target(self.df, self.target_column)
-        except Exception as exc:  # noqa: BLE001 — การวิเคราะห์ target พังไม่ควรล้มทั้งรายงาน
+        except Exception as exc:  # noqa: BLE001
             self._notes.append(f"target analysis failed: {exc}")
             self._target_associations = []
+        try:
+            self._target_baseline = _build_target_baseline(
+                self.df, self.target_column, lang=self.lang
+            )
+            self._leakage_findings = detect_target_leakage(self.df, self.target_column)
+        except Exception as exc:  # noqa: BLE001
+            self._notes.append(f"target leakage detection failed: {exc}")
+            self._target_baseline = None
+            self._leakage_findings = []
 
     def _compute_insight_engine(self) -> None:
         """ค้นหาข้อค้นพบจากการผสมคอลัมน์ (group-by + aggregate + statistical scoring)."""
@@ -1072,21 +1299,28 @@ class ProfileReport:
             return None
 
     # -------------------------------------------------------------- compute
-    def _compute_overview(self) -> dict[str, Any]:
-        df = self.df
+    def _compute_overview_for_df(self, df: pd.DataFrame) -> dict[str, Any]:
+        """ภาพรวมพื้นฐานของ DataFrame — ใช้ทั้งก่อนและหลัง clean."""
         rows, cols = df.shape
         total_cells = int(rows * cols)
         missing = int(df.isna().sum().sum())
-        type_counts: dict[str, int] = {}
-        for t in self._column_types.values():
-            type_counts[t.value] = type_counts.get(t.value, 0) + 1
         return {
-            "rows": int(rows),
-            "columns": int(cols),
+            "rows": rows,
+            "columns": cols,
             "total_cells": total_cells,
             "missing_cells": missing,
             "missing_pct": round((missing / total_cells * 100.0) if total_cells else 0.0, 2),
             "duplicate_rows": int(df.duplicated().sum()),
+        }
+
+    def _compute_overview(self) -> dict[str, Any]:
+        df = self.df
+        base = self._compute_overview_for_df(df)
+        type_counts: dict[str, int] = {}
+        for t in self._column_types.values():
+            type_counts[t.value] = type_counts.get(t.value, 0) + 1
+        overview = {
+            **base,
             "rows_before_cleaning": int(self._rows_before_cleaning),
             "rows_after_cleaning": int(self._rows_after_cleaning),
             "rows_removed_by_cleaning": int(
@@ -1095,6 +1329,10 @@ class ProfileReport:
             "ignored_columns": sorted(self._ignored_columns),
             "type_counts": type_counts,
         }
+        if self._raw_overview is not None:
+            overview["raw_missing_cells"] = int(self._raw_overview.get("missing_cells", 0))
+            overview["raw_missing_pct"] = float(self._raw_overview.get("missing_pct", 0.0))
+        return overview
 
     def _compute_basic_stats(self, col: str) -> dict[str, Any]:
         series = self.df[col]
@@ -1301,6 +1539,7 @@ class ProfileReport:
 
         result = {
             "thaieda_version": __version__,
+            "report_mode": self.report_mode,
             "overview": self._overview,
             "data_type": self._data_type,
             "key_findings": self._top_findings(),
@@ -1339,6 +1578,8 @@ class ProfileReport:
             result["target_analysis"] = {
                 "target_column": self.target_column,
                 "associations": [a.to_dict() for a in self._target_associations],
+                "baseline": self._target_baseline,
+                "leakage": self._leakage_findings,
             }
         return result
 
@@ -1366,8 +1607,10 @@ class ProfileReport:
     # ---------------------------------------------------------- render helpers
     def _build_report_summary(self) -> dict[str, Any]:
         """สรุปสุขภาพข้อมูลแบบภาษาคนอ่าน — ใช้เปิดรายงานแทนตัวเลขล้วน."""
+        lang = self.lang
         rows = int(self._overview.get("rows", 0))
         missing_pct = float(self._overview.get("missing_pct", 0.0))
+        raw_missing_pct = float(self._overview.get("raw_missing_pct", missing_pct))
         duplicate_rows = int(self._overview.get("duplicate_rows", 0))
         duplicate_pct = round((duplicate_rows / rows * 100.0) if rows else 0.0, 2)
 
@@ -1375,26 +1618,165 @@ class ProfileReport:
         critical_count += sum(1 for a in self._anomalies if a.severity == "critical")
         warning_count = sum(1 for i in self._quality_issues if i.severity == "warning")
         warning_count += sum(1 for a in self._anomalies if a.severity == "warning")
+        warning_count += sum(
+            1 for f in self._leakage_findings if f.get("severity") == "warning"
+        )
 
-        if critical_count or missing_pct >= 30:
+        summary_missing = raw_missing_pct if self.clean else missing_pct
+        placeholder_warning = self._high_placeholder_rate()
+
+        if (
+            critical_count
+            or summary_missing >= 30
+            or duplicate_pct >= 10
+            or any(f.get("tier") == "critical" for f in self._leakage_findings)
+        ):
             status = "critical"
-            verdict = "ควรแก้ประเด็นสำคัญก่อนใช้ตัดสินใจจริง"
-        elif warning_count or missing_pct >= 5 or duplicate_pct >= 1:
+            if critical_count and summary_missing >= 30:
+                verdict = _localized_text(
+                    lang,
+                    th=f"พบประเด็นวิกฤต {critical_count} เรื่อง และค่าว่างสูง ({summary_missing:.1f}%) — แก้ก่อนใช้งาน",
+                    en=f"{critical_count} critical issue(s) and high missing rate ({summary_missing:.1f}%) — fix before use.",
+                )
+            elif critical_count:
+                verdict = _localized_text(
+                    lang,
+                    th=f"พบประเด็นวิกฤต {critical_count} เรื่อง — ควรแก้ก่อนใช้ตัดสินใจจริง",
+                    en=f"{critical_count} critical issue(s) found — fix before using this data.",
+                )
+            elif duplicate_pct >= 10:
+                verdict = _localized_text(
+                    lang,
+                    th=f"แถวซ้ำสูง ({duplicate_pct:.1f}%) — ตรวจ dedup ก่อนวิเคราะห์",
+                    en=f"High duplicate rate ({duplicate_pct:.1f}%) — deduplicate before analysis.",
+                )
+            elif summary_missing >= 30:
+                verdict = _localized_text(
+                    lang,
+                    th=f"ค่าว่างสูง ({summary_missing:.1f}%) — ควรจัดการ missing ก่อนใช้งาน",
+                    en=f"High missing rate ({summary_missing:.1f}%) — handle missing values first.",
+                )
+            else:
+                verdict = _localized_text(
+                    lang,
+                    th="พบสัญญาณ target leakage รุนแรง — ตรวจฟีเจอร์ก่อนสร้างโมเดล",
+                    en="Severe target leakage detected — review features before modeling.",
+                )
+        elif (
+            warning_count
+            or summary_missing >= 5
+            or duplicate_pct >= 1
+            or placeholder_warning
+            or any(f.get("severity") == "warning" for f in self._leakage_findings)
+        ):
             status = "warning"
-            verdict = "ข้อมูลใช้ต่อได้ แต่ควรตรวจจุดที่เตือนก่อนวิเคราะห์เชิงลึก"
+            if any(f.get("kind") == "suspected_proxy" for f in self._leakage_findings):
+                verdict = _localized_text(
+                    lang,
+                    th="มีฟีเจอร์ที่อาจเป็น proxy/leakage — ตรวจก่อนเทรนโมเดล",
+                    en="Some features may be proxies/leakage — review before training.",
+                )
+            elif warning_count:
+                verdict = _localized_text(
+                    lang,
+                    th=f"พบจุดเตือน {warning_count} เรื่อง — ใช้ต่อได้แต่ควรตรวจก่อนเชิงลึก",
+                    en=f"{warning_count} warning(s) found — usable but review before deep analysis.",
+                )
+            elif summary_missing >= 5:
+                verdict = _localized_text(
+                    lang,
+                    th=f"ค่าว่างปานกลาง ({summary_missing:.1f}%) — ตรวจ missing ก่อนวิเคราะห์",
+                    en=f"Moderate missing rate ({summary_missing:.1f}%) — check missing values.",
+                )
+            elif duplicate_pct >= 1:
+                verdict = _localized_text(
+                    lang,
+                    th=f"มีแถวซ้ำ {duplicate_pct:.1f}% — พิจารณา dedup",
+                    en=f"Duplicate rows at {duplicate_pct:.1f}% — consider deduplication.",
+                )
+            else:
+                verdict = _localized_text(
+                    lang,
+                    th="ข้อมูลใช้ต่อได้ แต่ควรตรวจจุดที่เตือนก่อนวิเคราะห์เชิงลึก",
+                    en="Usable with caution — review warnings before deep analysis.",
+                )
         else:
             status = "good"
-            verdict = "ข้อมูลโดยรวมดูพร้อมใช้ ไม่พบประเด็นเร่งด่วน"
+            verdict = _localized_text(
+                lang,
+                th="ข้อมูลโดยรวมดูพร้อมใช้ ไม่พบประเด็นเร่งด่วน",
+                en="Overall data health looks good — no urgent issues found.",
+            )
 
-        highlights = [
-            f"มีข้อมูล {rows:,} แถว × {self._overview.get('columns', 0)} คอลัมน์",
-            f"ค่าว่าง {missing_pct:.2f}% ของข้อมูลทั้งหมด",
-            f"แถวซ้ำ {duplicate_rows:,} แถว ({duplicate_pct:.2f}%)",
-        ]
+        cols = self._overview.get("columns", 0)
+        if lang == "en":
+            highlights = [
+                f"{rows:,} rows × {cols} columns",
+                f"Missing {raw_missing_pct:.2f}% of all cells"
+                + (
+                    f" (after clean: {missing_pct:.2f}%)"
+                    if self.clean and abs(raw_missing_pct - missing_pct) > 0.01
+                    else ""
+                ),
+                f"{duplicate_rows:,} duplicate rows ({duplicate_pct:.2f}%)",
+            ]
+        else:
+            highlights = [
+                f"มีข้อมูล {rows:,} แถว × {cols} คอลัมน์",
+                f"ค่าว่างดิบ {raw_missing_pct:.2f}% ของข้อมูลทั้งหมด"
+                + (
+                    f" (หลัง clean: {missing_pct:.2f}%)"
+                    if self.clean and abs(raw_missing_pct - missing_pct) > 0.01
+                    else ""
+                ),
+                f"แถวซ้ำ {duplicate_rows:,} แถว ({duplicate_pct:.2f}%)",
+            ]
+        if self._target_baseline and self._target_baseline.get("is_binary"):
+            rate = self._target_baseline.get("positive_rate_pct")
+            bal = self._target_baseline.get("balance_label", "")
+            highlights.append(
+                f"Target baseline: {rate}% positive ({bal})"
+                if lang == "en"
+                else f"ฐานเป้าหมาย: positive {rate}% ({bal})"
+            )
+        if self._data_type.get("key") == "ml_tabular" and self.target_column:
+            n_assoc = sum(
+                1
+                for a in self._target_associations
+                if (a.effect_size or abs(a.score or 0.0)) >= 0.05
+            )
+            if n_assoc:
+                highlights.append(
+                    f"{min(n_assoc, 8)} feature(s) show measurable association with target"
+                    if lang == "en"
+                    else f"มี {min(n_assoc, 8)} ฟีเจอร์ที่สัมพันธ์กับ target ชัดเจน"
+                )
+        if self._leakage_findings:
+            n = len(self._leakage_findings)
+            highlights.append(
+                f"{n} suspected leakage feature(s)"
+                if lang == "en"
+                else f"สงสัย target leakage {n} ฟีเจอร์"
+            )
         if self._insights is not None and self._insights.total_insights:
-            highlights.append(f"พบข้อค้นพบที่ควรดู {self._insights.total_insights} เรื่อง")
+            highlights.append(
+                f"{self._insights.total_insights} findings worth reviewing"
+                if lang == "en"
+                else f"พบข้อค้นพบที่ควรดู {self._insights.total_insights} เรื่อง"
+            )
         if self._insight_engine is not None and self._insight_engine.cards:
-            highlights.append(f"มี insight เชิงธุรกิจ {len(self._insight_engine.cards)} เรื่อง")
+            highlights.append(
+                f"{len(self._insight_engine.cards)} cross-column business insights"
+                if lang == "en"
+                else f"มี insight เชิงธุรกิจ {len(self._insight_engine.cards)} เรื่อง"
+            )
+        if self.report_mode == "blueprint":
+            highlights.insert(
+                0,
+                "Blueprint mode — actionable summary, fewer charts"
+                if lang == "en"
+                else "โหมด Blueprint — สรุปเชิงปฏิบัติ กราฟน้อยลง",
+            )
 
         return {
             "status": status,
@@ -1402,9 +1784,21 @@ class ProfileReport:
             "critical_count": critical_count,
             "warning_count": warning_count,
             "missing_pct": missing_pct,
+            "raw_missing_pct": raw_missing_pct,
             "duplicate_pct": duplicate_pct,
             "highlights": highlights,
         }
+
+    def _high_placeholder_rate(self) -> bool:
+        """True ถ้ามี placeholder เยอะพอที่ควรเตือน (ไม่ใช่ false alarm จาก '-' ใน EN)."""
+        for issue in self._quality_issues:
+            if issue.check_name != "placeholder_values":
+                continue
+            if issue.percentage >= 5.0:
+                examples = {str(e).strip() for e in issue.examples}
+                if examples - {"-"}:
+                    return True
+        return False
 
     def _sorted_quality_issues(self) -> list[dict[str, Any]]:
         """เรียง quality issue ตามความสำคัญและผลกระทบ เพื่อให้คนอ่านเห็นเรื่องใหญ่ก่อน."""
@@ -1446,10 +1840,42 @@ class ProfileReport:
         actions: list[dict[str, Any]] = []
         seen: set[str] = set()
 
+        lang = self.lang
+        if self._leakage_findings:
+            top = self._leakage_findings[0]
+            actions.append(
+                {
+                    "severity": top.get("severity", "critical"),
+                    "title": _localized_text(
+                        lang,
+                        th=f"ตรวจ target leakage: {top['feature']}",
+                        en=f"Review target leakage: {top['feature']}",
+                    ),
+                    "why": top["description_en"] if lang == "en" else top["description_th"],
+                    "action": _localized_text(
+                        lang,
+                        th=(
+                            "ตัดฟีเจอร์ที่สงสัย leakage ออกจาก training set"
+                            if top.get("tier") == "critical"
+                            else "ตรวจฟีเจอร์ proxy ด้วยตา — อย่าใช้ถ้าเป็นข้อมูลหลังเกิด outcome"
+                        ),
+                        en=(
+                            "Drop suspected leakage features from the training set"
+                            if top.get("tier") == "critical"
+                            else "Manually review proxy features — drop if post-outcome data"
+                        ),
+                    ),
+                }
+            )
+            seen.add(str(top.get("feature")))
+
         for ins in insights:
             if len(actions) >= 5:
                 break
-            key = str(ins.get("recommendation_th") or ins.get("title_th"))
+            title = ins.get("title_th", "") if lang != "en" else ins.get("title_th", "")
+            rec = ins.get("recommendation_th", "")
+            desc = ins.get("description_th", "")
+            key = str(rec or title)
             if key in seen:
                 continue
             if ins.get("severity") in {"critical", "warning"} or len(actions) < 3:
@@ -1457,9 +1883,9 @@ class ProfileReport:
                 actions.append(
                     {
                         "severity": ins.get("severity", "info"),
-                        "title": ins.get("title_th", ""),
-                        "why": ins.get("description_th", ""),
-                        "action": ins.get("recommendation_th", ""),
+                        "title": title,
+                        "why": desc,
+                        "action": rec,
                     }
                 )
 
@@ -1628,18 +2054,45 @@ class ProfileReport:
             str(finding.get("column") or finding.get("title_th") or ""),
         )
 
+    def _append_grouped_quality_findings(self, raw: list[dict[str, Any]]) -> None:
+        """รวม quality issues ที่ check_name เดียวกันหลายคอลัมน์เป็น finding เดียว."""
+        by_check: dict[str, list[QualityIssue]] = defaultdict(list)
+        for issue in self._quality_issues:
+            by_check[issue.check_name].append(issue)
+        for check_name, issues in by_check.items():
+            if len(issues) > 1 and check_name in _GROUPABLE_CHECKS:
+                worst = max(
+                    issues,
+                    key=lambda i: (_SEVERITY_ORDER.get(i.severity, 99), i.percentage, i.count),
+                )
+                cols = sorted({i.column for i in issues})
+                entry = worst.to_dict()
+                entry["source"] = "quality"
+                entry["column"] = ", ".join(cols[:6]) + (f" (+{len(cols) - 6})" if len(cols) > 6 else "")
+                entry["grouped_columns"] = cols
+                entry["group_count"] = len(cols)
+                if self.lang == "en":
+                    entry["title"] = f"{check_name} in {len(cols)} columns"
+                    entry["description"] = (
+                        f"{check_name} affects {len(cols)} columns: {', '.join(cols[:4])}"
+                    )
+                else:
+                    entry["title"] = f"{check_name} ใน {len(cols)} คอลัมน์"
+                    entry["description_th"] = (
+                        f"{check_name} พบใน {len(cols)} คอลัมน์: {', '.join(cols[:4])}"
+                    )
+                raw.append(entry)
+            else:
+                for issue in issues:
+                    entry = issue.to_dict()
+                    entry["source"] = "quality"
+                    raw.append(entry)
+
     def _top_findings(self) -> list[dict[str, Any]]:
         """เลือก Key Findings 3–5 ข้อที่สำคัญที่สุด แทนการโชว์ list ยาวด้านบน."""
         raw: list[dict[str, Any]] = []
+        self._append_grouped_quality_findings(raw)
         seen_qa: set[tuple[str, str]] = set()
-        for issue in self._quality_issues:
-            key = (issue.check_name, issue.column)
-            if key in seen_qa:
-                continue
-            seen_qa.add(key)
-            entry = issue.to_dict()
-            entry["source"] = "quality"
-            raw.append(entry)
         for anomaly in self._anomalies:
             key = (anomaly.check_name, anomaly.column)
             if key in seen_qa:
@@ -1659,6 +2112,20 @@ class ProfileReport:
                 entry["column"] = column
                 raw.append(entry)
 
+        if self._leakage_findings:
+            for lf in self._leakage_findings[:3]:
+                raw.append(
+                    {
+                        "source": "leakage",
+                        "severity": lf.get("severity", "critical"),
+                        "column": lf.get("feature"),
+                        "check_name": lf.get("kind"),
+                        "description_th": lf.get("description_th"),
+                        "description": lf.get("description_en"),
+                        "title": lf.get("feature"),
+                        "percentage": round(float(lf.get("score", 0)) * 100, 1),
+                    }
+                )
         raw.extend(self._conditional_missing_notes())
 
         if not raw and self._insights is not None:
@@ -1667,35 +2134,61 @@ class ProfileReport:
                 entry["source"] = "insight"
                 raw.append(entry)
 
+        if self.target_column:
+            raw = [
+                item
+                for item in raw
+                if not (
+                    item.get("source") == "insight"
+                    and str(item.get("category", "")) in _DISTRIBUTION_INSIGHT_CATEGORIES
+                )
+            ]
         ranked = sorted(raw, key=self._finding_score, reverse=True)
+        max_findings = 12 if self.report_mode == "blueprint" else 5
         selected: list[dict[str, Any]] = []
         seen: set[tuple[str, str, str]] = set()
+        category_counts: dict[str, int] = defaultdict(int)
         for item in ranked:
             key = (
                 str(item.get("source") or ""),
-                str(item.get("column") or item.get("title_th") or ""),
+                str(item.get("column") or item.get("title_th") or item.get("title") or ""),
                 str(item.get("check_name") or item.get("pattern") or item.get("title_th") or ""),
             )
             if key in seen:
                 continue
+            cat = str(item.get("check_name") or item.get("source") or "other")
+            max_per_cat = 3 if self.report_mode == "blueprint" else 2
+            if category_counts[cat] >= max_per_cat:
+                continue
             seen.add(key)
+            category_counts[cat] += 1
+            lang = self.lang
             technical = (
-                item.get("description_th") or item.get("description") or item.get("title_th") or ""
+                item.get("description")
+                if lang == "en" and item.get("description")
+                else item.get("description_th") or item.get("description") or item.get("title") or item.get("title_th") or ""
             )
-            recommendation = item.get("suggestion_th") or item.get("recommendation_th") or ""
+            recommendation = (
+                item.get("suggestion") or item.get("recommendation_th") or item.get("recommendation_th") or ""
+                if lang == "en"
+                else item.get("suggestion_th") or item.get("recommendation_th") or ""
+            )
+            title = item.get("title") or item.get("title_th") or item.get("column") or ""
             enriched = {
                 **item,
+                "title": title,
+                "description": _plain_language(str(technical)),
                 "technical": _plain_language(str(technical)),
                 "business": self._translate_to_business(item),
                 "recommendation": _plain_language(str(recommendation)),
                 "impact": float(item.get("percentage") or 0.0),
             }
             selected.append(enriched)
-            if len(selected) >= 5:
+            if len(selected) >= max_findings:
                 break
 
         if len(selected) > 3:
-            return selected[:5]
+            return selected[:max_findings]
         return selected
 
     def _build_issue_summary(self) -> dict[str, Any]:
@@ -1779,8 +2272,16 @@ class ProfileReport:
             "missing_matrix": dc.get("missing_matrix", ""),
             "missing_heatmap": dc.get("missing_heatmap", ""),
         }
+        if self.report_mode == "blueprint":
+            dist_charts["scatter_matrix"] = ""
+            dist_charts["violinplot"] = ""
 
-        # named entities — แนบ label ของประเภทไว้ใช้ในเทมเพลต
+        data_type_ctx = dict(self._data_type)
+        data_type_ctx["display_label"] = (
+            data_type_ctx.get("label")
+            if lang == "en"
+            else data_type_ctx.get("label_th", data_type_ctx.get("label", ""))
+        )
         ner_sections = [
             {"column": col, "result": result.to_dict()} for col, result in self._ner.items()
         ]
@@ -1818,11 +2319,16 @@ class ProfileReport:
         insight_section = None
         insight_items: list[dict[str, Any]] = []
         if self._insights is not None:
+            insight_limit = 12 if self.report_mode == "blueprint" else len(self._insights.insights)
             insight_items = [
                 {**i.to_dict(), "category_label": L(f"icat_{i.category}")}
-                for i in self._insights.insights
+                for i in self._insights.insights[:insight_limit]
             ]
+            exec_summary = getattr(self._insights, "executive_summary_en", "") or ""
+            if lang != "en" or not exec_summary.strip():
+                exec_summary = self._insights.executive_summary_th
             insight_section = {
+                "executive_summary": exec_summary,
                 "executive_summary_th": self._insights.executive_summary_th,
                 "total_insights": self._insights.total_insights,
                 # จำนวนข้อค้นพบทั้งหมดก่อนถูกตัด (P1) — ใช้บอกผู้อ่านว่าแสดงเพียงส่วนสำคัญ
@@ -1871,14 +2377,28 @@ class ProfileReport:
                 "details": self._cleaning_plan.details,
             }
 
+        modeling_blueprint = None
+        if self.target_column is not None:
+            modeling_blueprint = _build_modeling_blueprint_context(
+                self.df,
+                target_column=self.target_column,
+                lang=lang,
+                column_types=self._column_types,
+                target_associations=self._target_associations,
+                leakage_findings=self._leakage_findings,
+                target_baseline=self._target_baseline,
+            )
+
         context = {
             "lang": lang,
             "L": L,
             "version": __version__,
+            "report_mode": self.report_mode,
             # ไอคอนตามความรุนแรง — ใช้ในการ์ด insight/quality/anomaly
             "sev_icons": {"critical": "🔴", "warning": "🟡", "info": "🔵"},
             "overview": self._overview,
-            "data_type": self._data_type,
+            "data_type": data_type_ctx,
+            "modeling_blueprint": modeling_blueprint,
             "report_summary": self._build_report_summary(),
             "issue_summary": self._build_issue_summary(),
             "key_findings": self._top_findings(),
@@ -1955,6 +2475,7 @@ def profile(
     insights_engine: bool = True,
     insights_top: int = 8,
     progress: Callable[[str], None] | None = None,
+    report_mode: str = "explore",
 ) -> ProfileReport:
     """สร้าง ProfileReport และรันการวิเคราะห์ทันที — ฟังก์ชันอำนวยความสะดวกหลัก.
 
@@ -1977,6 +2498,7 @@ def profile(
         insights_engine=insights_engine,
         insights_top=insights_top,
         progress=progress,
+        report_mode=report_mode,
     )
     report.run()
     return report

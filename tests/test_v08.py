@@ -130,13 +130,13 @@ class TestHandleMissingValues:
         s = pd.Series([1.0, np.nan, 3.0], name="col")
         out, result = handle_missing_values(s, "flag")
         assert result.rows_affected == 1
-        assert out.iloc[1] == 0
+        assert pd.isna(out.iloc[1])
 
     def test_flag_text(self):
         s = pd.Series(["a", None, "c"], name="col")
         out, result = handle_missing_values(s, "flag")
         assert result.rows_affected == 1
-        assert out.iloc[1] == "ไม่ระบุ"
+        assert pd.isna(out.iloc[1])
 
     def test_median(self):
         s = pd.Series([1.0, 2.0, np.nan, 3.0], name="col")

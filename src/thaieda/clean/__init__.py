@@ -1228,7 +1228,7 @@ def handle_missing_values(
     """จัดการค่าว่างในคอลัมน์ — แทนที่หรือ flag ตาม strategy (v0.8).
 
     strategy:
-      - 'flag'    : แทน NaN ด้วย 'ไม่ระบุ' (text) หรือ 0 (numeric) — ทุกค่ายังใช้งานได้
+      - 'flag'    : บันทึก missing โดยไม่เติมค่า (คง NaN) — เหมาะกับ EDA/Blueprint ที่ต้องเห็น raw missing
       - 'drop'    : ลบแถวที่ NaN (เฉพาะคอลัมน์นี้)
       - 'median'  : แทนด้วย median (numeric only)
       - 'mode'    : แทนด้วย mode (ทุกประเภท)
@@ -1305,18 +1305,13 @@ def handle_missing_values(
                 desc = f"[ML→mode] แทน {missing} ค่าว่าง (categorical) ด้วย mode ({mode_val})"
             else:
                 desc = f"ไม่สามารถหา mode ของคอลัมน์ '{col_name}' ได้"
-    else:  # 'flag' (default)
-        if pd.api.types.is_numeric_dtype(series):
-            out = series.fillna(0)
-            desc = f"แทน {missing} ค่าว่างด้วย 0 (numeric)"
-        else:
-            out = series.fillna("ไม่ระบุ")
-            desc = f"แทน {missing} ค่าว่างด้วย 'ไม่ระบุ'"
-        # Q1: เตือนเมื่อค่าว่างสูง (> 40%) — การ fill อาจบิดเบือน ควรพิจารณา drop/impute แทน
+    else:  # 'flag' (default) — บันทึก missing โดยไม่เติมค่า (คง NaN ไว้)
+        out = series
+        desc = f"flag {missing} ค่าว่างในคอลัมน์ '{col_name}' (ไม่เติมค่า — คง missing ไว้)"
         if missing_ratio > _HIGH_NA_RATIO:
             desc += (
-                f" — เตือน: คอลัมน์นี้มี missing {missing_ratio * 100:.0f}% (> 40%) "
-                "แนะนำพิจารณา drop หรือ impute ด้วย domain knowledge แทนการ fill"
+                f" — เตือน: missing {missing_ratio * 100:.0f}% (> 40%) "
+                "ควรพิจารณา drop หรือ impute ด้วย domain knowledge"
             )
 
     return out, CleaningResult(

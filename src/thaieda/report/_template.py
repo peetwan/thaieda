@@ -439,6 +439,17 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
   #back-to-top.visible { opacity: 1; visibility: visible; }
   #back-to-top:hover { transform: translateY(-4px); box-shadow: 0 6px 20px var(--accent-glow); }
   
+  /* Modeling Blueprint */
+  .blueprint-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin: 20px 0; }
+  .blueprint-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 22px; box-shadow: var(--shadow); border-top: 4px solid var(--accent); }
+  .blueprint-card.critical { border-top-color: var(--critical); }
+  .blueprint-card h3 { margin: 0 0 12px; font-size: 16px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; }
+  .blueprint-card ul { margin: 8px 0 0 18px; padding: 0; }
+  .blueprint-card li { margin: 6px 0; font-size: 14px; }
+  .blueprint-checklist { list-style: none; margin: 0; padding: 0; }
+  .blueprint-checklist li { padding: 10px 14px; margin: 8px 0; background: var(--panel2); border-radius: 10px; border-left: 4px solid var(--ok); }
+  .leakage-item { background: var(--critical-bg); border: 1px solid rgba(239,68,68,0.3); border-radius: 12px; padding: 14px 16px; margin: 10px 0; }
+
   .plotly-chart { margin-top: 18px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--panel); box-shadow: var(--shadow); }
 </style>
 <script>
@@ -491,11 +502,11 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
   </header>
 
   <div class="tab-bar">
-    <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')">Overview</button>
-    <button class="tab-btn" data-tab="insights" onclick="switchTab('insights')">Insights</button>
-    <button class="tab-btn" data-tab="quality" onclick="switchTab('quality')">Quality</button>
-    <button class="tab-btn" data-tab="anomalies" onclick="switchTab('anomalies')">Anomalies</button>
-    <button class="tab-btn" data-tab="columns" onclick="switchTab('columns')">Columns</button>
+    <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')">{{ L('tab_overview') }}</button>
+    <button class="tab-btn" data-tab="insights" onclick="switchTab('insights')">{{ L('tab_insights') }}</button>
+    <button class="tab-btn" data-tab="quality" onclick="switchTab('quality')">{{ L('tab_quality') }}</button>
+    <button class="tab-btn" data-tab="anomalies" onclick="switchTab('anomalies')">{{ L('tab_anomalies') }}</button>
+    <button class="tab-btn" data-tab="columns" onclick="switchTab('columns')">{{ L('tab_columns') }}</button>
   </div>
 
   <!-- TAB: OVERVIEW -->
@@ -506,7 +517,7 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
   <section id="what-is-this" class="data-type-banner">
     <div class="dtype-card">
       <div class="dtype-label">{{ L('detected_data_type') }}</div>
-      <div class="dtype-value">{{ data_type.label_th }}</div>
+      <div class="dtype-value">{{ data_type.display_label or data_type.label_th }}</div>
       <div class="dtype-summary muted">{{ data_type.summary }}</div>
       {% if data_type.language %}
       <div class="so-what"><span class="lbl">{{ L('detected_language') }}</span> {{ L('language_' ~ data_type.language.language) }}</div>
@@ -539,7 +550,7 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
         <span class="sev {{ kf.severity }}">{{ sev_icons[kf.severity] }} {{ L('severity_' ~ kf.severity) }}</span>
         <b>{{ kf.title if kf.title else kf.column }}</b>
         {% if kf.business %}<div class="kf-business">{{ kf.business }}</div>{% endif %}
-        <div class="kf-tech muted">{{ kf.description }}</div>
+        <div class="kf-tech muted">{{ kf.description or kf.technical }}</div>
         {% if kf.percentage %}<div class="kf-impact"><span class="lbl">{{ L('impact') }}</span> {{ kf.percentage }}%</div>{% endif %}
       </div>
     </div>
@@ -553,7 +564,7 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
       <div class="eyebrow">{{ L('executive_summary') }}</div>
       <div class="verdict">{{ report_summary.verdict }}</div>
       <div class="summary">
-        {% if insight_section %}{{ insight_section.executive_summary_th }}{% else %}ชุดข้อมูลนี้ยังไม่พบข้อค้นพบสำคัญจากระบบอัตโนมัติ{% endif %}
+        {% if insight_section %}{{ insight_section.executive_summary }}{% else %}{{ L('no_insights_yet') }}{% endif %}
       </div>
       <ul>
         {% for h in report_summary.highlights %}<li>{{ h }}</li>{% endfor %}
@@ -565,7 +576,12 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
         <div class="health-row"><span>{{ L('severity_critical') }}</span><b>{{ issue_summary.critical }}</b></div>
         <div class="health-row"><span>{{ L('severity_warning') }}</span><b>{{ issue_summary.warning }}</b></div>
         <div class="health-row"><span>{{ L('severity_info') }}</span><b>{{ issue_summary.info }}</b></div>
+        {% if overview.raw_missing_pct is defined %}
+        <div class="health-row"><span>{{ L('raw_missing') }}</span><b>{{ overview.raw_missing_pct }}%</b></div>
+        <div class="health-row"><span>{{ L('post_clean_missing') }}</span><b>{{ report_summary.missing_pct }}%</b></div>
+        {% else %}
         <div class="health-row"><span>{{ L('missing_cells') }}</span><b>{{ report_summary.missing_pct }}%</b></div>
+        {% endif %}
         <div class="health-row"><span>{{ L('duplicate_rows') }}</span><b>{{ report_summary.duplicate_pct }}%</b></div>
       </div>
     </aside>
@@ -589,6 +605,46 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
   </div>
   {% else %}
     <p class="empty">✓ {{ L('no_priority_actions') }}</p>
+  {% endif %}
+
+
+  {% if modeling_blueprint %}
+  <h2 id="modeling-blueprint">{{ L('modeling_blueprint') }}</h2>
+  <div class="blueprint-grid">
+    {% if modeling_blueprint.target_baseline %}
+    <div class="blueprint-card">
+      <h3>{{ L('target_baseline') }}</h3>
+      <div><b>{{ modeling_blueprint.target_baseline.target_column }}</b></div>
+      {% if modeling_blueprint.target_baseline.is_binary %}
+      <div class="meta">{{ L('positive_rate') }}: <b>{{ modeling_blueprint.target_baseline.positive_rate_pct }}%</b></div>
+      <div class="meta">{{ L('class_balance') }}: {{ modeling_blueprint.target_baseline.balance_label }}</div>
+      {% endif %}
+      <ul>{% for cls, cnt in modeling_blueprint.target_baseline.class_counts %}<li><code>{{ cls }}</code>: {{ "{:,}".format(cnt) }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+    <div class="blueprint-card {% if modeling_blueprint.leakage %}critical{% endif %}">
+      <h3>{{ L('leakage_suspects') }}</h3>
+      {% if modeling_blueprint.leakage %}
+        {% for lf in modeling_blueprint.leakage %}
+        <div class="leakage-item"><b>{{ lf.feature }}</b> <span class="badge">{{ lf.kind }}</span><div class="muted">{{ lf.description }}</div></div>
+        {% endfor %}
+      {% else %}<p class="empty">✓ {{ L('no_leakage_suspects') }}</p>{% endif %}
+    </div>
+    <div class="blueprint-card">
+      <h3>{{ L('strong_features') }}</h3>
+      {% if modeling_blueprint.strong_features %}
+      <ul>{% for sf in modeling_blueprint.strong_features %}<li><b>{{ sf.column }}</b> <span class="badge">{{ sf.association_type }}</span> {{ L('association_score') }}={{ sf.score }}</li>{% endfor %}</ul>
+      {% else %}<p class="muted">—</p>{% endif %}
+    </div>
+    <div class="blueprint-card">
+      <h3>{{ L('columns_to_drop') }}</h3>
+      {% if modeling_blueprint.columns_to_drop %}
+      <ul>{% for c in modeling_blueprint.columns_to_drop %}<li><code>{{ c }}</code></li>{% endfor %}</ul>
+      {% else %}<p class="muted">—</p>{% endif %}
+    </div>
+  </div>
+  <h3>{{ L('modeling_next_steps') }}</h3>
+  <ul class="blueprint-checklist">{% for step in modeling_blueprint.next_steps %}<li>{{ step }}</li>{% endfor %}</ul>
   {% endif %}
 
   <!-- ============ OVERVIEW ============ -->
@@ -627,7 +683,7 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
    {% elif dist_charts.correlation_heatmap %}<div class="imgrow full"><div><div class="imgcap">{{ L('correlation_heatmap') }}</div><img src="data:image/png;base64,{{ dist_charts.correlation_heatmap }}" alt="correlation heatmap"><div class="chart-note"><b>{{ L('chart_insight') }}:</b> ดูว่าคอลัมน์ตัวเลขใดเคลื่อนไปด้วยกันสูงมาก อาจใช้แทนกันได้หรือส่งผลต่อโมเดล</div></div></div>{% endif %}
     {% if dist_charts.scatter_matrix %}<div class="imgrow full"><div><div class="imgcap">{{ L('scatter_matrix') }}</div><img src="data:image/png;base64,{{ dist_charts.scatter_matrix }}" alt="scatter matrix"><div class="chart-note"><b>{{ L('chart_insight') }}:</b> ใช้ดู pattern ระหว่างตัวเลข เช่น เส้นตรง กลุ่มย่อย หรือ outlier</div></div></div>{% endif %}
     <div class="imgrow">{% if dist_charts.boxplot %}<div><div class="imgcap">{{ L('boxplot') }}</div><img src="data:image/png;base64,{{ dist_charts.boxplot }}" alt="box plot"><div class="chart-note"><b>{{ L('chart_insight') }}:</b> จุดที่หลุดจากกล่องคือค่าที่ควรตรวจว่าเป็น outlier จริงหรือไม่</div></div>{% endif %}{% if dist_charts.violinplot %}<div><div class="imgcap">{{ L('violinplot') }}</div><img src="data:image/png;base64,{{ dist_charts.violinplot }}" alt="violin plot"><div class="chart-note"><b>{{ L('chart_insight') }}:</b> ดูรูปทรงการกระจายว่าเบ้ มีหลายกลุ่ม หรือกระจุกตัวตรงไหน</div></div>{% endif %}</div>
-  {% else %}<p class="empty">ไม่มีกราฟการกระจายที่เหมาะสมสำหรับข้อมูลชุดนี้</p>{% endif %}
+  {% else %}<p class="empty">{{ L('no_dist_charts') }}</p>{% endif %}
 
   <h2>{{ L('missing_data') }}</h2>
   {% if has_missing_charts %}

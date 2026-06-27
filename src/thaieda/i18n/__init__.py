@@ -344,6 +344,39 @@ LABELS: dict[str, dict[str, str]] = {
         "en": "What this chart tells us",
         "th": "กราฟนี้บอกอะไรเรา",
     },
+    # --- EDA Blueprint (v2.1) ---
+    "modeling_blueprint": {"en": "Modeling Blueprint", "th": "แผนสร้างโมเดล"},
+    "target_baseline": {"en": "Target Baseline", "th": "ฐานเป้าหมาย"},
+    "leakage_suspects": {"en": "Leakage Suspects", "th": "สงสัย target leakage"},
+    "strong_features": {"en": "Strong Features", "th": "ฟีเจอร์ที่สัมพันธ์กับเป้าหมาย"},
+    "columns_to_drop": {"en": "Columns to Drop", "th": "คอลัมน์ที่ควรตัดออก"},
+    "modeling_next_steps": {"en": "Next Steps", "th": "ขั้นตอนถัดไป"},
+    "raw_missing": {"en": "Raw Missing (before clean)", "th": "ค่าว่างดิบ (ก่อนทำความสะอาด)"},
+    "post_clean_missing": {"en": "After Cleaning", "th": "หลังทำความสะอาด"},
+    "blueprint_mode": {"en": "Blueprint Mode", "th": "โหมด Blueprint"},
+    "no_insights_yet": {
+        "en": "No major automated findings yet for this dataset.",
+        "th": "ชุดข้อมูลนี้ยังไม่พบข้อค้นพบสำคัญจากระบบอัตโนมัติ",
+    },
+    "positive_rate": {"en": "Positive rate", "th": "อัตรา positive"},
+    "class_balance": {"en": "Class balance", "th": "สมดุลคลาส"},
+    "induced_by_cleaning": {"en": "Induced by cleaning", "th": "เกิดจากการทำความสะอาด"},
+    "grouped_columns": {"en": "columns", "th": "คอลัมน์"},
+    # --- report tabs ---
+    "tab_overview": {"en": "Overview", "th": "ภาพรวม"},
+    "tab_insights": {"en": "Insights", "th": "ข้อค้นพบ"},
+    "tab_quality": {"en": "Quality", "th": "คุณภาพ"},
+    "tab_anomalies": {"en": "Anomalies", "th": "ความผิดปกติ"},
+    "tab_columns": {"en": "Columns", "th": "คอลัมน์"},
+    "no_leakage_suspects": {
+        "en": "No leakage suspects detected.",
+        "th": "ไม่พบฟีเจอร์ที่สงสัย target leakage",
+    },
+    "association_score": {"en": "score", "th": "คะแนน"},
+    "no_dist_charts": {
+        "en": "No suitable distribution charts for this dataset.",
+        "th": "ไม่มีกราฟการกระจายที่เหมาะสมสำหรับข้อมูลชุดนี้",
+    },
 }
 
 

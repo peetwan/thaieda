@@ -295,6 +295,7 @@ class InsightSummary:
     info_count: int
     insights: list[Insight] = field(default_factory=list)
     executive_summary_th: str = ""
+    executive_summary_en: str = ""
     # จำนวนข้อค้นพบที่สร้างได้ทั้งหมด "ก่อน" ตัดให้เหลือ max_insights (P1)
     # เท่ากับ total_insights เมื่อไม่มีการตัด; มากกว่าเมื่อถูกตัด — ใช้บอกผู้อ่านว่ามีทั้งหมดกี่ข้อ
     total_generated: int = 0
@@ -307,6 +308,7 @@ class InsightSummary:
             "warning_count": self.warning_count,
             "info_count": self.info_count,
             "executive_summary_th": self.executive_summary_th,
+            "executive_summary_en": self.executive_summary_en,
             "insights": [i.to_dict() for i in self.insights],
         }
 
@@ -994,6 +996,68 @@ def _build_executive_summary(
     return " ".join(parts)
 
 
+def _build_executive_summary_en(
+    df: pd.DataFrame,
+    insights: list[Insight],
+    quality_issues: list[QualityIssue],
+    anomaly_issues: list[AnomalyIssue],
+    timeseries_results: dict[str, TimeseriesResult] | None = None,
+    *,
+    total_generated: int | None = None,
+    shown: int | None = None,
+) -> str:
+    """English executive summary (2–3 sentences) for EN reports."""
+    timeseries_results = timeseries_results or {}
+    rows, cols = df.shape
+    parts: list[str] = [f"The dataset has {rows:,} rows × {cols} columns."]
+
+    crit = [i for i in insights if i.severity == "critical"]
+    warn = [i for i in insights if i.severity == "warning"]
+
+    if quality_issues:
+        n_crit_q = sum(1 for i in quality_issues if i.severity == "critical")
+        seg = f"{len(quality_issues)} quality issue(s) detected"
+        if n_crit_q:
+            seg += f" ({n_crit_q} critical)"
+        parts.append(seg)
+
+    if anomaly_issues:
+        cols_with = len({a.column for a in anomaly_issues})
+        parts.append(f"{len(anomaly_issues)} anomaly flag(s) across {cols_with} column(s)")
+
+    if timeseries_results:
+        n_trend = sum(1 for r in timeseries_results.values() if r.has_trend)
+        n_season = sum(1 for r in timeseries_results.values() if r.has_seasonality)
+        seg = f"Timeseries analyzed for {len(timeseries_results)} column(s)"
+        extra = []
+        if n_trend:
+            extra.append(f"{n_trend} with trend")
+        if n_season:
+            extra.append(f"{n_season} with seasonality")
+        if extra:
+            seg += f" ({', '.join(extra)})"
+        parts.append(seg)
+
+    if crit:
+        top_titles = "; ".join(dict.fromkeys(i.title_th for i in crit[:3]))
+        parts.append(f"Fix first: {top_titles}")
+
+    if total_generated is not None and shown is not None and total_generated > shown:
+        parts.append(f"Showing top {shown:,} of {total_generated:,} generated insights")
+
+    if crit:
+        verdict = "Resolve critical issues (especially encoding/calendar) before analysis."
+    elif warn:
+        verdict = "Usable with caution — review warnings before deeper analysis."
+    elif quality_issues or anomaly_issues:
+        verdict = "Overall quality is acceptable with minor notes."
+    else:
+        verdict = "No major quality or anomaly issues — ready for analysis."
+    parts.append(verdict)
+
+    return " ".join(parts)
+
+
 # ----------------------------------------------------------------------------
 # ฟังก์ชันหลัก
 # ----------------------------------------------------------------------------
@@ -1094,6 +1158,15 @@ def generate_insights(
         total_generated=total_generated,
         shown=len(insights),
     )
+    summary_en = _build_executive_summary_en(
+        df,
+        insights,
+        quality_issues,
+        anomaly_issues,
+        timeseries_results,
+        total_generated=total_generated,
+        shown=len(insights),
+    )
 
     return InsightSummary(
         total_insights=len(insights),
@@ -1102,6 +1175,7 @@ def generate_insights(
         info_count=info_count,
         insights=insights,
         executive_summary_th=summary,
+        executive_summary_en=summary_en,
         total_generated=total_generated,
     )
 

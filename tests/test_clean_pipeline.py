@@ -116,8 +116,8 @@ class TestCleanMissing:
     def test_flag_fills_missing(self):
         df = pd.DataFrame({"a": [1.0, np.nan, 3.0], "b": ["x", None, "z"]})
         out, _ = clean(df, downcast=False, remove_duplicates=False)
-        assert out["a"].isna().sum() == 0
-        assert out["b"].isna().sum() == 0
+        assert out["a"].isna().sum() == 1
+        assert out["b"].isna().sum() == 1
 
     def test_drop_removes_rows(self):
         df = pd.DataFrame({"a": [1.0, np.nan, 3.0], "b": ["x", "y", "z"]})

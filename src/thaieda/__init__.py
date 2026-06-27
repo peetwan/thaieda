@@ -219,6 +219,7 @@ def run(
     timeseries: bool = True,
     insights_engine: bool = True,
     insights_top: int = 8,
+    report_mode: str = "explore",
     progress: Callable[[str], None] | None = None,
     llm: bool = False,
     privacy: str = "insight_only",
@@ -253,6 +254,7 @@ def run(
         timeseries: วิเคราะห์อนุกรมเวลา (default: True).
         insights_engine: ค้นหาข้อค้นพบจากการผสมคอลัมน์ (default: True).
         insights_top: จำนวนข้อค้นพบสูงสุดที่แสดง (default: 8).
+        report_mode: ``"explore"`` (default) | ``"blueprint"`` — shorter actionable report, fewer charts.
         progress: callback แสดงความคืบหน้า (optional).
         llm: เรียก LLM analysis หลังวิเคราะห์เสร็จ (default: False).
         privacy: โหมดความเป็นส่วนตัวของ LLM — "insight_only" (default) | "anonymized" | "dp_noise"
@@ -301,6 +303,7 @@ def run(
         insights_engine=insights_engine,
         insights_top=insights_top,
         progress=progress,
+        report_mode=report_mode,
     )
 
     notes: list[str] = list(report.notes)
