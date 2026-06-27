@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-06-27
+
+### Added
+- `_id_likeness_score` heuristic to detect identifier codes.
+- Token-level ID protection in text normalization.
+- `skip_id_like` parameter for `fix_repeated_chars` function.
+
+### Fixed
+- `fix_repeated_chars` incorrectly trimming product IDs/codes embedded in text.
+- Performance bottlenecks on extremely large datasets.
+
+### Tests
+- Total tests: 903 (901 passed, 2 skipped).
+
 ## [2.0.0] - 2026-06-27
 
 Major release introducing offline executive narrative, smart pre-analysis, smart cleaning pipeline, compare, and report hardening.

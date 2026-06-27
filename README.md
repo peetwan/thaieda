@@ -18,7 +18,7 @@ While generic profiling tools count missing values and draw standard charts, the
 
 *   **Smart Column & Type Detection**: Identifies Thai/English text, numbers masquerading as text, Buddhist Era years, Thai phone numbers, Thai national IDs, and mixed-language columns.
 *   **One-Line AutoEDA (`run`)**: A complete pipeline that auto-detects, cleans, checks quality, finds anomalies, performs time-series/target analysis, runs a cross-column insight engine, generates charts, builds offline executive narratives, and generates HTML reports.
-*   **Thai-Aware Cleaning Pipeline (`clean`)**: Easily cleans and normalizes Unicode formats, fixes zero-width/invisible spaces, normalizes currency/numbers, converts Buddhist Era to Common Era (CE), corrects keyboard layout mistakes (e.g., `l;ylfu` ➔ `สวัสดี`), and performs machine-learning (ML) missing value imputation.
+*   **Thai-Aware Cleaning Pipeline (`clean`)**: Easily cleans and normalizes Unicode formats, fixes zero-width/invisible spaces, normalizes currency/numbers, converts Buddhist Era to Common Era (CE), corrects keyboard layout mistakes (e.g., `l;ylfu` ➔ `สวัสดี`), protects product IDs/codes using heuristic likeness scores, and performs machine-learning (ML) missing value imputation.
 *   **Cross-Column Insight Engine**: Automatically discovers complex relationships, outlier influences, trend evidence, Simpson's paradox, and target leakage with statistical scoring.
 *   **Multi-File Schema Discovery**: Scans folders of files (`profile_dataset`) to discover primary/foreign key candidates and orphans, then renders schema relationships as interactive reports and Mermaid diagrams.
 *   **Privacy-Preserving LLM Integration**: Generates secure LLM summaries with 5 privacy modes (`insight_only`, `synthetic`, `anonymized`, `dp_noise`, and `full`) to safely analyze data without risking raw PII exposure.
@@ -116,6 +116,25 @@ cleaned_df, report = thaieda.clean(
 # Export the audit trail of modifications
 report.to_json("cleaning-audit.json")
 ```
+
+#### 🧼 Smart Cleaning & ID Protection
+When normalizing text (such as using `fix_repeated_chars` to collapse excessive characters), standard rule-based approaches might unintentionally mangle product codes, serial numbers, or model names. ThaiEDA solves this with an intelligent heuristic protection system.
+
+*   **`skip_id_like` Parameter** (default `True`): Under `fix_repeated_chars`, setting this to `True` protects strings and sub-tokens that look like identifier codes from being modified.
+*   **Token-Level Protection**: Instead of analyzing the entire text block globally, ThaiEDA splits text into individual tokens and applies the safeguard locally. This ensures a product ID embedded within a chat or review text remains completely untouched, while surrounding natural text is cleaned.
+*   **`_id_likeness_score` Heuristic**: Determines if a token is an ID using a 7-criteria scoring algorithm (0.0 to 1.0):
+    1.  `digit_ratio`: The ratio of numeric digits to length (IDs generally have $\ge 0.3$).
+    2.  `upper_ratio`: The ratio of uppercase characters to all alphabet characters (IDs generally have $> 0.5$).
+    3.  `separator`: Presence of symbols like hyphens, underscores, or dots in the middle.
+    4.  `length`: Usually short strings ($\le 20$ characters).
+    5.  `no_spaces`: No spaces within the token.
+    6.  `alnum_mix`: Mixtures of both letters and digits.
+    7.  `entropy`: Lower character entropy due to repeated structures.
+
+**Examples in Action:**
+*   `'55555'` ➔ `'555'` (digits in laughter are normalized)
+*   `'มากกกกกก'` ➔ `'มากกก'` (exaggerated Thai text is collapsed)
+*   `'SKU-AAA111'` ➔ `'SKU-AAA111'` (safely kept intact as an ID)
 
 ### 3. Comparing Two Datasets (Drift & Schema)
 Use `compare()` to detect schema changes and statistical distribution drift between two datasets (e.g., training vs. production data).
