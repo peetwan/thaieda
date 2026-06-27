@@ -1,6 +1,6 @@
 # ThaiEDA
 
-**Exploratory data analysis that actually understands Thai.**
+**AutoEDA for Thai and mixed-language data.**
 
 [![PyPI](https://img.shields.io/pypi/v/thaieda.svg)](https://pypi.org/project/thaieda/)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
@@ -8,361 +8,421 @@
 [![CI](https://github.com/peetwan/thaieda/actions/workflows/ci.yml/badge.svg)](https://github.com/peetwan/thaieda/actions/workflows/ci.yml)
 [![Code Style: ruff](https://img.shields.io/badge/code%20style-ruff-261230.svg)](https://docs.astral.sh/ruff/)
 
----
-
-## มันคืออะไร
-
-ThaiEDA คือ Python library สำหรับทำ Exploratory Data Analysis (EDA) แบบอัตโนมัติ — ใส่ DataFrame เข้าไปหนึ่งบรรทัด ได้ผลลัพธ์ออกมาครบ: ตรวจข้อมูล → ทำความสะอาด → หา anomaly → สร้าง insight → ออกรายงาน HTML
-
-สิ่งที่ทำให้ต่างจาก ydata-profiling, sweetviz, หรือ Evidently คือ **รู้เรื่องภาษาไทย** — Buddhist Era (พ.ศ.), เลขไทย (๑๒๓), zero-width space, mojibake จาก TIS-620, ที่อยู่ภาษาไทย, เลขบัตรประชาชน, บริษัทไทย — ทั้งหมดนี้ทำให้ข้อมูลไทยไม่พังเวลาผ่าน pipeline
-
----
-
-## ทำอะไรได้บ้าง
-
-### One-liner ครบจบ
+ThaiEDA is an open-source Python library for exploratory data analysis on Thai,
+English, and mixed-language datasets. It turns a pandas DataFrame, a file, or a
+folder of related tables into a clean, executive-ready EDA report with Thai-aware
+data cleaning, quality checks, anomaly detection, cross-column insights,
+visualizations, and optional privacy-preserving LLM analysis.
 
 ```python
-import thaieda
 import pandas as pd
-
-df = pd.read_csv("data.csv")
-result = thaieda.run(df)          # ครบทุกขั้นตอนในบรรทัดเดียว
-result.to_html("report.html")     # รายงาน HTML แบบ standalone
-```
-
-`run(df)` ทำสิ่งต่อไปนี้ตามลำดับ:
-
-```
-DataFrame → thaieda.run(df) → EDAResult
-
-  Step 0  pre-analyze    data type + language detection
-  Step 1  detect         column types + Thai months + addresses
-  Step 2  clean          smart cleaning (auto-decide what to fix)
-  Step 3  quality        language-aware checks + 0–100 score
-  Step 4  anomaly        IQR + ML + text anomaly detection
-  Step 5  insights       6 cross-column patterns (BH-corrected)
-  Step 6  viz            static (matplotlib) + interactive (Plotly)
-  Step 7  report         executive HTML narrative
-```
-
-### ความสามารถหลัก
-
-| ความสามารถ | รายละเอียด |
-|-----------|-----------|
-| **Thai text ไม่พัง** | ฟอนต์ไทยในทุก chart (Sarabun auto), เลขไทย → 123, พ.ศ. → CE, ตัด zero-width space, แก้ mojibake |
-| **Insight ไม่ใช่แค่ stats** | หา cross-column patterns เช่น "คอลัมน์ A ทำนาย B ได้ดี", "กลุ่มนี้สูงกว่าค่าเฉลี่ย 3 เท่า" พร้อม Benjamini-Hochberg correction |
-| **Anomaly detection** | IQR + z-score + Isolation Forest + text anomaly |
-| **Quality score 0–100** | ให้คะแนนคุณภาพข้อมูลแบบมี grade |
-| **Smart cleaning** | ตัดสินใจเองว่าควรแก้อะไร — encoding, numerals, BE dates, duplicates, missing values |
-| **Privacy-first LLM** | 4 โหมดความเป็นส่วนตัว — default ส่งข้อมูลดิบออกจากเครื่องเป็นศูนย์ (PDPA-ready) |
-| **Folder mode** | `run_folder("data/")` วิเคราะห์ทุกไฟล์ในโฟลเดอร์ + รวมเป็น master HTML |
-| **Compare** | `compare(df1, df2)` เปรียบเทียบสอง dataset พร้อม drift detection |
-| **Thai NER** | ดึงชื่อคน/สถานที่/องค์กรจากข้อความไทย |
-| **Thai address parsing** | 123 ม.4 ต.บางบัว อ.บางบัว จ.กรุงเทพฯ → structured fields |
-| **Thai ID validation** | เช็ค checksum เลขบัตรประชาชน |
-
-### ภาษาไทยที่จับได้
-
-| ปัญหา | ตัวอย่าง | ThaiEDA ทำอะไร |
-|---------|---------|----------------|
-| Buddhist Era dates | `15/03/2567` | ตรวจ พ.ศ. → แปลงเป็น CE |
-| Thai numerals | `๑๒๓` ในคอลัมน์ตัวเลข | แปลงเป็น `123` |
-| Zero-width spaces | `สม\u200bชาย` | ตัดอักขระที่มองไม่เห็น + แจ้ง |
-| Mojibake encoding | `Ã ¬Â¸Â¡Â¹` | auto-detect TIS-620 → UTF-8 |
-| Thai month names | `มกราคม` | parse เป็น ISO date |
-| Mixed Thai/English | `อร่อยมาก 5/5 stars` | ตรวจเป็น mixed ไม่ใช่ English/numeric |
-| National ID | `1-1234-56789-01-2` | checksum validation |
-| Phone numbers | `081-234-5678` | ตรวจ + normalize |
-| Thai addresses | `123 ม.4 ต.บางบัว อ.บางบัว จ.กรุงเทพฯ` | parse เป็น structured fields |
-
-### คุณภาพข้อมูลที่ตรวจ
-
-| ปัญหา | ThaiEDA ทำอะไร |
-|---------|----------------|
-| Placeholder values (`-`, `N/A`, `ไม่มี`) | แจ้งเป็น missing |
-| Constant columns | แจ้งเป็นไร้ประโยชน์ |
-| High-NA columns (>80%) | แจ้ง `mostly_missing` |
-| Smart data type | จำแนก transaction/registry/survey/timeseries/mixed |
-| Language-aware | ข้อมูล English ไม่เตือนเรื่อง พ.ศ./เลขไทย |
-| ID/FK semantics | `order_id`, `store_id` ไม่นำมาหา category anomaly |
-| Keyboard layout guard | `Floyd` ในคอลัมน์ English ไม่ถูกแปลงเป็นไทย |
-
-### Privacy LLM — 4 โหมด
-
-| โหมด | ส่งอะไรไป LLM | ความเสี่ยง | เหมาะกับ |
-|------|--------------|----------|---------|
-| `insight_only` (default) | สถิติ + insight เท่านั้น | ต่ำ | ภาครัฐ, การแพทย์, PDPA |
-| `synthetic` | mock data จาก fitted distributions | ต่ำ | LLM เห็นรูปข้อมูลจริงแต่ไม่ใช่ของจริง |
-| `anonymized` | PII → tokens | ปานกลาง | ต้องการ structure ไม่มี PII |
-| `dp_noise` | stats + Laplace noise | ต่ำ | dataset เล็กที่ stats รั่วได้ |
-| `full` | ข้อมูลดิบ | สูง | ข้อมูลสาธารณะ, demo |
-
----
-
-## ทำไมถึงใช้
-
-มี ydata-profiling และ sweetviz อยู่แล้ว ทำไมต้องใช้ ThaiEDA?
-
-1. **ข้อมูลไทยไม่พัง** — ydata/sweetviz render ไทยเป็น tofu (□□□) ในทุก chart ไม่เห็น พ.ศ., เลขไทย, zero-width space, mojibake ThaiEDA ตรวจและแก้ทั้งหมดอัตโนมัติ ไม่ต้อง config ฟอนต์ ไม่ต้อง manual cleanup
-
-2. **Insight ไม่ใช่แค่สถิติ** — ydata ให้ distribution + correlation matrix แต่ ThaiEDA หา *actionable* cross-column patterns จัดอันดับตามความน่าสนใจทางสถิติ + มี anomaly detection + quality scoring
-
-3. **ครั้งเดียวจบ** — `run(df)` ทำ pipeline เต็มรูปแบบ ใช้ ydata ต้องมี anomaly detector แยก, Thai font config แยก, cleaner แยก, interpretation แยก
-
-4. **Privacy-first** — ถาม LLM เกี่ยวกับข้อมูลได้โดยไม่ส่ง raw rows ไป cloud 4 โหมด default ส่งข้อมูลดิบออกจากเครื่องเป็นศูนย์
-
-5. **Report เล็ก** — ydata สร้าง 71 MB HTML บน dataset 171 คอลัมน์ ThaiEDA สร้าง 0.48 MB เล็กกว่า 148 เท่า เพราะ cap charts, collapse tables, sample อัจฉริยะบนข้อมูลใหญ่
-
----
-
-## เปรียบเทียบกับเครื่องมืออื่น
-
-### ความสามารถ
-
-| Feature | ydata-profiling | sweetviz | Evidently | **ThaiEDA** |
-|---------|:---:|:---:|:---:|:---:|
-| HTML report | ✅ | ✅ | ✅ | ✅ |
-| Cross-column insights | ❌ | ❌ | ❌ | ✅ 6 patterns + BH |
-| Anomaly detection | ❌ | ❌ | ❌ | ✅ IQR + ML + text |
-| Quality score (0–100) | ❌ | ❌ | ❌ | ✅ |
-| Language detection | ❌ | ❌ | ❌ | ✅ Thai/English/mixed |
-| Thai font in charts | ❌ tofu | ❌ tofu | ❌ tofu | ✅ Sarabun auto |
-| Buddhist Era (พ.ศ.) | ❌ | ❌ | ❌ | ✅ → CE |
-| Thai numerals (๑๒๓) | ❌ | ❌ | ❌ | ✅ → 123 |
-| Zero-width space | ❌ | ❌ | ❌ | ✅ |
-| Mojibake repair | ❌ | ❌ | ❌ | ✅ |
-| Smart cleaning | ❌ | ❌ | ❌ | ✅ auto-decide |
-| Thai NER | ❌ | ❌ | ❌ | ✅ |
-| Privacy LLM modes | ❌ | ❌ | ❌ | ✅ 4 modes (PDPA) |
-| Folder mode | ❌ | ❌ | ❌ | ✅ `run_folder()` |
-
-### ความเร็วและขนาด report
-
-| Dataset | Rows | Cols | ydata | ydata size | sweetviz | sv size | Evidently | ev size | **ThaiEDA** | **EDA size** |
-|---------|-----:|-----:|-------:|-----------:|---------:|--------:|----------:|--------:|------------:|-------------:|
-| titanic | 891 | 12 | 5.3s | 1.95 MB | 3.3s | 0.92 MB | — | — | 8.2s | **0.82 MB** |
-| superstore | 10,800 | 21 | 9.3s | 5.16 MB | 5.4s | 1.49 MB | — | — | 26.0s | **1.50 MB** |
-| adult | 32,561 | 15 | 5.4s | 1.65 MB | 8.0s | 1.26 MB | — | — | 17.2s | **1.05 MB** |
-| aps-failure | 16,000 | 171 | 99.8s | **71.2 MB** | 15.8s | 8.2 MB | — | — | 93.0s | **0.48 MB** |
-| synthetic | 2,000 | 12 | 45s | 7.2 MB | 3s | 0.9 MB | 1s | 3.7 MB | 16s | **1.5 MB** |
-
-### คุณภาพการตรวจจับ (synthetic dataset 10 known issues)
-
-**General EDA** (6 issues):
-
-| Metric | ydata | sweetviz | Evidently | **ThaiEDA** |
-|--------|:---:|:---:|:---:|:---:|
-| Ground-Truth Recall | 100% | 83% | 100% | **100%** |
-| Issue Type Breadth (11) | 73% | 64% | 91% | **91%** |
-| Report Completeness (10) | 70% | 50% | 70% | **100%** |
-| HTML size | 7.2 MB | 0.9 MB | 3.7 MB | **1.5 MB** |
-
-**Thai-specific** (4 issues):
-
-| Thai issue | ydata | sweetviz | Evidently | **ThaiEDA** |
-|-----------|:---:|:---:|:---:|:---:|
-| Buddhist Era (พ.ศ.) | 0% | 0% | 0% | **✅** |
-| Thai numerals (๑๒๓) | 0% | 0% | 0% | **✅** |
-| Zero-width spaces | 0% | 0% | 0% | ❌ |
-| Mojibake (TIS-620) | 0% | 0% | 0% | **✅** |
-| **Thai GTR** | **0%** | **0%** | **0%** | **75%** |
-
-### Full pipeline test — 9 public datasets
-
-ทุก dataset รันผ่าน `run(df, lang="en")` ครบทุกขั้นตอน ไม่ crash ไม่ต้องใช้ API key:
-
-| Dataset | Shape | Time | Report | Insights | Issues | Anomalies |
-|---------|------:|-----:|-------:|---------:|-------:|----------:|
-| titanic | 891×12 | 8.9s | 814 KB | 30 | 3 | 12 |
-| superstore | 5,000×21 | 19.9s | 1,635 KB | 30 | 2 | 16 |
-| adult | 5,000×15 | 9.4s | 1,007 KB | 29 | 3 | 17 |
-| online-shoppers | 5,000×18 | 10.4s | 1,051 KB | 30 | 0 | 18 |
-| beijing-pm25 | 5,000×13 | 6.8s | 788 KB | 22 | 1 | 6 |
-| telco-churn | 5,000×21 | 10.2s | 861 KB | 11 | 0 | 4 |
-| california-housing | 5,000×10 | 11.9s | 946 KB | 30 | 0 | 11 |
-| winequality-red | 1,599×12 | 8.7s | 956 KB | 29 | 0 | 16 |
-| synthetic-benchmark | 2,000×12 | 10.7s | 1,536 KB | 24 | 5 | 7 |
-
-**9/9 ผ่าน** — เฉลี่ย 30 insights ต่อ dataset report 0.8–1.6 MB
-
-### ความใกล้เคียงของข้อมูลหลัง clean()
-
-ThaiEDA รักษาสถิติข้อมูลเดิม วัด mean/std change ก่อน-หลัง cleaning บน 5 datasets:
-
-| Dataset | Mean change | Std change | NaN fixed | Memory reduction |
-|---------|------------:|----------:|----------:|----------------:|
-| titanic | 2.84% | 3.02% | 866→0 | 29.6% |
-| superstore | 0.00% | 0.00% | 0→0 | 59.6% |
-| adult | 0.00% | 0.00% | 0→0 | 89.0% |
-| winequality-red | 0.30% | 1.59% | 0→0 | 60.1% |
-| california-housing | 0.06% | 0.02% | 11→0 | 57.6% |
-
-**สถิติคงตัว** — mean เปลี่ยน <3%, std <3.2% ลด memory 30–89%
-
----
-
-## ตัวอย่างการใช้งาน
-
-### One-Line EDA
-
-```python
 import thaieda
-import pandas as pd
 
-df = pd.read_csv("data.csv")
-result = thaieda.run(df)
+df = pd.read_csv("orders.csv")
 
-result.to_html("report.html")
+result = thaieda.run(df, lang="en")
+result.to_html("orders.thaieda.html")
+
+print(result.overview)
 print(result.quality_issues)
 print(result.insights)
-
-# ใน Jupyter: แค่แสดง result
-result  # renders HTML inline
 ```
 
-### Folder Mode
+## Table of Contents
 
-```python
-import thaieda
+- [Why ThaiEDA Exists](#why-thaieda-exists)
+- [What It Solves](#what-it-solves)
+- [Why It Is Different](#why-it-is-different)
+- [Quickstart](#quickstart)
+- [Core Capabilities](#core-capabilities)
+- [Common Workflows](#common-workflows)
+- [LLM Privacy Modes](#llm-privacy-modes)
+- [CLI](#cli)
+- [Project Design](#project-design)
+- [Development](#development)
 
-results = thaieda.run_folder("data/")
-print(results.summary())
-results.to_html("reports/")
-results.to_master_html("master-report.html")
-```
+## Why ThaiEDA Exists
 
-รองรับ: CSV, TSV, Excel, JSON, JSONL, Parquet — `recursive=True` สำหรับ subfolders
+Most EDA tools are excellent at general-purpose profiling, but they often assume
+the data is already clean, Western-formatted, and English-first. Thai datasets
+usually are not like that.
 
-### Supported File Formats
+Real Thai business, public-sector, and research data often contains Buddhist Era
+years, Thai numerals, legacy encodings, zero-width spaces, mixed Thai/English
+text, Thai phone numbers, national ID formats, address fragments, and chart
+rendering issues caused by missing Thai fonts. These issues silently distort
+profiles, break parsing, split categories, hide quality problems, and make
+reports harder to trust.
 
-| Entry point | Supported formats |
-|-------------|-------------------|
-| `read_data()` | CSV, TSV, JSON, JSONL/NDJSON, Excel (`.xlsx`/`.xls`), Parquet |
-| `run_folder()` | CSV, TSV, JSON, JSONL/NDJSON, Excel (`.xlsx`/`.xls`), Parquet |
-| CLI `--format` | `auto`, `csv`, `tsv`, `json`, `jsonl`, `excel`, `parquet` |
-| `export_synthetic_data()` | CSV, TSV, JSON, Excel (`.xlsx`), Parquet |
+ThaiEDA was created to make that first EDA pass reliable for Thai data:
 
-### LLM Analysis (Privacy-Safe)
+- Detect the shape and language characteristics of a dataset.
+- Clean common Thai-specific data issues before they corrupt analysis.
+- Surface quality risks in plain language.
+- Find non-obvious relationships across columns.
+- Produce compact HTML reports that are useful to both analysts and decision
+  makers.
+- Let users ask an LLM for help without sending raw sensitive rows by default.
 
-```python
-result = thaieda.run(df, llm=True, privacy="insight_only", provider="ollama")
-print(result.llm_response)
-# Default: ไม่มีข้อมูลดิบออกจากเครื่อง
-```
+## What It Solves
 
-### Compare Two Datasets
+| Problem in real datasets | Why it matters | ThaiEDA response |
+| --- | --- | --- |
+| Buddhist Era dates such as `2567` | Years can be misread as future CE dates or numeric values | Detects BE patterns and converts to CE where appropriate |
+| Thai numerals in numeric columns | Numeric summaries become strings or NaN-heavy columns | Normalizes Thai digits to Arabic digits and coerces numeric columns |
+| Zero-width spaces and BOM characters | Duplicate categories and joins fail silently | Removes invisible characters and reports affected rows |
+| TIS-620/CP874/mojibake text | Thai text becomes unreadable and downstream NLP breaks | Detects legacy encodings and repairs common mojibake patterns |
+| Thai phone, ID, and address formats | PII, identifiers, and locations are missed by generic checks | Detects and normalizes Thai-specific formats |
+| Missing Thai fonts in charts | Reports show tofu boxes instead of readable labels | Uses Thai-aware chart rendering with bundled font support |
+| Mixed Thai/English columns | Language-specific rules trigger on the wrong columns | Detects Thai, English, mixed text, IDs, categories, dates, and numeric fields |
+| Large and wide tables | HTML reports become too large to open comfortably | Caps charts, collapses large tables, samples expensive stages, and downcasts dtypes |
 
-```python
-from thaieda import compare
+## Why It Is Different
 
-diff = compare(df_train, df_test, labels=("train", "test"))
-print(diff["schema_diff"])
-print(diff["drift"]["numeric"])
-```
+ThaiEDA is not just a prettier profile report. It is a Thai-aware EDA pipeline:
 
-### Thai ID Card Validation
+| Capability | General EDA profilers | ThaiEDA |
+| --- | --- | --- |
+| Descriptive profile report | Yes | Yes |
+| Thai-specific data cleaning | Usually manual | Built in |
+| Buddhist Era, Thai digits, zero-width spaces | Usually missed | First-class checks |
+| Thai chart/font handling | Often manual | Built in |
+| Cross-column insight discovery | Limited or separate | Built in with statistical scoring |
+| Anomaly detection | Separate workflow | Numeric, text, and Thai-specific checks |
+| Dataset quality scoring | Limited | Built in |
+| Multi-file schema discovery | Separate workflow | PK/FK discovery and relationship report |
+| Privacy-preserving LLM analysis | Usually raw prompt work | Five explicit privacy modes |
+| One-line end-to-end workflow | Partial | `thaieda.run(df)` |
 
-```python
-from thaieda.quality import validate_thai_id
+Use ThaiEDA when the dataset is Thai, mixed-language, messy, operational,
+privacy-sensitive, or intended for a business-facing EDA report. Use it alongside
+specialized modeling, monitoring, and BI tools when you need deeper downstream
+analysis.
 
-validate_thai_id("1-1234-56789-01-2")  # → True/False
-```
+## Quickstart
 
-### Thai Address Parsing
-
-```python
-from thaieda.detect import parse_thai_address
-
-addr = parse_thai_address("123 หมู่ 4 ต.บางบัว อ.บางบัว จ.กรุงเทพฯ 10230")
-# {'house_number': '123', 'moo': '4', 'subdistrict': 'บางบัว', ...}
-```
-
-### Smart Cleaning
-
-```python
-from thaieda.clean._smart import plan_cleaning
-
-plan = plan_cleaning(df)
-print(plan.actions)   # ['zwspace', 'numerals', 'duplicates']
-print(plan.skipped)   # ['encoding', 'whitespace']
-```
-
-### Statistical Accuracy
-
-```python
-from thaieda.insight_engine import discover_insights  # Spearman + Pearson
-from thaieda.analysis import analyze_target            # Cramér's V effect size
-from thaieda.quality import detect_missing_mechanism  # MCAR/MAR/MNAR
-from thaieda.quality import fit_distributions         # KS goodness-of-fit
-```
-
----
-
-## การจัดการข้อมูลขนาดใหญ่
-
-ทดสอบบน 19 public datasets — 500 ถึง 541K rows, 2 ถึง 171 columns:
-
-- **Insight capping** — แสดง 30 insight ที่สำคัญที่สุด สรุปบอกจำนวนจริง ("679 found, showing top 30")
-- **HTML bloat control** — สูงสุด 40 charts, 1.6 MB ตาราง collapse หลัง 50 แถว wide table เป็น summary หลัง 60 คอลัมน์
-- **Wide-table fast path** — insight engine sample เมื่อคอลัมน์เกิน 100
-- **Tall-table fast path** — anomaly/quality check sample 50K rows เมื่อข้อมูลเกิน 100K
-- **dtype downcasting** — int64→int32, float64→float32 ลดขนาด 50-70%
-
----
-
-## Modules
-
-| Module | ทำอะไร |
-|--------|--------|
-| `run()` / `EDA()` | One-liner API — full pipeline ในครั้งเดียว |
-| `run_folder()` | วิเคราะห์ทุกไฟล์ในโฟลเดอร์ + master HTML |
-| `compare()` | เปรียบเทียบสอง dataset + drift detection |
-| `io/` | auto-read CSV/TSV/JSON/Excel/Parquet + encoding detection |
-| `detect/` | column type detection + Thai months + address + language |
-| `clean/` | smart cleaning: encoding, numerals, BE, zwspace, duplicates, missing |
-| `quality/` | language-aware quality checks + score 0–100 + Thai ID validation |
-| `anomaly/` | statistical + ML + text anomaly detection |
-| `ner/` | Thai NER: person/place/organization |
-| `insight_engine/` | 6 cross-column insight patterns (BH-corrected) |
-| `viz/` | static + interactive charts + colorblind-safe palette |
-| `report/` | executive HTML report + smart pre-analysis |
-| `llm/` | privacy-preserving LLM analysis (4 modes, 3 providers) |
-| `timeseries/` | trend/seasonality/STL/ACF + Thai holiday awareness |
-| `schema/` | multi-file PK/FK discovery + relationship matching |
-
----
-
-## Installation
+### Install
 
 ```bash
 pip install thaieda
 ```
 
-ติดตั้งทุกอย่างในครั้งเดียว — Thai tokenizer, NER, ML, interactive charts, Excel, stats, encoding detection
-
-LLM providers (optional, lazy-imported):
+Install the full optional stack:
 
 ```bash
-pip install openai       # OpenAI GPT
-pip install anthropic    # Anthropic Claude
-pip install ollama       # Ollama local LLM
+pip install "thaieda[all]"
 ```
 
-**Requirements:** Python 3.10+
-
----
-
-## Testing
+Optional LLM provider clients are lazy-loaded. Install only the provider you use:
 
 ```bash
-pytest tests/ -v                    # run test suite
-ruff check src/ tests/              # lint
-ruff format src/ tests/             # format
+pip install openai
+pip install anthropic
+pip install ollama
 ```
 
----
+### One-Line EDA
+
+```python
+import pandas as pd
+import thaieda
+
+df = pd.read_csv("data.csv")
+
+result = thaieda.run(
+    df,
+    lang="en",
+    clean=True,
+    make_charts=True,
+    insights_engine=True,
+)
+
+result.to_html("report.html")
+result.to_json("report.json")
+
+cleaned_df = result.cleaned_df
+```
+
+`thaieda.EDA(df)` is an alias for `thaieda.run(df)`.
+
+### Pipeline
+
+```text
+DataFrame / file / folder
+  -> read and detect
+  -> smart cleaning
+  -> quality checks
+  -> anomaly detection
+  -> cross-column insights
+  -> visualizations
+  -> executive narrative
+  -> HTML / JSON report
+  -> optional privacy-preserving LLM analysis
+```
+
+## Core Capabilities
+
+### Smart Cleaning
+
+The v2 cleaning pipeline works on a copy of the DataFrame and returns an audit
+report describing what changed.
+
+```python
+cleaned, cleaning_report = thaieda.clean(
+    df,
+    handle_missing="ml",
+    remove_duplicates=True,
+    fix_dates=True,
+    downcast=True,
+)
+
+print(cleaning_report.to_dict())
+```
+
+It covers:
+
+- Encoding repair and Unicode normalization.
+- Zero-width space and whitespace cleanup.
+- Thai numeral normalization.
+- Buddhist Era to Common Era conversion.
+- Date and Thai month normalization.
+- Currency normalization.
+- Duplicate removal.
+- Missing-value handling, including ML imputation.
+- dtype downcasting for lower memory use.
+
+### Data Quality
+
+ThaiEDA checks for practical issues that often matter before modeling or
+reporting:
+
+- Missing values and mostly-missing columns.
+- Placeholder values such as `-`, `N/A`, `NULL`, and Thai equivalents.
+- Constant and low-information columns.
+- Buddhist Era and date-format problems.
+- Thai numerals inside numeric-like fields.
+- Zero-width characters and encoding artifacts.
+- Thai national ID checksum validation.
+- Phone number normalization.
+- Language-aware column interpretation.
+
+### Insight Discovery
+
+The insight engine searches across column combinations, not only individual
+columns. It can surface:
+
+- Strong numeric correlations.
+- Outlier-driven findings.
+- Segment comparisons.
+- Segment contribution and attribution patterns.
+- Trend patterns over ordered or date-like fields.
+- Statistically ranked insight cards with false-discovery control.
+
+### Executive Reports
+
+Reports are designed to be readable, compact, and shareable:
+
+- Standalone HTML output.
+- English or Thai labels via `lang="en"` or `lang="th"`.
+- Executive narrative generated offline, without an LLM.
+- Chart caps and collapsed tables for large/wide datasets.
+- JSON export for pipelines and downstream tooling.
+
+### Multi-File Schema Discovery
+
+ThaiEDA can profile a folder of related files as one dataset, infer key
+candidates, discover likely PK/FK relationships, and report orphan key values.
+
+```python
+from thaieda import DatasetReport, profile_dataset
+
+dataset = profile_dataset("data/warehouse", validate_values=True)
+DatasetReport(dataset, lang="en").to_html("schema-report.html")
+
+print(dataset.to_mermaid())
+```
+
+### Dataset Comparison
+
+Compare two DataFrames for schema differences, row-count changes, numeric drift,
+missing-value changes, and categorical shifts.
+
+```python
+from thaieda import compare
+
+diff = compare(train_df, current_df, labels=("train", "current"))
+
+print(diff["schema_diff"])
+print(diff["distribution_drift"])
+print(diff["categorical_drift"])
+```
+
+## Common Workflows
+
+### Analyze a Folder
+
+```python
+import thaieda
+
+folder_result = thaieda.run_folder(
+    "data",
+    recursive=True,
+    output_dir="reports",
+    lang="en",
+)
+
+print(folder_result.summary())
+folder_result.to_master_html("reports/index.html")
+```
+
+Supported input formats include CSV, TSV, JSON, JSONL/NDJSON, Excel, and
+Parquet.
+
+### Read Data With Auto Detection
+
+```python
+from thaieda import read_data
+
+df = read_data("orders.xlsx")
+df = read_data("legacy-thai.csv", encoding="auto")
+df = read_data("events.parquet", downcast=True)
+```
+
+### Privacy-Aware LLM Analysis
+
+```python
+result = thaieda.run(
+    df,
+    lang="en",
+    llm=True,
+    provider="ollama",
+    privacy="insight_only",
+)
+
+print(result.llm_response)
+```
+
+You can also use the LLM module directly:
+
+```python
+from thaieda.llm import analyze_with_llm
+
+response = analyze_with_llm(
+    df,
+    privacy="synthetic",
+    provider="openai",
+    language="en",
+)
+```
+
+### Generate Synthetic Data for Safer Sharing
+
+```python
+from thaieda.llm import export_synthetic_data
+
+summary = export_synthetic_data(
+    df,
+    "synthetic-orders.parquet",
+    n_rows=5000,
+    include_audit=True,
+)
+
+print(summary)
+```
+
+## LLM Privacy Modes
+
+LLM analysis is optional and off by default. When enabled, ThaiEDA prepares data
+according to an explicit privacy mode before building the prompt.
+
+| Mode | What the LLM sees | Risk level | Typical use |
+| --- | --- | --- | --- |
+| `insight_only` | Summary stats and insight cards only | Low | Default for sensitive data |
+| `synthetic` | Generated rows with similar statistical properties | Low | Need row-like shape without real records |
+| `anonymized` | Data with PII replaced by tokens | Medium | Need structure while masking obvious PII |
+| `dp_noise` | Summary stats with Laplace noise | Low | Small or sensitive datasets |
+| `full` | Raw rows | High | Public data or explicit risk acceptance |
+
+Providers:
+
+| Provider | Default model | Environment |
+| --- | --- | --- |
+| `openai` | `gpt-4o-mini` | `OPENAI_API_KEY` |
+| `anthropic` | `claude-3-5-sonnet-20241022` | `ANTHROPIC_API_KEY` |
+| `ollama` | `llama3.1` | `OLLAMA_HOST` or local default |
+
+## CLI
+
+ThaiEDA includes a command-line interface for reports, cleaning, and multi-file
+dataset profiling.
+
+```bash
+thaieda --version
+
+thaieda profile data.csv -o report.html --lang en
+thaieda run data.csv -o report.html --cleaned-output cleaned.csv --lang en
+thaieda clean data.csv -o cleaned.csv
+thaieda dataset data/warehouse -o schema-report.html --lang en
+```
+
+Useful flags:
+
+```bash
+--format auto|csv|tsv|json|jsonl|excel|parquet
+--encoding auto
+--target COLUMN
+--no-charts
+--no-insights
+--no-timeseries
+--sample N
+--quiet
+--json output.json
+```
+
+## API Overview
+
+| API | Purpose |
+| --- | --- |
+| `thaieda.run(df)` / `thaieda.EDA(df)` | Full one-line EDA pipeline |
+| `EDAResult.to_html()` / `.to_json()` / `.to_dict()` | Export analysis results |
+| `thaieda.run_folder(path)` | Analyze every supported file in a folder |
+| `thaieda.clean(df)` | DataFrame-level smart cleaning pipeline |
+| `thaieda.read_data(path)` | Auto-detect format and encoding |
+| `thaieda.compare(df1, df2)` | Compare schema, stats, and drift |
+| `thaieda.profile_dataset(path)` | Discover multi-file schema relationships |
+| `thaieda.DatasetReport(dataset)` | Render multi-file schema report |
+| `thaieda.llm.analyze_with_llm()` | LLM analysis with privacy controls |
+| `thaieda.llm.export_synthetic_data()` | Export generated synthetic data plus audit |
+
+## Project Design
+
+ThaiEDA follows a few practical engineering rules:
+
+- Prefer vectorized pandas operations over row-by-row loops.
+- Keep optional heavy dependencies lazy-loaded.
+- Fail loudly with helpful messages instead of silently degrading behavior.
+- Use a non-GUI matplotlib backend for headless environments.
+- Keep reports compact enough to share and open.
+- Treat Thai data problems as first-class EDA concerns, not edge cases.
+
+## Development
+
+```bash
+python -m pytest
+ruff check src tests
+ruff format src tests
+```
+
+The source package lives under `src/thaieda/`, with tests under `tests/`.
+
+## Project Status
+
+- Current version: `2.0.0`
+- Python: `3.10+`
+- License: Apache-2.0
+- Repository: <https://github.com/peetwan/thaieda>
+- PyPI: <https://pypi.org/project/thaieda/>
 
 ## License
 
-[Apache-2.0](LICENSE) © Peet Wannasarnmetha
+ThaiEDA is released under the [Apache-2.0 License](LICENSE).
