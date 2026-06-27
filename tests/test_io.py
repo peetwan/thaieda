@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 
 import pandas as pd
@@ -10,13 +11,25 @@ import pytest
 from thaieda.io import detect_encoding, detect_format, read_data
 
 
+def _has_parquet_engine() -> bool:
+    with contextlib.suppress(ImportError):
+        import pyarrow  # noqa: F401
+
+        return True
+    with contextlib.suppress(ImportError):
+        import fastparquet  # noqa: F401
+
+        return True
+    return False
+
+
 # ------------------------------------------------------------- detect_format
 def test_detect_format_csv(tmp_path):
     assert detect_format(tmp_path / "data.csv") == "csv"
 
 
 def test_detect_format_tsv(tmp_path):
-    assert detect_format(tmp_path / "data.tsv") == "csv"
+    assert detect_format(tmp_path / "data.tsv") == "tsv"
 
 
 def test_detect_format_json(tmp_path):
@@ -26,6 +39,12 @@ def test_detect_format_json(tmp_path):
 def test_detect_format_jsonl(tmp_path):
     assert detect_format(tmp_path / "data.jsonl") == "jsonl"
     assert detect_format(tmp_path / "data.ndjson") == "jsonl"
+
+
+def test_detect_format_excel_and_parquet(tmp_path):
+    assert detect_format(tmp_path / "data.xlsx") == "excel"
+    assert detect_format(tmp_path / "data.xls") == "excel"
+    assert detect_format(tmp_path / "data.parquet") == "parquet"
 
 
 def test_detect_format_unknown_defaults_csv(tmp_path):
@@ -80,6 +99,34 @@ def test_read_data_csv_explicit_encoding(tmp_path):
     f = tmp_path / "data.csv"
     f.write_text("a,b\n1,2\n", encoding="utf-8")
     df = read_data(f, format="csv", encoding="utf-8")
+    assert len(df) == 1
+
+
+def test_read_data_tsv_explicit_format(tmp_path):
+    f = tmp_path / "data.txt"
+    f.write_text("a\tb\n1\t2\n", encoding="utf-8")
+    df = read_data(f, format="tsv", encoding="utf-8")
+    assert list(df.columns) == ["a", "b"]
+    assert df["b"].iloc[0] == 2
+
+
+def test_read_data_excel(tmp_path):
+    f = tmp_path / "data.xlsx"
+    pd.DataFrame({"a": [1], "b": [2]}).to_excel(f, index=False)
+    df = read_data(f)
+    assert list(df.columns) == ["a", "b"]
+    assert len(df) == 1
+
+
+@pytest.mark.skipif(
+    not _has_parquet_engine(),
+    reason="ต้องติดตั้ง pyarrow หรือ fastparquet สำหรับ Parquet",
+)
+def test_read_data_parquet(tmp_path):
+    f = tmp_path / "data.parquet"
+    pd.DataFrame({"a": [1], "b": [2]}).to_parquet(f, index=False)
+    df = read_data(f)
+    assert list(df.columns) == ["a", "b"]
     assert len(df) == 1
 
 

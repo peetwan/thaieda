@@ -21,16 +21,18 @@ _ENCODING_CANDIDATES: tuple[str, ...] = ("utf-8", "tis-620", "cp874", "cp1252")
 # นามสกุลไฟล์ -> format
 _EXT_TO_FORMAT: dict[str, str] = {
     ".csv": "csv",
-    ".tsv": "csv",
+    ".tsv": "tsv",
     ".json": "json",
     ".jsonl": "jsonl",
     ".ndjson": "jsonl",
     ".xlsx": "excel",
     ".xls": "excel",
+    ".parquet": "parquet",
 }
 
 # format ที่รองรับ
-_VALID_FORMATS: frozenset[str] = frozenset({"csv", "json", "jsonl", "excel"})
+_VALID_FORMATS: frozenset[str] = frozenset({"csv", "tsv", "json", "jsonl", "excel", "parquet"})
+_BINARY_FORMATS: frozenset[str] = frozenset({"excel", "parquet"})
 
 
 def _can_decode(raw: bytes, encoding: str) -> bool:
@@ -133,6 +135,11 @@ def _read_csv(path: Path, encoding: str) -> pd.DataFrame:
     return pd.read_csv(path, encoding=encoding, sep=sep)
 
 
+def _read_tsv(path: Path, encoding: str) -> pd.DataFrame:
+    """อ่านไฟล์ TSV เมื่อระบุ format='tsv' โดยตรง."""
+    return pd.read_csv(path, encoding=encoding, sep="\t")
+
+
 def _read_json_lines(path: Path, encoding: str) -> pd.DataFrame:
     """อ่าน JSON Lines (หนึ่ง JSON object ต่อหนึ่งบรรทัด)."""
     return pd.read_json(path, lines=True, encoding=encoding)
@@ -165,17 +172,33 @@ def _read_excel(path: Path) -> pd.DataFrame:
         ) from exc
 
 
+def _read_parquet(path: Path) -> pd.DataFrame:
+    """อ่านไฟล์ Parquet — ต้องมี pyarrow หรือ fastparquet."""
+    try:
+        return pd.read_parquet(path)
+    except ImportError as exc:
+        raise ImportError(
+            "Parquet support requires pip install pyarrow (หรือ pip install thaieda[parquet])"
+        ) from exc
+
+
 def _read_with_format(path: Path, fmt: str, encoding: str) -> pd.DataFrame:
-    """อ่านไฟล์ตาม format ที่ระบุ (csv/json/jsonl/excel)."""
+    """อ่านไฟล์ตาม format ที่ระบุ (csv/tsv/json/jsonl/excel/parquet)."""
     if fmt == "csv":
         return _read_csv(path, encoding)
+    if fmt == "tsv":
+        return _read_tsv(path, encoding)
     if fmt == "jsonl":
         return _read_json_lines(path, encoding)
     if fmt == "json":
         return _read_json_any(path, encoding)
     if fmt == "excel":
         return _read_excel(path)
-    raise ValueError(f"format ไม่รองรับ: {fmt!r} — รองรับเฉพาะ auto, csv, json, jsonl, excel")
+    if fmt == "parquet":
+        return _read_parquet(path)
+    raise ValueError(
+        f"format ไม่รองรับ: {fmt!r} — รองรับเฉพาะ auto, csv, tsv, json, jsonl, excel, parquet"
+    )
 
 
 def read_data(
@@ -205,15 +228,25 @@ def read_data(
     if not p.is_file():
         raise FileNotFoundError(f"ไม่พบไฟล์: {p}")
 
-    if format != "auto" and format not in _VALID_FORMATS:
-        raise ValueError(f"format ไม่รองรับ: {format!r} — รองรับเฉพาะ auto, csv, json, jsonl, excel")
-
-    enc = detect_encoding(p) if encoding == "auto" else encoding
     auto_format = format == "auto"
     fmt = detect_format(p) if auto_format else format
+    if format != "auto" and format not in _VALID_FORMATS:
+        raise ValueError(
+            f"format ไม่รองรับ: {format!r} — รองรับเฉพาะ auto, csv, tsv, json, jsonl, excel, parquet"
+        )
+
+    enc = (
+        "utf-8"
+        if fmt in _BINARY_FORMATS
+        else detect_encoding(p)
+        if encoding == "auto"
+        else encoding
+    )
 
     # ข้อความบอก encoding ที่ลอง — ช่วยผู้ใช้รู้ว่าควรระบุ --encoding อะไรถ้าอ่านไม่ออก
-    if encoding == "auto":
+    if fmt in _BINARY_FORMATS:
+        tried_enc = f"binary format: {fmt}"
+    elif encoding == "auto":
         tried_enc = f"encoding ที่ลอง: {', '.join(_ENCODING_CANDIDATES)} (เลือก {enc})"
     else:
         tried_enc = f"encoding: {enc}"
@@ -225,7 +258,7 @@ def read_data(
         if not auto_format:
             raise ValueError(f"อ่านไฟล์ {p} แบบ {fmt} ไม่สำเร็จ ({tried_enc}): {exc}") from exc
         # เดา format เอง — ลอง format อื่นที่เหลือ (เช่น ไม่มีนามสกุล → ลอง csv แล้ว json)
-        for alt in ("json", "csv"):
+        for alt in ("json", "jsonl", "csv", "tsv"):
             if alt == fmt:
                 continue
             try:
@@ -235,7 +268,7 @@ def read_data(
                 continue
         if df is None:
             raise ValueError(
-                f"อ่านไฟล์ {p} ไม่สำเร็จ (ลองทั้ง CSV และ JSON แล้ว, {tried_enc}): {exc}"
+                f"อ่านไฟล์ {p} ไม่สำเร็จ (ลอง CSV, TSV และ JSON แล้ว, {tried_enc}): {exc}"
             ) from exc
 
     if downcast:

@@ -55,6 +55,12 @@ class TestGracefulLLM:
         assert result.narrative is not None
         assert result.llm_response == result.narrative.executive_summary_th
 
+    def test_llm_fallback_respects_english_language(self, no_api_keys):
+        result = _fast_run(_small_df(), llm=True, provider="openai", lang="en")
+        assert result.narrative is not None
+        assert result.llm_response == result.narrative.executive_summary_en
+        assert result.llm_response != result.narrative.executive_summary_th
+
     def test_degradation_note_added(self, no_api_keys):
         result = _fast_run(_small_df(), llm=True, provider="openai")
         assert any("LLM" in note for note in result.notes)

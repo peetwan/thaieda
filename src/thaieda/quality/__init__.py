@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import re
 import unicodedata
 from dataclasses import dataclass, field
@@ -1122,9 +1123,9 @@ def fit_distributions(series: pd.Series, column: str) -> DistributionFitResult |
     all_fits: list[dict[str, Any]] = []
 
     # Normal distribution
-    try:
+    with contextlib.suppress(Exception):
         mu, sigma = st.norm.fit(values)
-        ks_stat, p_val = st.kstest(values, "norm", args=(mu, sigma))
+        ks_stat, p_val = st.kstest(values, st.norm.cdf, args=(mu, sigma))
         all_fits.append(
             {
                 "distribution": "normal",
@@ -1133,14 +1134,12 @@ def fit_distributions(series: pd.Series, column: str) -> DistributionFitResult |
                 "parameters": {"mean": float(mu), "std": float(sigma)},
             }
         )
-    except Exception:
-        pass
 
     # Lognormal distribution (ต้องมีค่าบวก)
     if (values > 0).all():
-        try:
+        with contextlib.suppress(Exception):
             shape, loc, scale = st.lognorm.fit(values, floc=0)
-            ks_stat, p_val = st.kstest(values, "lognorm", args=(shape, loc, scale))
+            ks_stat, p_val = st.kstest(values, st.lognorm.cdf, args=(shape, loc, scale))
             all_fits.append(
                 {
                     "distribution": "lognormal",
@@ -1149,14 +1148,12 @@ def fit_distributions(series: pd.Series, column: str) -> DistributionFitResult |
                     "parameters": {"shape": float(shape), "loc": float(loc), "scale": float(scale)},
                 }
             )
-        except Exception:
-            pass
 
     # Exponential distribution (ต้องมีค่าไม่ติดลบ)
     if (values >= 0).all():
-        try:
+        with contextlib.suppress(Exception):
             loc, scale = st.expon.fit(values)
-            ks_stat, p_val = st.kstest(values, "expon", args=(loc, scale))
+            ks_stat, p_val = st.kstest(values, st.expon.cdf, args=(loc, scale))
             all_fits.append(
                 {
                     "distribution": "exponential",
@@ -1165,13 +1162,11 @@ def fit_distributions(series: pd.Series, column: str) -> DistributionFitResult |
                     "parameters": {"loc": float(loc), "scale": float(scale)},
                 }
             )
-        except Exception:
-            pass
 
     # Uniform distribution
-    try:
+    with contextlib.suppress(Exception):
         loc, scale = st.uniform.fit(values)
-        ks_stat, p_val = st.kstest(values, "uniform", args=(loc, scale))
+        ks_stat, p_val = st.kstest(values, st.uniform.cdf, args=(loc, scale))
         all_fits.append(
             {
                 "distribution": "uniform",
@@ -1180,8 +1175,6 @@ def fit_distributions(series: pd.Series, column: str) -> DistributionFitResult |
                 "parameters": {"loc": float(loc), "scale": float(scale)},
             }
         )
-    except Exception:
-        pass
 
     if not all_fits:
         return None

@@ -53,6 +53,13 @@ class TestExportSyntheticData:
         read = pd.read_csv(path)
         assert len(read) == 200
 
+    def test_export_tsv(self, sample_df, tmp_path):
+        path = tmp_path / "synthetic.tsv"
+        result = export_synthetic_data(sample_df, str(path), include_audit=False)
+        assert Path(result["output_path"]).exists()
+        read = pd.read_csv(path, sep="\t")
+        assert len(read) == 200
+
     def test_export_xlsx(self, sample_df, tmp_path):
         """export เป็น XLSX."""
         path = tmp_path / "synthetic.xlsx"

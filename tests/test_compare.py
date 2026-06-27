@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import warnings
+
 import pandas as pd
 
+import thaieda
 from thaieda.compare import compare_datasets, compare_reports
 
 
@@ -34,6 +37,25 @@ def test_same_dataframes_no_diffs() -> None:
     else:
         assert drift["method"] == "mean_std"
         assert drift["cohens_d"] == 0.0
+
+
+def test_top_level_compare_alias() -> None:
+    df = pd.DataFrame({"x": [1, 2, 3]})
+    result = thaieda.compare(df, df.copy())
+    assert result["row_count"]["diff"] == 0
+
+
+def test_infinite_values_do_not_emit_runtime_warning() -> None:
+    df_a = pd.DataFrame({"x": [1.0, 2.0, float("inf")]})
+    df_b = pd.DataFrame({"x": [1.0, 3.0, float("-inf")]})
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", RuntimeWarning)
+        result = compare_datasets(df_a, df_b)
+
+    assert not [w for w in caught if issubclass(w.category, RuntimeWarning)]
+    assert result["numeric_stats_diff"]["x"]["A"]["count"] == 2
+    assert result["numeric_stats_diff"]["x"]["B"]["count"] == 2
 
 
 def test_different_row_counts_shows_diff() -> None:

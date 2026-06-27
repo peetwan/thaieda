@@ -22,10 +22,10 @@ from thaieda import __version__
 from thaieda.i18n import label
 
 # ตัวเลือก format ที่รองรับสำหรับการอ่านไฟล์
-_FORMAT_CHOICES = ["auto", "csv", "json", "jsonl"]
+_FORMAT_CHOICES = ["auto", "csv", "tsv", "json", "jsonl", "excel", "parquet"]
 
 # นามสกุลไฟล์ที่นับเป็น "ตาราง" เมื่อสแกนไดเรกทอรี (โหมด dataset หลายตาราง)
-_DATASET_EXTS = (".csv", ".tsv", ".json", ".jsonl", ".ndjson")
+_DATASET_EXTS = (".csv", ".tsv", ".json", ".jsonl", ".ndjson", ".xlsx", ".xls", ".parquet")
 
 # ขนาดไฟล์ที่ถือว่า "ใหญ่" (10MB) — แสดงจำนวนแถวหลังอ่าน และแนะนำ flag เพื่อความเร็ว
 _LARGE_FILE_BYTES = 10 * 1024 * 1024
@@ -278,7 +278,7 @@ def _read_input(args: argparse.Namespace, quiet: bool = False, color: bool = Fal
     except ValueError as exc:
         print(
             f"error: อ่านไฟล์ไม่สำเร็จ: {exc} — "
-            "ลองระบุ --format csv/json/jsonl หรือ --encoding tis-620/cp874",
+            "ลองระบุ --format csv/tsv/json/jsonl/excel/parquet หรือ --encoding tis-620/cp874",
             file=sys.stderr,
         )
         return None, 1

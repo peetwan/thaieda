@@ -56,6 +56,7 @@ dependencies = [
     "rapidfuzz>=3.0",
     "chardet>=5.0",
     "openpyxl>=3.1",
+    "pyarrow>=14.0",
 ]
 
 [project.optional-dependencies]
@@ -81,6 +82,8 @@ ner = ["pythainlp>=5.0", "python-crfsuite>=0.9"]
 fuzzy = ["rapidfuzz>=3.0"]
 # Automatic encoding detection for read_data (thaieda.io)
 detect = ["chardet>=5.0"]
+# Parquet I/O
+parquet = ["pyarrow>=14.0"]
 # LLM Q&A (v0.3+)
 llm = ["litellm>=1.0"]
 # ติดตั้งทุกอย่างในคำสั่งเดียว — pip install thaieda[all]
@@ -98,6 +101,7 @@ all = [
     "chardet>=5.0",
     "litellm>=1.0",
     "openpyxl>=3.1",
+    "pyarrow>=14.0",
 ]
 # Development dependencies
 dev = [

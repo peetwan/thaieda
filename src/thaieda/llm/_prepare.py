@@ -162,7 +162,7 @@ def _compute_summary(df: pd.DataFrame) -> dict[str, Any]:
     }
 
     # สถิติเชิงตัวเลข — vectorized
-    numeric = df.select_dtypes(include="number")
+    numeric = df.select_dtypes(include="number").replace([np.inf, -np.inf], np.nan)
     if numeric.shape[1] > 0:
         desc = numeric.describe()
         summary["numeric_stats"] = {

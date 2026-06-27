@@ -20,7 +20,16 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-__all__ = ["compare_datasets", "compare_reports"]
+__all__ = ["compare", "compare_datasets", "compare_reports"]
+
+
+def _finite_numeric(series: pd.Series) -> pd.Series:
+    """Return numeric values excluding NaN and +/-inf."""
+    numeric = pd.to_numeric(series, errors="coerce").dropna()
+    if numeric.empty:
+        return numeric
+    finite = np.isfinite(numeric.to_numpy(dtype="float64"))
+    return numeric[finite]
 
 
 # ----------------------------------------------------------------------------
@@ -120,14 +129,17 @@ def compare_datasets(
     ]
 
     for col in numeric_common:
-        s1 = pd.to_numeric(df1[col], errors="coerce").dropna()
-        s2 = pd.to_numeric(df2[col], errors="coerce").dropna()
+        s1 = _finite_numeric(df1[col])
+        s2 = _finite_numeric(df2[col])
 
         def _safe_stat(func, s, default=None):
             if len(s) == 0:
                 return default
             try:
-                return round(float(func(s)), 4)
+                value = float(func(s))
+                if not math.isfinite(value):
+                    return default
+                return round(value, 4)
             except (ValueError, OverflowError, ZeroDivisionError):
                 return default
 
@@ -452,3 +464,6 @@ def _diff_or_none(a: float | int | None, b: float | int | None) -> float | None:
     if a is None or b is None:
         return None
     return round(float(b - a), 4)
+
+
+compare = compare_datasets

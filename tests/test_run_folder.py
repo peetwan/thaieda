@@ -184,6 +184,16 @@ class TestRunFolderKwargs:
         result = run_folder(tmp_csv_folder, save_html=False, make_charts=False, clean=False)
         assert result.success == 3
 
+    def test_narrative_false(self, tmp_csv_folder):
+        result = run_folder(
+            tmp_csv_folder,
+            save_html=False,
+            make_charts=False,
+            narrative=False,
+        )
+        assert result.success == 3
+        assert all(fr.result is not None and fr.result.narrative is None for fr in result.results)
+
     def test_invalid_kwarg_ignored(self, tmp_csv_folder):
         """kwargs ที่ run() ไม่รองรับ ถูกกรองออก ไม่พัง."""
         result = run_folder(

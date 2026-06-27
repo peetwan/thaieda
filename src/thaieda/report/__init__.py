@@ -11,6 +11,7 @@ import re
 from collections.abc import Callable
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from thaieda import __version__
@@ -479,6 +480,8 @@ class ProfileReport:
         if target_column is not None and target_column not in df.columns:
             raise KeyError(f"target_column {target_column!r} not found in DataFrame.")
         self.df = df
+        self._rows_before_cleaning = len(df)
+        self._rows_after_cleaning = len(df)
         self.lang = lang
         self.tokenizer_engine = tokenizer_engine
         self.max_sample = max_sample
@@ -974,6 +977,7 @@ class ProfileReport:
         ใช้ DEFAULT_OPERATIONS ของ clean_thai_text (แก้ encoding/zw/ช่องว่าง/normalize ฯลฯ)
         เก็บเฉพาะการดำเนินการที่มีผล (>0 แถว) ไว้ใน self._cleaning_diff เพื่อแสดงก่อน/หลังในรายงาน
         """
+        self._rows_before_cleaning = len(self.df)
         cleaned_df = self.df.copy()
         diffs: list[CleaningResult] = []
 
@@ -1012,6 +1016,7 @@ class ProfileReport:
             cleaned_df[col] = cleaned
             diffs.extend(r for r in results if r.rows_affected > 0)
         self.df = cleaned_df
+        self._rows_after_cleaning = len(cleaned_df)
         self._cleaning_diff = diffs
 
     def _compute_cleaning_suggestions(self) -> list[CleaningResult]:
@@ -1076,6 +1081,11 @@ class ProfileReport:
             "missing_cells": missing,
             "missing_pct": round((missing / total_cells * 100.0) if total_cells else 0.0, 2),
             "duplicate_rows": int(df.duplicated().sum()),
+            "rows_before_cleaning": int(self._rows_before_cleaning),
+            "rows_after_cleaning": int(self._rows_after_cleaning),
+            "rows_removed_by_cleaning": int(
+                max(self._rows_before_cleaning - self._rows_after_cleaning, 0)
+            ),
             "ignored_columns": sorted(self._ignored_columns),
             "type_counts": type_counts,
         }
@@ -1094,7 +1104,12 @@ class ProfileReport:
             if col in self._ignored_columns:
                 stats["note"] = "ignored: index/date component artifact"
                 return stats
-            numeric = pd.to_numeric(series, errors="coerce").dropna()
+            numeric = pd.to_numeric(series, errors="coerce")
+            finite = pd.Series(
+                np.isfinite(numeric.to_numpy(dtype="float64", na_value=np.nan)),
+                index=numeric.index,
+            )
+            numeric = numeric[numeric.notna() & finite]
             if len(numeric) > 0:
                 stats.update(
                     {

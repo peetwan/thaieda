@@ -5,7 +5,7 @@
 [![PyPI](https://img.shields.io/pypi/v/thaieda.svg)](https://pypi.org/project/thaieda/)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-yellow.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Tests: 878 passed](https://img.shields.io/badge/tests-878%20passed-brightgreen.svg)]()
+[![CI](https://github.com/peetwan/thaieda/actions/workflows/ci.yml/badge.svg)](https://github.com/peetwan/thaieda/actions/workflows/ci.yml)
 [![Code Style: ruff](https://img.shields.io/badge/code%20style-ruff-261230.svg)](https://docs.astral.sh/ruff/)
 
 ---
@@ -232,7 +232,16 @@ results.to_html("reports/")
 results.to_master_html("master-report.html")
 ```
 
-รองรับ: CSV, Excel, JSON, JSONL, TSV — `recursive=True` สำหรับ subfolders
+รองรับ: CSV, TSV, Excel, JSON, JSONL, Parquet — `recursive=True` สำหรับ subfolders
+
+### Supported File Formats
+
+| Entry point | Supported formats |
+|-------------|-------------------|
+| `read_data()` | CSV, TSV, JSON, JSONL/NDJSON, Excel (`.xlsx`/`.xls`), Parquet |
+| `run_folder()` | CSV, TSV, JSON, JSONL/NDJSON, Excel (`.xlsx`/`.xls`), Parquet |
+| CLI `--format` | `auto`, `csv`, `tsv`, `json`, `jsonl`, `excel`, `parquet` |
+| `export_synthetic_data()` | CSV, TSV, JSON, Excel (`.xlsx`), Parquet |
 
 ### LLM Analysis (Privacy-Safe)
 
@@ -245,9 +254,9 @@ print(result.llm_response)
 ### Compare Two Datasets
 
 ```python
-from thaieda.compare import compare_datasets
+from thaieda import compare
 
-diff = compare_datasets(df_train, df_test, labels=("train", "test"))
+diff = compare(df_train, df_test, labels=("train", "test"))
 print(diff["schema_diff"])
 print(diff["drift"]["numeric"])
 ```
@@ -309,7 +318,7 @@ from thaieda.quality import fit_distributions         # KS goodness-of-fit
 | `run()` / `EDA()` | One-liner API — full pipeline ในครั้งเดียว |
 | `run_folder()` | วิเคราะห์ทุกไฟล์ในโฟลเดอร์ + master HTML |
 | `compare()` | เปรียบเทียบสอง dataset + drift detection |
-| `io/` | auto-read CSV/JSON/Excel + encoding detection |
+| `io/` | auto-read CSV/TSV/JSON/Excel/Parquet + encoding detection |
 | `detect/` | column type detection + Thai months + address + language |
 | `clean/` | smart cleaning: encoding, numerals, BE, zwspace, duplicates, missing |
 | `quality/` | language-aware quality checks + score 0–100 + Thai ID validation |
@@ -347,7 +356,7 @@ pip install ollama       # Ollama local LLM
 ## Testing
 
 ```bash
-pytest tests/ -v                    # 878 tests passed
+pytest tests/ -v                    # run test suite
 ruff check src/ tests/              # lint
 ruff format src/ tests/             # format
 ```

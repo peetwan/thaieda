@@ -30,6 +30,8 @@ from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 
+from thaieda.compare import compare_datasets as compare
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -73,6 +75,7 @@ __all__ = [
     "EDAResult",
     "run_folder",
     "FolderResult",
+    "compare",
     "clean",
     "CleaningReport",
     "downcast_dtypes",
@@ -287,10 +290,24 @@ def run(
             # v2.0: graceful degradation — ไม่มี API key / ไม่มี package → ใช้ template narrative แทน
             if narrative_result is None:
                 narrative_result = _build_narrative(report, language=llm_language or lang)
-            llm_response = narrative_result.executive_summary_th
+            fallback_language = llm_language or lang
+            llm_response = (
+                narrative_result.executive_summary_en
+                if fallback_language == "en"
+                else narrative_result.executive_summary_th
+            )
             notes.append(
                 f"LLM ไม่พร้อมใช้งาน ({exc}) — ใช้บทสรุปแบบ template (narrative) แทน โดยไม่ต้องใช้ API key"
             )
+
+    rows_removed = int(report.overview.get("rows_removed_by_cleaning", 0) or 0)
+    if rows_removed > 0:
+        notes.append(
+            "clean=True removed duplicate rows: "
+            f"{report.overview.get('rows_before_cleaning')} -> "
+            f"{report.overview.get('rows_after_cleaning')} rows "
+            f"({rows_removed} removed)."
+        )
 
     return EDAResult(
         report=report,
@@ -631,7 +648,7 @@ class FolderResult:
 # ----------------------------------------------------------------------------
 # run_folder() — one-liner สำหรับวิเคราะห์ทุกไฟล์ในโฟลเดอร์
 # ----------------------------------------------------------------------------
-_SUPPORTED_EXTENSIONS = {".csv", ".xlsx", ".xls", ".json", ".jsonl", ".tsv"}
+_SUPPORTED_EXTENSIONS = {".csv", ".xlsx", ".xls", ".json", ".jsonl", ".tsv", ".parquet"}
 
 # พารามิเตอร์ที่ส่งต่อไปยัง run()
 _RUN_PARAMS = (
@@ -649,6 +666,7 @@ _RUN_PARAMS = (
     "model",
     "llm_language",
     "epsilon",
+    "narrative",
 )
 
 
@@ -791,6 +809,10 @@ def __getattr__(name: str):
         import thaieda.io as _io
 
         return getattr(_io, name)
+    if name == "compare":
+        from thaieda.compare import compare_datasets
+
+        return compare_datasets
     if name in (
         "profile_dataset",
         "DatasetProfile",

@@ -14,6 +14,7 @@ Pipeline สร้าง DataFrame ที่มีคุณสมบัติท
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 import numpy as np
@@ -220,56 +221,44 @@ def _fit_distributions(values: np.ndarray, st: Any) -> list[tuple[str, Any, floa
     candidates: list[tuple[str, Any, float, float]] = []
 
     # Normal
-    try:
+    with contextlib.suppress(Exception):
         mu, sigma = st.norm.fit(values)
-        ks_stat, p_val = st.kstest(values, "norm", args=(mu, sigma))
+        ks_stat, p_val = st.kstest(values, st.norm.cdf, args=(mu, sigma))
         candidates.append(("normal", (mu, sigma), float(p_val), float(ks_stat)))
-    except Exception:
-        pass
 
     # Lognormal (ต้องมีค่าบวก)
     if (values > 0).all():
-        try:
+        with contextlib.suppress(Exception):
             shape, loc, scale = st.lognorm.fit(values, floc=0)
-            ks_stat, p_val = st.kstest(values, "lognorm", args=(shape, loc, scale))
+            ks_stat, p_val = st.kstest(values, st.lognorm.cdf, args=(shape, loc, scale))
             candidates.append(("lognormal", (shape, loc, scale), float(p_val), float(ks_stat)))
-        except Exception:
-            pass
 
     # Exponential
     if (values >= 0).all():
-        try:
+        with contextlib.suppress(Exception):
             loc, scale = st.expon.fit(values)
-            ks_stat, p_val = st.kstest(values, "expon", args=(loc, scale))
+            ks_stat, p_val = st.kstest(values, st.expon.cdf, args=(loc, scale))
             candidates.append(("exponential", (loc, scale), float(p_val), float(ks_stat)))
-        except Exception:
-            pass
 
     # Gamma (ต้องไม่ติดลบ) — เพิ่ม v1.9.3
     if (values >= 0).all() and len(values) >= 20:
-        try:
+        with contextlib.suppress(Exception):
             a, loc, scale = st.gamma.fit(values, floc=0)
-            ks_stat, p_val = st.kstest(values, "gamma", args=(a, loc, scale))
+            ks_stat, p_val = st.kstest(values, st.gamma.cdf, args=(a, loc, scale))
             candidates.append(("gamma", (a, loc, scale), float(p_val), float(ks_stat)))
-        except Exception:
-            pass
 
     # Weibull (ต้องไม่ติดลบ) — เพิ่ม v1.9.3
     if (values >= 0).all() and len(values) >= 20:
-        try:
+        with contextlib.suppress(Exception):
             c, loc, scale = st.weibull_min.fit(values, floc=0)
-            ks_stat, p_val = st.kstest(values, "weibull_min", args=(c, loc, scale))
+            ks_stat, p_val = st.kstest(values, st.weibull_min.cdf, args=(c, loc, scale))
             candidates.append(("weibull", (c, loc, scale), float(p_val), float(ks_stat)))
-        except Exception:
-            pass
 
     # Uniform
-    try:
+    with contextlib.suppress(Exception):
         loc, scale = st.uniform.fit(values)
-        ks_stat, p_val = st.kstest(values, "uniform", args=(loc, scale))
+        ks_stat, p_val = st.kstest(values, st.uniform.cdf, args=(loc, scale))
         candidates.append(("uniform", (loc, scale), float(p_val), float(ks_stat)))
-    except Exception:
-        pass
 
     return candidates
 
@@ -573,13 +562,13 @@ def export_synthetic_data(
 ) -> dict[str, Any]:
     """สร้างข้อมูลจำลองแล้ว export เป็นไฟล์ — v1.9.1.
 
-    รองรับ: .csv, .xlsx, .json, .parquet
+    รองรับ: .csv, .tsv, .xlsx, .json, .parquet
     ไฟล์ผลลัพธ์มี statistical properties ใกล้เคียงข้อมูลจริง แต่ไม่มีค่าจริงปน
     ปลอดภัยสำหรับส่งให้ LLM หรือบุคคลที่สามวิเคราะห์ต่อ
 
     Args:
         df: DataFrame ต้นฉบับ (ข้อมูลจริง).
-        output_path: path ของไฟล์ผลลัพธ์ (.csv/.xlsx/.json/.parquet).
+        output_path: path ของไฟล์ผลลัพธ์ (.csv/.tsv/.xlsx/.json/.parquet).
         n_rows: จำนวนแถว (default: เท่ากับ df).
         random_seed: seed สำหรับ reproducibility.
         preserve_patterns: รักษา missing rate.
@@ -604,6 +593,8 @@ def export_synthetic_data(
     # export ตามนามสกุล
     if suffix == ".csv":
         synthetic.to_csv(path, index=False, encoding="utf-8-sig")
+    elif suffix == ".tsv":
+        synthetic.to_csv(path, index=False, encoding="utf-8-sig", sep="\t")
     elif suffix == ".xlsx":
         try:
             synthetic.to_excel(path, index=False, engine="openpyxl")
@@ -617,7 +608,7 @@ def export_synthetic_data(
         except ImportError as e:
             raise ImportError(f"ต้องติดตั้ง pyarrow สำหรับ .parquet: pip install pyarrow\n{e}") from e
     else:
-        raise ValueError(f"ไม่รองรับนามสกุล {suffix!r} — รองรับ: .csv, .xlsx, .json, .parquet")
+        raise ValueError(f"ไม่รองรับนามสกุล {suffix!r} — รองรับ: .csv, .tsv, .xlsx, .json, .parquet")
 
     file_size_kb = round(path.stat().st_size / 1024, 1)
 

@@ -146,6 +146,21 @@ class TestCleanOption:
         result = thaieda.run(sample_df, clean=True)
         assert len(result.report.cleaning_diff) >= 1
 
+    def test_clean_duplicate_rows_are_visible_in_overview(self):
+        df = pd.DataFrame({"value": ["a", "a", "b"]})
+        result = thaieda.run(
+            df,
+            clean=True,
+            make_charts=False,
+            timeseries=False,
+            insights_engine=False,
+        )
+        assert result.overview["rows"] == 2
+        assert result.overview["rows_before_cleaning"] == 3
+        assert result.overview["rows_after_cleaning"] == 2
+        assert result.overview["rows_removed_by_cleaning"] == 1
+        assert any("duplicate rows" in note for note in result.notes)
+
 
 # ----------------------------------------------------------------------------
 # 4. make_charts=False ข้ามกราฟ

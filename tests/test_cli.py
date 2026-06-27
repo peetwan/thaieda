@@ -48,6 +48,13 @@ def jsonl_file(tmp_path):
     return f
 
 
+@pytest.fixture
+def xlsx_file(tmp_path):
+    f = tmp_path / "data.xlsx"
+    pd.DataFrame({"name": ["alice", "bob"], "score": [10, 20]}).to_excel(f, index=False)
+    return f
+
+
 # ------------------------------------------------------------- version / help
 def test_version(capsys):
     with pytest.raises(SystemExit) as exc:
@@ -90,6 +97,13 @@ def test_profile_with_clean_flag(csv_file, tmp_path):
     assert rc == 0
     html = out.read_text(encoding="utf-8")
     assert "การทำความสะอาด" in html
+
+
+def test_profile_xlsx_explicit_format(xlsx_file, tmp_path):
+    out = tmp_path / "report.html"
+    rc = main(["profile", str(xlsx_file), "-o", str(out), "--format", "excel", "--no-charts"])
+    assert rc == 0
+    assert out.is_file()
 
 
 # ------------------------------------------------------------- run
