@@ -1,7 +1,13 @@
 """Command-line interface สำหรับ ThaiEDA.
 
 ตัวอย่าง:
-    # วิเคราะห์ → รายงาน HTML
+    # one-liner (ค่าเริ่มต้น): อ่าน → clean → blueprint report → HTML
+    thaieda data.csv
+    thaieda data.csv -o report.html --target clicked
+    thaieda .                              # batch ทุกไฟล์ในโฟลเดอร์
+    thaieda folder/ --output-dir reports/   # batch → โฟลเดอร์ reports/
+
+    # วิเคราะห์ → รายงาน HTML (โหมด explore เต็มรูปแบบ)
     thaieda profile data.csv -o report.html --lang th --tokenizer auto
 
     # ครบจบในคำสั่งเดียว: ทำความสะอาด → วิเคราะห์ → รายงาน + ไฟล์ที่สะอาดแล้ว
@@ -14,8 +20,10 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import sys
+import time
 from pathlib import Path
 
 from thaieda import __version__
@@ -30,6 +38,39 @@ _DATASET_EXTS = (".csv", ".tsv", ".json", ".jsonl", ".ndjson", ".xlsx", ".xls", 
 # ขนาดไฟล์ที่ถือว่า "ใหญ่" (10MB) — แสดงจำนวนแถวหลังอ่าน และแนะนำ flag เพื่อความเร็ว
 _LARGE_FILE_BYTES = 10 * 1024 * 1024
 
+# ชื่อคอลัมน์ที่ใช้เดา target อัตโนมัติ (one-liner) — ตรงแบบ case-insensitive
+_TARGET_NAME_CANDIDATES = (
+    "target",
+    "label",
+    "clicked",
+    "churn",
+    "survived",
+    "y",
+    "class",
+    "outcome",
+    "income",
+    "quality",
+    "response",
+    "default",
+    "fraud",
+    "exit",
+)
+
+# รูปแบบชื่อคอลัมน์ target แบบ partial (prefix/suffix) — ใช้หลัง exact match
+_TARGET_PARTIAL_PATTERNS = (
+    "target",
+    "label",
+    "churn",
+    "survived",
+    "outcome",
+    "quality",
+    "income",
+    "clicked",
+)
+
+# นามสกุลไฟล์สำหรับโหมด batch one-liner (โฟลเดอร์ → รายงานต่อไฟล์)
+_BATCH_EXTS = frozenset({".csv", ".tsv", ".json", ".jsonl", ".ndjson", ".xlsx", ".xls", ".parquet"})
+
 # ----------------------------------------------------------------------------
 # helper: จัดรูปแบบ output บนเทอร์มินัล (สี + หัวข้อ box-drawing)
 # ----------------------------------------------------------------------------
@@ -42,6 +83,15 @@ _ANSI = {
     "info": "\033[96m",
     "ok": "\033[92m",
 }
+
+
+def _configure_stdio() -> None:
+    """บังคับ stdout/stderr เป็น UTF-8 บน Windows — กัน charmap error ตอนพิมพ์ไทย/×."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            with contextlib.suppress(Exception):
+                reconfigure(encoding="utf-8", errors="replace")
 
 
 def _supports_color() -> bool:
@@ -250,6 +300,267 @@ def _build_parser() -> argparse.ArgumentParser:
     p_dataset.add_argument("--json", default=None, help="ส่งออกข้อมูลเป็น JSON ไปยังพาธที่ระบุด้วย")
     p_dataset.add_argument("--quiet", action="store_true", help="แสดงผลแบบย่อ (พิมพ์เฉพาะพาธไฟล์ผลลัพธ์)")
     return parser
+
+
+def _build_oneliner_parser() -> argparse.ArgumentParser:
+    """Parser สำหรับ one-liner: ``thaieda data.csv`` (ไม่ต้องระบุ subcommand)."""
+    parser = argparse.ArgumentParser(
+        prog="thaieda",
+        description="AutoEDA สำหรับข้อมูลภาษาไทย — วิเคราะห์ไฟล์แล้วสร้างรายงาน HTML อัตโนมัติ",
+    )
+    parser.add_argument("--version", action="version", version=f"thaieda {__version__}")
+    parser.add_argument(
+        "input",
+        nargs="?",
+        default=".",
+        help="พาธไฟล์ CSV/TSV/JSON/Excel/Parquet หรือโฟลเดอร์ (batch รายงานต่อไฟล์)",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        default=None,
+        help="พาธไฟล์ HTML ผลลัพธ์ (ไฟล์เดียวเท่านั้น — ค่าเริ่มต้น: <stem>-report.html)",
+    )
+    parser.add_argument(
+        "-t",
+        "--target",
+        default=None,
+        metavar="COLUMN",
+        help=(
+            "คอลัมน์เป้าหมายที่อยากทำนาย/วิเคราะห์ (เช่น clicked, churn, Survived) / "
+            "target column for ML blueprint. "
+            "ใช้ thaieda data.csv --columns เพื่อดูรายชื่อคอลัมน์ก่อน"
+        ),
+    )
+    parser.add_argument(
+        "--columns",
+        "--preview",
+        action="store_true",
+        dest="columns_preview",
+        help="แสดงรายชื่อคอลัมน์ + dtype + target ที่น่าจะเป็น (ไม่รัน EDA, ออกทันที)",
+    )
+    parser.add_argument(
+        "--folder",
+        action="store_true",
+        help="บังคับโหมด batch — ประมวลผลทุกไฟล์ในโฟลเดอร์ (เหมือน thaieda .)",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        metavar="DIR",
+        help="โฟลเดอร์สำหรับบันทึก HTML ในโหมด batch (ค่าเริ่มต้น: ข้างไฟล์ต้นทาง)",
+    )
+    parser.add_argument(
+        "-y",
+        "--no-interactive",
+        action="store_true",
+        help="ข้าม prompt เลือก target (เหมาะกับ batch/CI — ไม่ถามบน TTY)",
+    )
+    parser.add_argument(
+        "--lang", choices=["th", "en"], default="th", help="ภาษาของรายงาน (เริ่มต้น: th)"
+    )
+    parser.add_argument(
+        "--explore",
+        action="store_true",
+        help="ใช้รายงาน explore แบบเต็ม (ค่าเริ่มต้น: blueprint — สั้น เน้น actionable)",
+    )
+    parser.add_argument(
+        "--no-clean",
+        action="store_true",
+        help="ข้ามขั้นตอนทำความสะอาด (วิเคราะห์ข้อมูลดิบ)",
+    )
+    parser.add_argument(
+        "--llm",
+        action="store_true",
+        help="วิเคราะห์ด้วย LLM หลัง EDA (ต้องติดตั้ง thaieda[llm] และมี API key)",
+    )
+    parser.add_argument("--no-charts", action="store_true", help="ไม่สร้างกราฟ (เร็วขึ้น)")
+    parser.add_argument(
+        "--sample",
+        type=int,
+        default=None,
+        metavar="N",
+        help="สุ่มตัวอย่าง N แถวก่อนวิเคราะห์ (เหมาะกับไฟล์ใหญ่)",
+    )
+    parser.add_argument("--quiet", action="store_true", help="แสดงผลแบบย่อ (พิมพ์เฉพาะพาธไฟล์ผลลัพธ์)")
+    _add_io_args(parser)
+    return parser
+
+
+def _target_match_reason(col: str) -> str | None:
+    """เหตุผลที่คอลัมน์นี้น่าจะเป็น target — คืน None ถ้าไม่ตรง."""
+    col_lower = str(col).lower()
+    for name in _TARGET_NAME_CANDIDATES:
+        if col_lower == name:
+            return f"ชื่อตรงกับ '{name}'"
+    for pat in _TARGET_PARTIAL_PATTERNS:
+        if col_lower == pat or col_lower.endswith(f"_{pat}") or col_lower.startswith(f"{pat}_"):
+            return f"ชื่อมี '{pat}'"
+    return None
+
+
+def _guess_target_column(columns) -> str | None:
+    """เดาคอลัมน์เป้าหมายจากชื่อที่พบบ่อย — คืน None ถ้าไม่พบ."""
+    for col in columns:
+        if _target_match_reason(str(col)) is not None:
+            return str(col)
+    return None
+
+
+def _target_candidates(columns) -> list[tuple[str, str]]:
+    """รายการ (คอลัมน์, เหตุผล) ที่น่าจะเป็น target — เรียงตามลำดับในข้อมูล."""
+    out: list[tuple[str, str]] = []
+    for col in columns:
+        reason = _target_match_reason(str(col))
+        if reason is not None:
+            out.append((str(col), reason))
+    return out
+
+
+def _likely_target_columns(columns) -> set[str]:
+    """คอลัมน์ที่น่าจะเป็น target — ใช้ mark * ใน prompt interactive."""
+    return {col for col, _ in _target_candidates(columns)}
+
+
+def _dtype_hint(series) -> str:
+    """ชื่อ dtype สั้น ๆ สำหรับแสดงบนเทอร์มินัล."""
+    dtype = str(series.dtype)
+    if dtype.startswith("int") or dtype.startswith("uint"):
+        return "int"
+    if dtype.startswith("float"):
+        return "float"
+    if dtype == "bool":
+        return "bool"
+    if dtype.startswith("datetime"):
+        return "datetime"
+    if dtype == "object":
+        return "object"
+    return dtype.split("[")[0][:12]
+
+
+def _target_source_label(source: str | None) -> str:
+    """แปลงแหล่งที่มาของ target เป็นข้อความสั้น ๆ."""
+    labels = {
+        "flag": "จาก --target",
+        "auto": "auto",
+        "interactive": "interactive",
+    }
+    return labels.get(source or "", source or "")
+
+
+def _print_target_line(target: str | None, source: str | None, *, quiet: bool) -> None:
+    """พิมพ์บรรทัด Target: ... หลังรันสำเร็จ (รวมกรณีไม่ระบุ target)."""
+    if quiet:
+        return
+    if target:
+        print(f"Target: {target} ({_target_source_label(source)})", flush=True)
+    else:
+        print("Target: (ไม่ระบุ — ไม่มีแผนสร้างโมเดล)", flush=True)
+
+
+def _print_columns_table(df, *, title: str | None = None) -> None:
+    """แสดงตารางคอลัมน์แบบ dry-run (--columns / --preview) — ไม่รัน EDA."""
+    cols = [str(c) for c in df.columns]
+    candidates = {col: reason for col, reason in _target_candidates(cols)}
+    header = title or f"Columns ({len(cols)}):"
+    print(header, flush=True)
+    print(f"  {'#':>3}  {'Column':<22}  {'dtype':<8}  {'unique':>6}  target?", flush=True)
+    for i, col in enumerate(cols, start=1):
+        series = df[col]
+        n_unique = int(series.nunique(dropna=True))
+        target_cell = ""
+        if col in candidates:
+            target_cell = f"★ likely target (auto: {candidates[col]})"
+        print(
+            f"  {i:>3}  {col:<22}  {_dtype_hint(series):<8}  {n_unique:>6}  {target_cell}",
+            flush=True,
+        )
+
+
+def _prompt_target_column(df) -> str | None:
+    """ถามผู้ใช้เลือกคอลัมน์ target แบบ interactive (TTY เท่านั้น)."""
+    cols = [str(c) for c in df.columns]
+    candidates = {col: reason for col, reason in _target_candidates(cols)}
+    print(
+        "target คือคอลัมน์ที่อยากทำนาย/วิเคราะห์ เช่น ยอดขาย, คลิก, churn, Survived",
+        flush=True,
+    )
+    print("คอลัมน์ที่มี:", flush=True)
+    for i, col in enumerate(cols, start=1):
+        mark = ""
+        if col in candidates:
+            mark = f" * (auto: {candidates[col]})"
+        dtype = _dtype_hint(df[col])
+        print(f"  {i}. {col}  [{dtype}]{mark}", flush=True)
+    if candidates:
+        print("  (* = ชื่อที่น่าจะเป็น target อัตโนมัติ)", flush=True)
+    try:
+        answer = input("เลือกคอลัมน์ target (Enter=ข้าม, หรือพิมพ์ชื่อ/เลข): ").strip()
+    except EOFError:
+        return None
+    if not answer:
+        return None
+    if answer.isdigit():
+        idx = int(answer)
+        if 1 <= idx <= len(cols):
+            return cols[idx - 1]
+        print(f"  ⚠ เลข {idx} ไม่อยู่ในรายการ — ข้าม target", flush=True)
+        return None
+    if answer in cols:
+        return answer
+    lower_map = {c.lower(): c for c in cols}
+    if answer.lower() in lower_map:
+        return lower_map[answer.lower()]
+    print(f"  ⚠ ไม่พบคอลัมน์ '{answer}' — ข้าม target", flush=True)
+    return None
+
+
+def _resolve_target_column(
+    df,
+    explicit_target: str | None,
+    *,
+    interactive: bool,
+) -> tuple[str | None, str | None]:
+    """คืน (target_column, source) — source เป็น flag | auto | interactive | None."""
+    columns = df.columns
+    if explicit_target is not None:
+        return explicit_target, "flag"
+    candidates = _target_candidates(columns)
+    if len(candidates) == 1:
+        return candidates[0][0], "auto"
+    if len(candidates) > 1:
+        if interactive and sys.stdin.isatty():
+            chosen = _prompt_target_column(df)
+            if chosen:
+                return chosen, "interactive"
+        return candidates[0][0], "auto"
+    if interactive and sys.stdin.isatty():
+        chosen = _prompt_target_column(df)
+        if chosen:
+            return chosen, "interactive"
+    return None, None
+
+
+def _is_batch_data_file(path: Path) -> bool:
+    """True ถ้า path เป็นไฟล์ข้อมูลที่ควรประมวลผลในโหมด batch."""
+    if not path.is_file():
+        return False
+    name = path.name
+    if name.startswith("."):
+        return False
+    if name.endswith("-report.html") or name.endswith(".thaieda.html"):
+        return False
+    return path.suffix.lower() in _BATCH_EXTS
+
+
+def _find_batch_files(folder: Path) -> list[Path]:
+    """รายการไฟล์ข้อมูลในโฟลเดอร์ (ไม่ recursive, ไม่รวม hidden/report)."""
+    return sorted(p for p in folder.iterdir() if _is_batch_data_file(p))
+
+
+def _default_oneliner_output(input_path: Path) -> str:
+    """ค่าเริ่มต้น: ``<stem>-report.html`` ในโฟลเดอร์เดียวกับไฟล์ input."""
+    return str(input_path.with_name(f"{input_path.stem}-report.html"))
 
 
 # ----------------------------------------------------------------------------
@@ -778,6 +1089,339 @@ def _maybe_route_dataset(args: argparse.Namespace) -> int | None:
 
 
 # ----------------------------------------------------------------------------
+# one-liner (thaieda data.csv)
+# ----------------------------------------------------------------------------
+def _run_oneliner_file(
+    df,
+    input_path: Path,
+    args: argparse.Namespace,
+    *,
+    target: str | None,
+    target_source: str | None,
+    output_path: str | None = None,
+    quiet: bool | None = None,
+    color: bool | None = None,
+    show_summary: bool = True,
+) -> tuple[int, str | None]:
+    """รัน pipeline one-liner สำหรับ DataFrame เดียว — คืน (exit_code, html_path)."""
+    from thaieda import run as thaieda_run
+
+    quiet = args.quiet if quiet is None else quiet
+    color = _supports_color() if color is None else color
+
+    if target is not None and target not in df.columns:
+        print(f"error: ไม่พบคอลัมน์เป้าหมาย '{target}' ในข้อมูล", file=sys.stderr)
+        return 2, None
+
+    out = output_path or args.output or _default_oneliner_output(input_path)
+    report_mode = "explore" if args.explore else "blueprint"
+    do_clean = not args.no_clean
+
+    _maybe_large_file_hint(input_path, args, quiet)
+    df = _maybe_sample(df, args.sample, quiet, color)
+
+    try:
+        result = thaieda_run(
+            df,
+            clean=do_clean,
+            handle_missing="flag",
+            lang=args.lang,
+            make_charts=not args.no_charts,
+            target_column=target,
+            report_mode=report_mode,
+            llm=args.llm,
+            progress=_make_progress(quiet, color),
+        )
+    except (TypeError, KeyError, ValueError, ImportError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1, None
+
+    if not quiet:
+        print(f"  {_paint('…', 'dim', color)} {label('prog_report', args.lang)}", flush=True)
+    result.to_html(out)
+
+    abs_output = str(Path(out).resolve())
+    _print_target_line(target, target_source, quiet=quiet)
+    if show_summary and not quiet:
+        _print_oneliner_summary(
+            result, input_path, abs_output, target, target_source, report_mode, color
+        )
+    return 0, abs_output
+
+
+def _resolve_batch_global_target(
+    file_dfs: list[tuple[Path, object]],
+    explicit_target: str | None,
+    *,
+    interactive: bool,
+) -> tuple[str | None, str | None]:
+    """เดา/ถาม target ครั้งเดียวสำหรับทั้ง batch — ใช้เมื่อคอลัมน์คล้ายกัน."""
+    if explicit_target is not None:
+        return explicit_target, "flag"
+
+    file_columns = [(p, [str(c) for c in df.columns]) for p, df in file_dfs if not df.empty]
+    autodetected = [_guess_target_column(cols) for _, cols in file_columns if cols]
+    if autodetected and all(a == autodetected[0] and a is not None for a in autodetected):
+        return autodetected[0], "auto"
+
+    valid = [(p, df) for p, df in file_dfs if not df.empty]
+    if not valid:
+        return None, None
+
+    col_sets = {tuple(str(c) for c in df.columns) for _, df in valid}
+    if len(col_sets) == 1:
+        df0 = valid[0][1]
+        candidates = _target_candidates(df0.columns)
+        if len(candidates) == 1:
+            return candidates[0][0], "auto"
+        if len(candidates) > 1:
+            if interactive and sys.stdin.isatty():
+                chosen = _prompt_target_column(df0)
+                if chosen:
+                    return chosen, "interactive"
+            return candidates[0][0], "auto"
+        if interactive and sys.stdin.isatty():
+            chosen = _prompt_target_column(df0)
+            if chosen:
+                return chosen, "interactive"
+        return None, None
+
+    if interactive and sys.stdin.isatty():
+        print(
+            "  ℹ คอลัมน์ต่างกันระหว่างไฟล์ — เลือก target ครั้งเดียว (ใช้กับไฟล์ที่มีคอลัมน์นี้)",
+            flush=True,
+        )
+        chosen = _prompt_target_column(valid[0][1])
+        if chosen:
+            return chosen, "interactive"
+    return None, None
+
+
+def _batch_output_path(
+    fpath: Path,
+    output_dir: Path | None,
+) -> Path:
+    """พาธ HTML สำหรับไฟล์หนึ่งในโหมด batch."""
+    stem = f"{fpath.stem}-report.html"
+    if output_dir is not None:
+        return output_dir / stem
+    return fpath.with_name(stem)
+
+
+def _run_oneliner_batch(args: argparse.Namespace) -> int:
+    """Batch one-liner: ประมวลผลทุกไฟล์ในโฟลเดอร์ → {stem}-report.html ต่อไฟล์."""
+    from thaieda.io import read_data
+
+    quiet = args.quiet
+    color = _supports_color()
+    interactive = not args.no_interactive
+    folder = Path(args.input)
+    output_dir = Path(args.output_dir) if args.output_dir else None
+
+    if not folder.is_dir():
+        print(f"error: ไม่พบโฟลเดอร์ {folder}", file=sys.stderr)
+        return 2
+
+    files = _find_batch_files(folder)
+    if not files:
+        exts = ", ".join(sorted(_BATCH_EXTS))
+        print(
+            f"error: ไม่พบไฟล์ข้อมูล ({exts}) ใน {folder}\n"
+            "  ใส่ไฟล์ CSV/TSV/JSON/Excel/Parquet หรือใช้ `thaieda dataset folder/` สำหรับ schema หลายตาราง",
+            file=sys.stderr,
+        )
+        return 2
+
+    if output_dir is not None:
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+    if not quiet:
+        print(_section(f"Batch: {folder} ({len(files)} ไฟล์)", color), flush=True)
+
+    file_columns: list[tuple[Path, list[str]]] = []
+    file_peeks: list[tuple[Path, object]] = []
+    for fpath in files:
+        try:
+            df_peek = read_data(fpath, format=args.format, encoding=args.encoding)
+            file_columns.append((fpath, [str(c) for c in df_peek.columns]))
+            file_peeks.append((fpath, df_peek))
+        except Exception as exc:  # noqa: BLE001
+            file_columns.append((fpath, []))
+            file_peeks.append((fpath, None))
+            if not quiet:
+                print(f"  ⚠ อ่าน {fpath.name} ไม่สำเร็จ (peek): {exc}", flush=True)
+
+    valid_peeks = [(p, df) for p, df in file_peeks if df is not None and not df.empty]
+    global_target, global_source = _resolve_batch_global_target(
+        valid_peeks, args.target, interactive=interactive
+    )
+    if global_target and not quiet:
+        _print_target_line(global_target, global_source, quiet=False)
+
+    ok_paths: list[str] = []
+    fail_count = 0
+    total = len(files)
+
+    for i, fpath in enumerate(files):
+        label_idx = f"[{i + 1}/{total}]"
+        t0 = time.perf_counter()
+        out_path = _batch_output_path(fpath, output_dir)
+
+        if not quiet:
+            print(f"{label_idx} processing {fpath.name} ...", flush=True)
+
+        try:
+            df = read_data(fpath, format=args.format, encoding=args.encoding)
+        except Exception as exc:  # noqa: BLE001
+            fail_count += 1
+            if not quiet:
+                print(f"{label_idx} {fpath.name} ... FAIL ({time.perf_counter() - t0:.1f}s): {exc}")
+            continue
+
+        if df.empty:
+            fail_count += 1
+            if not quiet:
+                print(f"{label_idx} {fpath.name} ... FAIL ({time.perf_counter() - t0:.1f}s): ไฟล์ว่าง")
+            continue
+
+        target, target_source = global_target, global_source
+        if target is None:
+            target, target_source = _resolve_target_column(
+                df, None, interactive=interactive
+            )
+        elif target not in df.columns:
+            if not quiet:
+                print(
+                    f"  ⚠ {fpath.name}: ไม่มีคอลัมน์ '{target}' — ข้าม target",
+                    flush=True,
+                )
+            if args.target is not None:
+                target, target_source = None, None
+            else:
+                target, target_source = _resolve_target_column(
+                    df, None, interactive=interactive
+                )
+
+        code, html_path = _run_oneliner_file(
+            df,
+            fpath,
+            args,
+            target=target,
+            target_source=target_source,
+            output_path=str(out_path),
+            show_summary=False,
+        )
+        elapsed = time.perf_counter() - t0
+
+        if code != 0 or html_path is None:
+            fail_count += 1
+            if not quiet:
+                print(f"{label_idx} {fpath.name} ... FAIL ({elapsed:.1f}s)")
+            continue
+
+        ok_paths.append(html_path)
+        if quiet:
+            print(html_path)
+        else:
+            print(f"{label_idx} {fpath.name} ... OK → {Path(html_path).name} ({elapsed:.1f}s)")
+
+    success = len(ok_paths)
+    if not quiet:
+        print(_section("สรุป batch", color))
+        print(f"  สำเร็จ: {success}/{total} | ล้มเหลว: {fail_count}/{total}")
+        for p in ok_paths:
+            print(f"    • {p}")
+
+    return 0 if success > 0 else 1
+
+
+def _run_columns_preview(args: argparse.Namespace) -> int:
+    """Dry-run: อ่านไฟล์แล้วแสดงตารางคอลัมน์ — ไม่รัน EDA."""
+    input_path = Path(args.input)
+    if input_path.is_dir() or args.folder:
+        print("error: --columns ใช้กับไฟล์เดียว (ไม่ใช่โฟลเดอร์)", file=sys.stderr)
+        return 2
+    df, code = _read_input(args, quiet=True)
+    if df is None:
+        return code
+    _print_columns_table(df)
+    return 0
+
+
+def _run_oneliner(args: argparse.Namespace) -> int:
+    """One-liner: อ่านไฟล์/โฟลเดอร์ → thaieda.run() → บันทึก HTML blueprint report."""
+    if getattr(args, "columns_preview", False):
+        return _run_columns_preview(args)
+
+    input_path = Path(args.input)
+    interactive = not args.no_interactive
+
+    if input_path.is_dir() or args.folder:
+        if args.output and not args.output_dir:
+            print(
+                "error: ใช้ --output-dir สำหรับโหมด batch (ไม่ใช่ -o)",
+                file=sys.stderr,
+            )
+            return 2
+        return _run_oneliner_batch(args)
+
+    quiet = args.quiet
+    color = _supports_color()
+
+    df, code = _read_input(args, quiet=quiet, color=color)
+    if df is None:
+        return code
+
+    target, target_source = _resolve_target_column(
+        df, args.target, interactive=interactive
+    )
+    if target_source == "flag" and target not in df.columns:
+        print(f"error: ไม่พบคอลัมน์เป้าหมาย '{target}' ในข้อมูล", file=sys.stderr)
+        return 2
+
+    rc, html_path = _run_oneliner_file(
+        df,
+        input_path,
+        args,
+        target=target,
+        target_source=target_source,
+    )
+    if rc == 0 and quiet and html_path:
+        print(html_path)
+    return rc
+
+
+def _print_oneliner_summary(
+    result,
+    input_path: Path,
+    output_path: str,
+    target: str | None,
+    target_source: str | None,
+    report_mode: str,
+    color: bool,
+) -> None:
+    """สรุปผล one-liner บนเทอร์มินัล."""
+    overview = result.overview
+    mode_label = "blueprint" if report_mode == "blueprint" else "explore"
+    print(_section(f"วิเคราะห์ไฟล์: {input_path}", color))
+    print(
+        f"  แถว: {overview['rows']:,} | คอลัมน์: {overview['columns']} | "
+        f"เซลล์ว่าง: {overview['missing_pct']}% | โหมด: {mode_label}"
+    )
+    if target:
+        print(f"  Target: {target} ({_target_source_label(target_source)})")
+    else:
+        print("  Target: (ไม่ระบุ — ไม่มีแผนสร้างโมเดล)")
+    if result.cleaning_report and result.cleaning_report.operations_run:
+        print(f"  ทำความสะอาดแล้ว: {len(result.cleaning_report.operations_run)} การดำเนินการ")
+    _print_insight_highlights(result.report)
+    for note in result.notes:
+        print(_paint(f"  ⚠ {note}", "warning", color))
+    _print_summary_table(result.report, color)
+    print(_paint(f"✓ บันทึกรายงาน HTML: {output_path}", "ok", color))
+
+
+# ----------------------------------------------------------------------------
 # entrypoint
 # ----------------------------------------------------------------------------
 _RUNNERS = {
@@ -786,15 +1430,35 @@ _RUNNERS = {
     "clean": _run_clean,
     "dataset": _run_dataset,
 }
+_SUBCOMMANDS = frozenset(_RUNNERS)
 
 
 def main(argv: list[str] | None = None) -> int:
-    """จุดเริ่มต้นของคำสั่ง `thaieda`."""
-    parser = _build_parser()
-    args = parser.parse_args(argv)
+    """จุดเริ่มต้นของคำสั่ง `thaieda`.
 
-    runner = _RUNNERS.get(args.command)
-    if runner is not None:
+    ถ้า argv[0] เป็น subcommand ที่รู้จัก → ใช้โหมดเดิม (profile/run/clean/dataset)
+    มิฉะนั้น → one-liner ``thaieda <input>`` สร้าง blueprint report อัตโนมัติ
+    """
+    _configure_stdio()
+    argv = list(argv if argv is not None else sys.argv[1:])
+
+    if not argv:
+        _build_parser().print_help()
+        return 0
+
+    if argv[0] in ("--help", "-h") and len(argv) == 1:
+        _build_oneliner_parser().print_help()
+        return 0
+
+    if "--version" in argv or "-V" in argv:
+        print(f"thaieda {__version__}")
+        raise SystemExit(0)
+
+    if argv[0] in _SUBCOMMANDS:
+        parser = _build_parser()
+        args = parser.parse_args(argv)
+        runner = _RUNNERS.get(args.command)
+        assert runner is not None
         try:
             return runner(args)
         except KeyboardInterrupt:
@@ -804,8 +1468,20 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {exc}", file=sys.stderr)
             return 1
 
-    parser.print_help()
-    return 0
+    parser = _build_oneliner_parser()
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exc:
+        return int(exc.code) if exc.code is not None else 2
+
+    try:
+        return _run_oneliner(args)
+    except KeyboardInterrupt:
+        print("\nยกเลิกแล้ว", file=sys.stderr)
+        return 130
+    except Exception as exc:  # noqa: BLE001
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

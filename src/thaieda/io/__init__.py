@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 
 import pandas as pd
@@ -129,10 +130,81 @@ def detect_format(path: str | Path) -> str:
     return _sniff_format(path)
 
 
+def _looks_like_data_value(val: str) -> bool:
+    """ค่าในตารางตัวเลข/headerless (รวม missing แบบ UCI เช่น ?)."""
+    v = val.strip().strip('"')
+    if v in ("", "?", "NA", "N/A", "na", "null", "None"):
+        return True
+    try:
+        float(v)
+    except ValueError:
+        return False
+    return True
+
+
+def _sniff_csv_delimiter(sample: str) -> str:
+    """เดาตัวคั่นจากบรรทัดแรก — รองรับ comma, semicolon (UCI wine), tab."""
+    lines = [ln for ln in sample.splitlines() if ln.strip()]
+    if not lines:
+        return ","
+    first = lines[0]
+    counts = {",": first.count(","), ";": first.count(";"), "\t": first.count("\t")}
+    return max(counts, key=counts.get)
+
+
+def _sniff_csv_options(path: Path, encoding: str) -> dict[str, str | int | None]:
+    """เดา delimiter และว่ามี header หรือไม่ (UCI .data มักไม่มี header)."""
+    try:
+        with open(path, encoding=encoding, errors="replace") as fh:
+            sample = fh.read(8192)
+    except OSError:
+        return {"sep": ",", "header": 0}
+
+    ext = path.suffix.lower()
+    if ext == ".tsv":
+        sep = "\t"
+    else:
+        sep = _sniff_csv_delimiter(sample)
+
+    lines = [ln for ln in sample.splitlines() if ln.strip()][:3]
+    if not lines:
+        return {"sep": sep, "header": 0}
+
+    first = next(csv.reader([lines[0]], delimiter=sep))
+    if not first:
+        return {"sep": sep, "header": 0}
+
+    if all(_looks_like_data_value(v) for v in first):
+        if len(lines) >= 2:
+            second = next(csv.reader([lines[1]], delimiter=sep))
+            if second and all(_looks_like_data_value(v) for v in second):
+                return {"sep": sep, "header": None}
+
+    return {"sep": sep, "header": 0}
+
+
+def _name_headerless_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """ตั้งชื่อคอลัมน์ headerless — คอลัมน์สุดท้ายเป็น ``target`` (ธรรมเนียม UCI ML)."""
+    n = len(df.columns)
+    if n <= 1:
+        df.columns = ["col_0"] if n == 1 else []
+        return df
+    df.columns = [f"col_{i}" for i in range(n - 1)] + ["target"]
+    return df
+
+
 def _read_csv(path: Path, encoding: str) -> pd.DataFrame:
-    """อ่านไฟล์ CSV/TSV — ตรวจตัวคั่น tab จากนามสกุล .tsv."""
-    sep = "\t" if path.suffix.lower() == ".tsv" else ","
-    return pd.read_csv(path, encoding=encoding, sep=sep)
+    """อ่านไฟล์ CSV/TSV — เดา delimiter และ header อัตโนมัติ."""
+    opts = _sniff_csv_options(path, encoding)
+    sep = str(opts["sep"])
+    header = opts["header"]
+    read_kw: dict = {"encoding": encoding, "sep": sep}
+    if header is None:
+        read_kw["header"] = None
+        read_kw["na_values"] = ["?"]
+        df = pd.read_csv(path, **read_kw)
+        return _name_headerless_columns(df)
+    return pd.read_csv(path, **read_kw)
 
 
 def _read_tsv(path: Path, encoding: str) -> pd.DataFrame:

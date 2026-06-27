@@ -86,6 +86,59 @@ pip install "thaieda[all]"
 
 ## เริ่มต้นเร็ว / Quickstart
 
+### One-liner CLI
+
+ติดตั้งแล้วรันคำสั่งเดียว — อ่านไฟล์ → ทำความสะอาด → สร้างรายงาน HTML blueprint อัตโนมัติ:
+
+```bash
+pip install thaieda
+thaieda mydata.csv
+# → สร้าง mydata-report.html ในโฟลเดอร์เดียวกับไฟล์
+```
+
+ตัวเลือกที่ใช้บ่อย:
+
+```bash
+thaieda data.csv -o report.html          # ระบุพาธ output
+thaieda data.csv --target clicked        # คอลัมน์เป้าหมาย (หรือเดาอัตโนมัติจากชื่อ)
+thaieda data.csv -t clicked              # ย่อ — เหมือน --target
+thaieda data.csv --columns               # ดูคอลัมน์ + target ที่น่าจะเป็น (ไม่รัน EDA)
+thaieda data.csv -y                      # ข้าม prompt เลือก target (CI/batch)
+thaieda data.csv --explore               # รายงาน EDA แบบเต็ม (แทน blueprint)
+thaieda data.csv --lang en --no-clean    # ภาษาอังกฤษ, ไม่ทำความสะอาด
+```
+
+**Target column:** ถ้าไม่ระบุ `-t`/`--target` ThaiEDA จะเดาจากชื่อคอลัมน์ (`target`, `label`, `clicked`, `churn`, `survived`, `y`, `class`, `outcome`, `income`, `quality`, `response`, `default`, `fraud`, `exit` และชื่อที่มีคำเหล่านี้) บน TTY จะถามให้เลือกจากรายการคอลัมน์ (Enter = ข้าม) ใช้ `-y`/`--no-interactive` เพื่อข้าม prompt
+
+#### เลือก target อย่างไร?
+
+1. **ดูคอลัมน์ก่อน** — ไม่ต้องรัน EDA เต็มรูปแบบ:
+   ```bash
+   thaieda data.csv --columns
+   # หรือ
+   thaieda data.csv --preview
+   ```
+   แสดงตาราง `#`, ชื่อคอลัมน์, dtype, จำนวน unique และคอลัมน์ที่น่าจะเป็น target (★)
+
+2. **ระบุเอง** — `thaieda data.csv -t clicked` หรือ `--target churn`
+
+3. **ไม่ใส่** — auto-detect จากชื่อ หรือถามใน terminal (ถ้าเป็น TTY)
+
+4. **หลังรันเสร็จ** — CLI พิมพ์ `Target: clicked (auto)` / `(จาก --target)` / `(ไม่ระบุ — ไม่มีแผนสร้างโมเดล)`
+
+**Batch โฟลเดอร์:** ประมวลผลทุกไฟล์ในโฟลเดอร์ → `{stem}-report.html` ต่อไฟล์ (ต่างจาก `thaieda dataset` ที่เป็น schema หลายตาราง)
+
+```bash
+cd ~/my-data/
+thaieda .                                # batch ทุก CSV/TSV/JSON/Excel/Parquet
+thaieda /path/to/folder --output-dir reports/
+thaieda folder/ -t clicked -y            # target เดียวกันทุกไฟล์, ไม่ถาม interactive
+```
+
+รองรับ CSV, TSV, JSON, Excel, Parquet — ตรวจ format/encoding อัตโนมัติ
+
+### Python API
+
 ```python
 import pandas as pd
 import thaieda
@@ -281,7 +334,15 @@ print(result.llm_response)
 ```bash
 thaieda --version
 
-# EDA + clean + HTML report
+# One-liner (ค่าเริ่มต้น — blueprint report)
+thaieda data.csv
+thaieda data.csv -o report.html --target clicked
+
+# Batch โฟลเดอร์ — รายงานต่อไฟล์ (ไม่ใช่ schema discovery)
+thaieda .
+thaieda data/ --output-dir reports/ -y
+
+# EDA + clean + HTML report (subcommand แบบเดิม)
 thaieda run data.csv -o report.html --lang th --target clicked
 
 # Profile แบบละเอียด
@@ -296,12 +357,14 @@ thaieda dataset data/warehouse/ -o schema-report.html --lang th
 
 | Command | คำอธิบาย |
 |---------|----------|
+| `thaieda <file>` | **one-liner** — clean → blueprint report → `<stem>-report.html` |
+| `thaieda <folder>` / `thaieda .` | **batch one-liner** — รายงาน HTML ต่อไฟล์ในโฟลเดอร์ |
 | `thaieda run` | clean → analyze → HTML (+ `--cleaned-output` CSV) |
 | `thaieda profile` | รายงานเต็ม พร้อม `--no-charts`, `--sample N` |
 | `thaieda clean` | ทำความสะอาดแล้ว export ไฟล์ |
 | `thaieda dataset` | PK/FK discovery ข้ามหลายไฟล์ |
 
-> **หมายเหตุ:** `report_mode="blueprint"` ใช้ผ่าน Python API (`thaieda.run(...)`) — CLI ยังไม่มี flag นี้
+> **Blueprint mode:** ค่าเริ่มต้นของ one-liner CLI และ Python API (`report_mode="blueprint"`) — ใช้ `--explore` หรือ `report_mode="explore"` สำหรับรายงาน EDA แบบเต็ม
 
 ---
 

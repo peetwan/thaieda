@@ -186,3 +186,28 @@ def test_read_data_returns_dataframe(tmp_path):
     f = tmp_path / "data.csv"
     f.write_text("a\n1\n", encoding="utf-8")
     assert isinstance(read_data(f), pd.DataFrame)
+
+
+def test_read_data_semicolon_csv(tmp_path):
+    """UCI wine-quality ใช้ semicolon เป็น delimiter."""
+    f = tmp_path / "wine.csv"
+    f.write_text(
+        '"fixed acidity";"quality"\n7.4;5\n7.8;6\n',
+        encoding="utf-8",
+    )
+    df = read_data(f)
+    assert list(df.columns) == ["fixed acidity", "quality"]
+    assert len(df) == 2
+
+
+def test_read_data_headerless_numeric(tmp_path):
+    """UCI .data ไม่มี header — คอลัมน์สุดท้ายตั้งชื่อ target."""
+    f = tmp_path / "heart.data"
+    f.write_text(
+        "63.0,1.0,1.0,145.0,0\n"
+        "67.0,1.0,4.0,160.0,2\n",
+        encoding="utf-8",
+    )
+    df = read_data(f)
+    assert list(df.columns) == ["col_0", "col_1", "col_2", "col_3", "target"]
+    assert df["target"].tolist() == [0, 2]
