@@ -71,9 +71,7 @@ def _run_eval(name: str) -> dict[str, Any]:
             for i in result.quality_issues
         ],
         "cleaning_plan_actions": sorted(plan.actions if plan is not None else []),
-        "cleaning_operations": sorted(
-            {op.operation for op in cleaning_report.operations_run}
-        )
+        "cleaning_operations": sorted({op.operation for op in cleaning_report.operations_run})
         if cleaning_report is not None
         else [],
     }

@@ -256,25 +256,28 @@ def _check_suspected_proxy(
                 r = float(xv.corr(tv))
                 eta = _correlation_ratio(tv.astype(str), xv)
                 effect = max(abs(r) if np.isfinite(r) else 0.0, eta)
-                if effect >= threshold and effect < _CORR_LEAK:
-                    if _is_monotonic_with_binary(xv, tv) or eta >= threshold:
-                        return _finding(
-                            col,
-                            target_col,
-                            "suspected_proxy",
-                            effect,
-                            tier="warning",
-                            th=(
-                                f"คอลัมน์ '{col}' มีชื่อบ่งชี้ข้อมูลย้อนหลัง/สรุป "
-                                f"และสัมพันธ์กับ target สูง (r={r:.3f}, eta={eta:.3f}) — "
-                                f"ควรตรวจก่อนใช้เป็น feature"
-                            ),
-                            en=(
-                                f"Column '{col}' has a temporal/aggregate name hint "
-                                f"and moderate-high association with the target "
-                                f"(r={r:.3f}, eta={eta:.3f}) — review before modeling."
-                            ),
-                        )
+                if (
+                    effect >= threshold
+                    and effect < _CORR_LEAK
+                    and (_is_monotonic_with_binary(xv, tv) or eta >= threshold)
+                ):
+                    return _finding(
+                        col,
+                        target_col,
+                        "suspected_proxy",
+                        effect,
+                        tier="warning",
+                        th=(
+                            f"คอลัมน์ '{col}' มีชื่อบ่งชี้ข้อมูลย้อนหลัง/สรุป "
+                            f"และสัมพันธ์กับ target สูง (r={r:.3f}, eta={eta:.3f}) — "
+                            f"ควรตรวจก่อนใช้เป็น feature"
+                        ),
+                        en=(
+                            f"Column '{col}' has a temporal/aggregate name hint "
+                            f"and moderate-high association with the target "
+                            f"(r={r:.3f}, eta={eta:.3f}) — review before modeling."
+                        ),
+                    )
 
     if not feature_numeric and (target_binary or not target_numeric):
         effect = _categorical_association_effect(feature, target)

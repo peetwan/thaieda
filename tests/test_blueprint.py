@@ -51,7 +51,9 @@ def test_leakage_wired_to_report():
 
 
 def test_en_report_content():
-    r = ProfileReport(_ml_df(), lang="en", target_column="clicked", make_charts=False, timeseries=False)
+    r = ProfileReport(
+        _ml_df(), lang="en", target_column="clicked", make_charts=False, timeseries=False
+    )
     html = r.to_html()
     assert "Executive Summary" in html
     assert "Modeling Blueprint" in html
@@ -150,7 +152,7 @@ def test_senior_citizen_not_flagged_as_thai_id():
 def test_ticket_strings_not_flagged_as_mixed_dates():
     """High-cardinality ticket IDs must not be flagged as mixed date formats."""
     from thaieda.anomaly import detect_column_anomalies
-    from thaieda.detect import ColumnType, detect_all
+    from thaieda.detect import detect_all
 
     tickets = [f"CA-2017-{100000 + i}" for i in range(100)]
     df = pd.DataFrame({"Ticket": tickets})
@@ -170,9 +172,13 @@ def test_proxy_leakage_tier_b_with_name_hint():
     # corr ~0.7 with target — below Tier A threshold
     noise = rng.normal(0, 1, n)
     historical_user_ctr = target.astype(float) * 2.0 + noise * 0.8
-    df = pd.DataFrame({"historical_user_ctr": historical_user_ctr, "noise_feat": noise, "clicked": target})
+    df = pd.DataFrame(
+        {"historical_user_ctr": historical_user_ctr, "noise_feat": noise, "clicked": target}
+    )
     res = detect_target_leakage(df, "clicked")
-    proxy = [d for d in res if d["feature"] == "historical_user_ctr" and d["kind"] == "suspected_proxy"]
+    proxy = [
+        d for d in res if d["feature"] == "historical_user_ctr" and d["kind"] == "suspected_proxy"
+    ]
     assert proxy
     assert proxy[0]["tier"] == "warning"
     assert all(d["feature"] != "noise_feat" for d in res if d["kind"] == "suspected_proxy")
@@ -190,11 +196,14 @@ def test_verdict_differs_clean_vs_dirty():
             "label": [0, 1] * 25,
         }
     )
-    r_clean = profile(clean_df, target_column="label", make_charts=False, timeseries=False, insights_engine=False)
-    r_dirty = profile(dirty_df, target_column="label", make_charts=False, timeseries=False, insights_engine=False)
+    r_clean = profile(
+        clean_df, target_column="label", make_charts=False, timeseries=False, insights_engine=False
+    )
+    r_dirty = profile(
+        dirty_df, target_column="label", make_charts=False, timeseries=False, insights_engine=False
+    )
     s_clean = r_clean._build_report_summary()
     s_dirty = r_dirty._build_report_summary()
     assert s_clean["status"] == "good"
     assert s_dirty["status"] in {"critical", "warning"}
     assert s_clean["verdict"] != s_dirty["verdict"]
-

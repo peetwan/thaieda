@@ -228,7 +228,10 @@ _DATA_TYPE_GUIDANCE: dict[str, dict[str, Any]] = {
         "label": "Mixed Data",
         "label_th": "ข้อมูลผสม",
         "summary": "ข้อมูลนี้มีหลายลักษณะผสมกัน ควรแยกวิเคราะห์ตามกลุ่มคอลัมน์ก่อนสรุปภาพรวม",
-        "summary_en": "This dataset mixes several patterns — analyze column groups separately before drawing conclusions.",
+        "summary_en": (
+            "This dataset mixes several patterns — "
+            "analyze column groups separately before drawing conclusions."
+        ),
         "focus": [
             "แบ่งคอลัมน์เป็น ID/วันที่/ตัวเลข/ข้อความก่อนทำ EDA",
             "เริ่มจากคุณภาพข้อมูลและความหมายของคีย์หลัก",
@@ -243,8 +246,14 @@ _DATA_TYPE_GUIDANCE: dict[str, dict[str, Any]] = {
     "ml_tabular": {
         "label": "ML Tabular Data",
         "label_th": "ข้อมูลตารางสำหรับ ML",
-        "summary": "ข้อมูลนี้เหมาะกับการสร้างโมเดลตาราง — มี target, ฟีเจอร์หลายคอลัมน์ และมักเป็น event/impression rows",
-        "summary_en": "This looks like tabular ML data — a target column, many features, and event/impression-style rows.",
+        "summary": (
+            "ข้อมูลนี้เหมาะกับการสร้างโมเดลตาราง — "
+            "มี target, ฟีเจอร์หลายคอลัมน์ และมักเป็น event/impression rows"
+        ),
+        "summary_en": (
+            "This looks like tabular ML data — a target column, many features, "
+            "and event/impression-style rows."
+        ),
         "focus": [
             "ตรวจ target leakage และ baseline (CTR/class balance) ก่อนเทรน",
             "ตัด ID columns และฟีเจอร์ที่สัมพันธ์กับ target สูงเกินจริง",
@@ -539,7 +548,9 @@ def _detect_data_type(
     }
 
 
-def _build_target_baseline(df: pd.DataFrame, target_col: str, lang: str = "th") -> dict[str, Any] | None:
+def _build_target_baseline(
+    df: pd.DataFrame, target_col: str, lang: str = "th"
+) -> dict[str, Any] | None:
     """สรุป baseline ของ target — CTR/class balance สำหรับ binary targets."""
     if target_col not in df.columns:
         return None
@@ -566,8 +577,8 @@ def _build_target_baseline(df: pd.DataFrame, target_col: str, lang: str = "th") 
             if num.notna().all() and int(num.nunique()) == 2:
                 rate = float(num.mean())
             else:
-                _POS = {1, True, "1", "true", "True", "yes", "Yes", "Y", "y"}
-                _NEG = {0, False, "0", "false", "False", "no", "No", "N", "n"}
+                _POS = {1, "1", "true", "True", "yes", "Yes", "Y", "y"}
+                _NEG = {0, "0", "false", "False", "no", "No", "N", "n"}
                 vals = set(vc.index)
                 if vals & _POS:
                     rate = float(sum(vc.get(v, 0) for v in vals if v in _POS)) / n
@@ -602,8 +613,7 @@ def _build_modeling_blueprint_context(
     id_cols = sorted(
         str(c)
         for c in df.columns
-        if _is_id_like_column(str(c), column_types.get(str(c)))
-        and str(c) != target_column
+        if _is_id_like_column(str(c), column_types.get(str(c))) and str(c) != target_column
     )
     leakage_features = {str(f["feature"]) for f in leakage_findings}
     strong: list[dict[str, Any]] = []
@@ -811,7 +821,9 @@ class ProfileReport:
             raw_df = self.df.copy()
             self._raw_overview = self._compute_overview_for_df(raw_df)
             self._emit_progress("prog_detect")
-            pre_data_type = _detect_data_type(raw_df, target_column=self.target_column, lang=self.lang)
+            pre_data_type = _detect_data_type(
+                raw_df, target_column=self.target_column, lang=self.lang
+            )
             pre_column_types = detect_all(raw_df)
             self._emit_progress("prog_quality")
             self._quality_issues_before = run_quality_checks(
@@ -1013,7 +1025,10 @@ class ProfileReport:
             return
         if self.report_mode == "blueprint" or self._data_type.get("key") == "ml_tabular":
             self._notes.append(
-                "timeseries analysis skipped (blueprint/ml_tabular — event rows are not a time series)"
+                (
+                    "timeseries analysis skipped "
+                    "(blueprint/ml_tabular — event rows are not a time series)"
+                )
                 if self.lang == "en"
                 else "ข้าม timeseries (blueprint/ml_tabular — แถว event ไม่ใช่อนุกรมเวลา)"
             )
@@ -1618,9 +1633,7 @@ class ProfileReport:
         critical_count += sum(1 for a in self._anomalies if a.severity == "critical")
         warning_count = sum(1 for i in self._quality_issues if i.severity == "warning")
         warning_count += sum(1 for a in self._anomalies if a.severity == "warning")
-        warning_count += sum(
-            1 for f in self._leakage_findings if f.get("severity") == "warning"
-        )
+        warning_count += sum(1 for f in self._leakage_findings if f.get("severity") == "warning")
 
         summary_missing = raw_missing_pct if self.clean else missing_pct
         placeholder_warning = self._high_placeholder_rate()
@@ -1635,8 +1648,14 @@ class ProfileReport:
             if critical_count and summary_missing >= 30:
                 verdict = _localized_text(
                     lang,
-                    th=f"พบประเด็นวิกฤต {critical_count} เรื่อง และค่าว่างสูง ({summary_missing:.1f}%) — แก้ก่อนใช้งาน",
-                    en=f"{critical_count} critical issue(s) and high missing rate ({summary_missing:.1f}%) — fix before use.",
+                    th=(
+                        f"พบประเด็นวิกฤต {critical_count} เรื่อง "
+                        f"และค่าว่างสูง ({summary_missing:.1f}%) — แก้ก่อนใช้งาน"
+                    ),
+                    en=(
+                        f"{critical_count} critical issue(s) and high missing rate "
+                        f"({summary_missing:.1f}%) — fix before use."
+                    ),
                 )
             elif critical_count:
                 verdict = _localized_text(
@@ -1680,7 +1699,10 @@ class ProfileReport:
                 verdict = _localized_text(
                     lang,
                     th=f"พบจุดเตือน {warning_count} เรื่อง — ใช้ต่อได้แต่ควรตรวจก่อนเชิงลึก",
-                    en=f"{warning_count} warning(s) found — usable but review before deep analysis.",
+                    en=(
+                        f"{warning_count} warning(s) found — "
+                        "usable but review before deep analysis."
+                    ),
                 )
             elif summary_missing >= 5:
                 verdict = _localized_text(
@@ -2068,7 +2090,9 @@ class ProfileReport:
                 cols = sorted({i.column for i in issues})
                 entry = worst.to_dict()
                 entry["source"] = "quality"
-                entry["column"] = ", ".join(cols[:6]) + (f" (+{len(cols) - 6})" if len(cols) > 6 else "")
+                entry["column"] = ", ".join(cols[:6]) + (
+                    f" (+{len(cols) - 6})" if len(cols) > 6 else ""
+                )
                 entry["grouped_columns"] = cols
                 entry["group_count"] = len(cols)
                 if self.lang == "en":
@@ -2166,10 +2190,17 @@ class ProfileReport:
             technical = (
                 item.get("description")
                 if lang == "en" and item.get("description")
-                else item.get("description_th") or item.get("description") or item.get("title") or item.get("title_th") or ""
+                else item.get("description_th")
+                or item.get("description")
+                or item.get("title")
+                or item.get("title_th")
+                or ""
             )
             recommendation = (
-                item.get("suggestion") or item.get("recommendation_th") or item.get("recommendation_th") or ""
+                item.get("suggestion")
+                or item.get("recommendation_th")
+                or item.get("recommendation_th")
+                or ""
                 if lang == "en"
                 else item.get("suggestion_th") or item.get("recommendation_th") or ""
             )

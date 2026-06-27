@@ -161,10 +161,7 @@ def _sniff_csv_options(path: Path, encoding: str) -> dict[str, str | int | None]
         return {"sep": ",", "header": 0}
 
     ext = path.suffix.lower()
-    if ext == ".tsv":
-        sep = "\t"
-    else:
-        sep = _sniff_csv_delimiter(sample)
+    sep = "\t" if ext == ".tsv" else _sniff_csv_delimiter(sample)
 
     lines = [ln for ln in sample.splitlines() if ln.strip()][:3]
     if not lines:
@@ -174,11 +171,10 @@ def _sniff_csv_options(path: Path, encoding: str) -> dict[str, str | int | None]
     if not first:
         return {"sep": sep, "header": 0}
 
-    if all(_looks_like_data_value(v) for v in first):
-        if len(lines) >= 2:
-            second = next(csv.reader([lines[1]], delimiter=sep))
-            if second and all(_looks_like_data_value(v) for v in second):
-                return {"sep": sep, "header": None}
+    if all(_looks_like_data_value(v) for v in first) and len(lines) >= 2:
+        second = next(csv.reader([lines[1]], delimiter=sep))
+        if second and all(_looks_like_data_value(v) for v in second):
+            return {"sep": sep, "header": None}
 
     return {"sep": sep, "header": 0}
 

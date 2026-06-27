@@ -1227,7 +1227,8 @@ def _run_oneliner_batch(args: argparse.Namespace) -> int:
         exts = ", ".join(sorted(_BATCH_EXTS))
         print(
             f"error: ไม่พบไฟล์ข้อมูล ({exts}) ใน {folder}\n"
-            "  ใส่ไฟล์ CSV/TSV/JSON/Excel/Parquet หรือใช้ `thaieda dataset folder/` สำหรับ schema หลายตาราง",
+            "  ใส่ไฟล์ CSV/TSV/JSON/Excel/Parquet "
+            "หรือใช้ `thaieda dataset folder/` สำหรับ schema หลายตาราง",
             file=sys.stderr,
         )
         return 2
@@ -1281,14 +1282,14 @@ def _run_oneliner_batch(args: argparse.Namespace) -> int:
         if df.empty:
             fail_count += 1
             if not quiet:
-                print(f"{label_idx} {fpath.name} ... FAIL ({time.perf_counter() - t0:.1f}s): ไฟล์ว่าง")
+                print(
+                    f"{label_idx} {fpath.name} ... FAIL ({time.perf_counter() - t0:.1f}s): ไฟล์ว่าง"
+                )
             continue
 
         target, target_source = global_target, global_source
         if target is None:
-            target, target_source = _resolve_target_column(
-                df, None, interactive=interactive
-            )
+            target, target_source = _resolve_target_column(df, None, interactive=interactive)
         elif target not in df.columns:
             if not quiet:
                 print(
@@ -1298,9 +1299,7 @@ def _run_oneliner_batch(args: argparse.Namespace) -> int:
             if args.target is not None:
                 target, target_source = None, None
             else:
-                target, target_source = _resolve_target_column(
-                    df, None, interactive=interactive
-                )
+                target, target_source = _resolve_target_column(df, None, interactive=interactive)
 
         code, html_path = _run_oneliner_file(
             df,
@@ -1372,9 +1371,7 @@ def _run_oneliner(args: argparse.Namespace) -> int:
     if df is None:
         return code
 
-    target, target_source = _resolve_target_column(
-        df, args.target, interactive=interactive
-    )
+    target, target_source = _resolve_target_column(df, args.target, interactive=interactive)
     if target_source == "flag" and target not in df.columns:
         print(f"error: ไม่พบคอลัมน์เป้าหมาย '{target}' ในข้อมูล", file=sys.stderr)
         return 2

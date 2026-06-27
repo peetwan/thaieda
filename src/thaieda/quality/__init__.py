@@ -704,10 +704,10 @@ _STRINGISH_TYPES = _TEXT_TYPES | {ColumnType.PHONE_NUMBER}
 def _is_stringish_column(series: pd.Series, ctype: ColumnType) -> bool:
     """True ถ้าคอลัมน์เก็บค่าแบบข้อความ (object/str/phone) — รองรับ pandas 3.x str dtype."""
     return (
-        ctype in _STRINGISH_TYPES
-        or pd.api.types.is_string_dtype(series)
-        or series.dtype == object
+        ctype in _STRINGISH_TYPES or pd.api.types.is_string_dtype(series) or series.dtype == object
     )
+
+
 # ประเภทคอลัมน์ที่อาจมีปี
 _YEAR_TYPES = {ColumnType.NUMERIC, ColumnType.DATETIME}
 
@@ -999,9 +999,10 @@ def run_quality_checks(
                 issues.append(issue)
 
         # v0.8: placeholder/dash แทน NaN
-        if _is_stringish_column(series, ctype) and (
-            issue := check_placeholder_values(series, col_name)
-        ) is not None:
+        if (
+            _is_stringish_column(series, ctype)
+            and (issue := check_placeholder_values(series, col_name)) is not None
+        ):
             issues.append(issue)
 
         # v0.8: constant column (zero variance) — flag เพื่อให้ user รู้ว่าไม่มีประโยชน์

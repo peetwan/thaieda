@@ -204,8 +204,7 @@ def test_read_data_headerless_numeric(tmp_path):
     """UCI .data ไม่มี header — คอลัมน์สุดท้ายตั้งชื่อ target."""
     f = tmp_path / "heart.data"
     f.write_text(
-        "63.0,1.0,1.0,145.0,0\n"
-        "67.0,1.0,4.0,160.0,2\n",
+        "63.0,1.0,1.0,145.0,0\n67.0,1.0,4.0,160.0,2\n",
         encoding="utf-8",
     )
     df = read_data(f)

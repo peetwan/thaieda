@@ -740,7 +740,8 @@ def _looks_like_datetime(values: list[str]) -> bool:
     # high-cardinality ticket/ID strings
     if len(set(values)) / n > 0.70:
         ticket_like = sum(
-            1 for v in values
+            1
+            for v in values
             if re.match(r"^[A-Za-z]{2,}[-_/.]", v.strip()) or (len(v.strip()) > 20 and "-" in v)
         )
         if ticket_like / n >= 0.30:

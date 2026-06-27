@@ -55,9 +55,7 @@ def _build_golden(name: str, df: pd.DataFrame) -> dict:
             for issue in result.quality_issues
         ],
         "cleaning_plan_actions": plan.actions if plan is not None else [],
-        "cleaning_operations": sorted(
-            {op.operation for op in cleaning_report.operations_run}
-        )
+        "cleaning_operations": sorted({op.operation for op in cleaning_report.operations_run})
         if cleaning_report is not None
         else [],
     }
