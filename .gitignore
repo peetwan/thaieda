@@ -54,14 +54,17 @@ credentials*
 *.thaieda.html
 *.cleaned.csv
 reports_output/
+eval/fixtures/test-report*.html
 
 # Test/example data — ห้าม commit (ไฟล์ใหญ่ ใช้ทดสอบเท่านั้น)
 data-example/
+eval/fixtures/clean-thai.csv
+eval/fixtures/dirty-thai-labeled.csv
 
 # Git worktrees ภายใน (สำหรับงาน agent)
 _worktrees/.env
 _worktrees/
-eval/public-test/qa-outputs/
+eval/public-test/
 
 # Temporary files and folders
 _tmp_*/
