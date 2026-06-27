@@ -438,6 +438,8 @@ _MASTER_HTML_TEMPLATE = """\
   .file-content header {{ display: none !important; }}
   .file-content .sticky-nav {{ display: none !important; }}
   .file-content > header {{ display: none !important; }}
+  .file-content .tab-bar {{ display: none !important; }}
+  .file-content .tab-panel {{ display: block !important; }}
   .file-content img {{ max-width: 100%; height: auto; }}
   .file-content table {{ border-collapse: collapse; }}
   .file-content th, .file-content td {{ padding: 8px; }}

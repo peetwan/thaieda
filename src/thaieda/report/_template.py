@@ -394,6 +394,21 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
   </div>
   {% endif %}
 
+  <!-- ============ CHARTS ============ -->
+  <h2 id="charts">{{ L('distributions_correlations') }}</h2>
+  {% if has_dist_charts %}
+    {% if dist_charts.correlation_heatmap_plotly %}
+   <div class="plotly-chart">{{ dist_charts.correlation_heatmap_plotly | safe }}</div>
+   {% elif dist_charts.correlation_heatmap %}<div class="imgrow full"><div><div class="imgcap">{{ L('correlation_heatmap') }}</div><img src="data:image/png;base64,{{ dist_charts.correlation_heatmap }}" alt="correlation heatmap"><div class="chart-note"><b>{{ L('chart_insight') }}:</b> ดูว่าคอลัมน์ตัวเลขใดเคลื่อนไปด้วยกันสูงมาก อาจใช้แทนกันได้หรือส่งผลต่อโมเดล</div></div></div>{% endif %}
+    {% if dist_charts.scatter_matrix %}<div class="imgrow full"><div><div class="imgcap">{{ L('scatter_matrix') }}</div><img src="data:image/png;base64,{{ dist_charts.scatter_matrix }}" alt="scatter matrix"><div class="chart-note"><b>{{ L('chart_insight') }}:</b> ใช้ดู pattern ระหว่างตัวเลข เช่น เส้นตรง กลุ่มย่อย หรือ outlier</div></div></div>{% endif %}
+    <div class="imgrow">{% if dist_charts.boxplot %}<div><div class="imgcap">{{ L('boxplot') }}</div><img src="data:image/png;base64,{{ dist_charts.boxplot }}" alt="box plot"><div class="chart-note"><b>{{ L('chart_insight') }}:</b> จุดที่หลุดจากกล่องคือค่าที่ควรตรวจว่าเป็น outlier จริงหรือไม่</div></div>{% endif %}{% if dist_charts.violinplot %}<div><div class="imgcap">{{ L('violinplot') }}</div><img src="data:image/png;base64,{{ dist_charts.violinplot }}" alt="violin plot"><div class="chart-note"><b>{{ L('chart_insight') }}:</b> ดูรูปทรงการกระจายว่าเบ้ มีหลายกลุ่ม หรือกระจุกตัวตรงไหน</div></div>{% endif %}</div>
+  {% else %}<p class="empty">ไม่มีกราฟการกระจายที่เหมาะสมสำหรับข้อมูลชุดนี้</p>{% endif %}
+
+  <h2>{{ L('missing_data') }}</h2>
+  {% if has_missing_charts %}
+  <div class="imgrow">{% if missing_charts.missing_matrix %}<div><div class="imgcap">{{ L('missing_matrix') }}</div><img src="data:image/png;base64,{{ missing_charts.missing_matrix }}" alt="missing value matrix"><div class="chart-note"><b>{{ L('chart_insight') }}:</b> แถบว่างช่วยบอกว่าค่าว่างกระจุกตัวช่วงใดหรือคอลัมน์ใด</div></div>{% endif %}{% if missing_charts.missing_heatmap %}<div><div class="imgcap">{{ L('missing_heatmap') }}</div><img src="data:image/png;base64,{{ missing_charts.missing_heatmap }}" alt="missing nullity correlation heatmap"><div class="chart-note"><b>{{ L('chart_insight') }}:</b> ถ้าค่าว่างเกิดพร้อมกันหลายคอลัมน์ อาจเกิดจากขั้นตอนเก็บข้อมูลเดียวกัน</div></div>{% endif %}</div>
+  {% else %}<p class="empty">✓ {{ L('no_missing') }}</p>{% endif %}
+
   </div><!-- /tab-overview -->
 
   <!-- TAB: INSIGHTS -->
@@ -558,21 +573,6 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
     <table><tr><th>{{ L('column') }}</th><th>{{ L('operation') }}</th><th>{{ L('rows_affected') }}</th><th>{{ L('before') }} → {{ L('after') }}</th></tr>{% for c in cleaning_suggestions %}<tr><td><b>{{ c.column }}</b></td><td>{{ c.operation }}<div class="ng">{{ c.description_th }}</div>{% if c.explanation %}<div class="ng">{{ L('explanation') }}: <span class="mono">{{ c.explanation }}</span></div>{% endif %}</td><td>{{ "{:,}".format(c.rows_affected) }}</td><td class="diff">{% for ex in c.before_examples %}<span class="row"><span class="b mono">{{ ex }}</span><span class="arrow">→</span><span class="a mono">{{ c.after_examples[loop.index0] }}</span></span>{% endfor %}</td></tr>{% endfor %}</table>
   {% else %}<p class="empty">✓ {{ L('no_cleaning') }}</p>{% endif %}
 
-  <!-- ============ CHARTS ============ -->
-  <h2 id="charts">{{ L('distributions_correlations') }}</h2>
-  {% if has_dist_charts %}
-    {% if dist_charts.correlation_heatmap_plotly %}
-   <div class="plotly-chart">{{ dist_charts.correlation_heatmap_plotly | safe }}</div>
-   {% elif dist_charts.correlation_heatmap %}<div class="imgrow full"><div><div class="imgcap">{{ L('correlation_heatmap') }}</div><img src="data:image/png;base64,{{ dist_charts.correlation_heatmap }}" alt="correlation heatmap"><div class="chart-note"><b>{{ L('chart_insight') }}:</b> ดูว่าคอลัมน์ตัวเลขใดเคลื่อนไปด้วยกันสูงมาก อาจใช้แทนกันได้หรือส่งผลต่อโมเดล</div></div></div>{% endif %}
-    {% if dist_charts.scatter_matrix %}<div class="imgrow full"><div><div class="imgcap">{{ L('scatter_matrix') }}</div><img src="data:image/png;base64,{{ dist_charts.scatter_matrix }}" alt="scatter matrix"><div class="chart-note"><b>{{ L('chart_insight') }}:</b> ใช้ดู pattern ระหว่างตัวเลข เช่น เส้นตรง กลุ่มย่อย หรือ outlier</div></div></div>{% endif %}
-    <div class="imgrow">{% if dist_charts.boxplot %}<div><div class="imgcap">{{ L('boxplot') }}</div><img src="data:image/png;base64,{{ dist_charts.boxplot }}" alt="box plot"><div class="chart-note"><b>{{ L('chart_insight') }}:</b> จุดที่หลุดจากกล่องคือค่าที่ควรตรวจว่าเป็น outlier จริงหรือไม่</div></div>{% endif %}{% if dist_charts.violinplot %}<div><div class="imgcap">{{ L('violinplot') }}</div><img src="data:image/png;base64,{{ dist_charts.violinplot }}" alt="violin plot"><div class="chart-note"><b>{{ L('chart_insight') }}:</b> ดูรูปทรงการกระจายว่าเบ้ มีหลายกลุ่ม หรือกระจุกตัวตรงไหน</div></div>{% endif %}</div>
-  {% else %}<p class="empty">ไม่มีกราฟการกระจายที่เหมาะสมสำหรับข้อมูลชุดนี้</p>{% endif %}
-
-  <h2>{{ L('missing_data') }}</h2>
-  {% if has_missing_charts %}
-  <div class="imgrow">{% if missing_charts.missing_matrix %}<div><div class="imgcap">{{ L('missing_matrix') }}</div><img src="data:image/png;base64,{{ missing_charts.missing_matrix }}" alt="missing value matrix"><div class="chart-note"><b>{{ L('chart_insight') }}:</b> แถบว่างช่วยบอกว่าค่าว่างกระจุกตัวช่วงใดหรือคอลัมน์ใด</div></div>{% endif %}{% if missing_charts.missing_heatmap %}<div><div class="imgcap">{{ L('missing_heatmap') }}</div><img src="data:image/png;base64,{{ missing_charts.missing_heatmap }}" alt="missing nullity correlation heatmap"><div class="chart-note"><b>{{ L('chart_insight') }}:</b> ถ้าค่าว่างเกิดพร้อมกันหลายคอลัมน์ อาจเกิดจากขั้นตอนเก็บข้อมูลเดียวกัน</div></div>{% endif %}</div>
-  {% else %}<p class="empty">✓ {{ L('no_missing') }}</p>{% endif %}
-
   </div><!-- /tab-anomalies -->
 
   <!-- TAB: COLUMNS -->
@@ -617,13 +617,6 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
   {% endif %}
 
   </div><!-- /tab-columns -->
-
-  <h2 id="recommended-actions">{{ L('recommended_actions') }}</h2>
-  {% if priority_actions %}
-  <ol>
-    {% for a in priority_actions %}<li><b>{{ a.title }}</b> — {{ a.action }}</li>{% endfor %}
-  </ol>
-  {% else %}<p class="empty">✓ {{ L('no_priority_actions') }}</p>{% endif %}
 
   <footer>{{ L('generated_by') }} <b>ThaiEDA</b> v{{ version }} — AutoEDA สำหรับข้อมูลภาษาไทย</footer>
 </div>
