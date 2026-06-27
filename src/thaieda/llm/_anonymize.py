@@ -209,6 +209,7 @@ def _replace_ner_entities(
                 token_map[entity_text] = token
             local_keys.append(entity_text)
 
+    ner_used = False
     if local_keys:
         import re
 
