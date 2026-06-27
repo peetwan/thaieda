@@ -235,13 +235,12 @@ def read_data(
             f"format ไม่รองรับ: {format!r} — รองรับเฉพาะ auto, csv, tsv, json, jsonl, excel, parquet"
         )
 
-    enc = (
-        "utf-8"
-        if fmt in _BINARY_FORMATS
-        else detect_encoding(p)
-        if encoding == "auto"
-        else encoding
-    )
+    if fmt in _BINARY_FORMATS:
+        enc = "utf-8"
+    elif encoding == "auto":
+        enc = detect_encoding(p)
+    else:
+        enc = encoding
 
     # ข้อความบอก encoding ที่ลอง — ช่วยผู้ใช้รู้ว่าควรระบุ --encoding อะไรถ้าอ่านไม่ออก
     if fmt in _BINARY_FORMATS:

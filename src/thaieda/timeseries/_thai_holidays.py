@@ -26,6 +26,10 @@ from datetime import date, datetime
 _FIXED_HOLIDAYS: dict[tuple[int, int], str] = {
     (1, 1): "วันขึ้นปีใหม่",
     (4, 6): "วันจักรีรัชกาล (รัชกาลที่ ๑)",
+    (4, 13): "วันสงกรานต์ (Songkran)",
+    (4, 14): "วันสงกรานต์ (Songkran)",
+    (4, 15): "วันสงกรานต์ (Songkran)",
+    (5, 1): "วันแรงงานแห่งชาติ",
     (5, 5): "วันฉัตรมงคล (รัชกาลที่ ๙)",
     (6, 3): "วันสมเด็จพระนางเจ้าฯ",
     (7, 28): "วันเฉลิมพระชนมพรรษา รัชกาลที่ ๑๐",
@@ -42,17 +46,16 @@ _FIXED_HOLIDAYS: dict[tuple[int, int], str] = {
 _MOVABLE_HOLIDAY_RANGES: list[dict[str, any]] = [
     {"name": "วันมาฆบูชา", "month": 2, "day_start": 10, "day_end": 20},
     {"name": "วันจักรีรัชกาล (รัชกาลที่ ๖)", "month": 1, "day_start": 1, "day_end": 1},
-    {"name": "วันสงกรานต์ (Songkran)", "month": 4, "day_start": 13, "day_end": 15},
-    {"name": "วันแรงงานแห่งชาติ", "month": 5, "day_start": 1, "day_end": 1},
     {"name": "วันวิสาขบูชา", "month": 5, "day_start": 20, "day_end": 31},
 ]
 
 
-def is_thai_holiday(dt: str | date | datetime) -> bool:
-    """ตรวจว่าวันที่ระบุเป็นวันหยุดนักขัตฤๅที่ไทยหรือไม่.
+def is_thai_holiday(dt: str | date | datetime, include_weekends: bool = True) -> bool:
+    """ตรวจว่าวันที่ระบุเป็นวันหยุดราชการหรือวันหยุดนักขัตฤกษ์ของไทยหรือไม่.
 
     Args:
         dt: วันที่ — string (ISO format เช่น "2025-12-05"), date, หรือ datetime.
+        include_weekends: รวมวันหยุดสุดสัปดาห์ (วันเสาร์-อาทิตย์) หรือไม่ (ค่าเริ่มต้นคือ True).
 
     Returns:
         True ถ้าเป็นวันหยุด, False ถ้าไม่ใช่.
@@ -71,7 +74,9 @@ def is_thai_holiday(dt: str | date | datetime) -> bool:
             return True
 
     # ตรวจวันเสาร์-อาทิตย์ (weekend)
-    return d.weekday() >= 5  # 5=เสาร์, 6=อาทิตย์
+    if include_weekends:
+        return d.weekday() >= 5  # 5=เสาร์, 6=อาทิตย์
+    return False
 
 
 def holiday_name(dt: str | date | datetime) -> str:

@@ -175,11 +175,20 @@ def _cramers_v(observed: np.ndarray, chi2: float | None = None) -> float:
     if chi2 is None:
         chi2 = _chi_square_numpy(observed)
 
-    v = math.sqrt(chi2 / (n * (k - 1)))
-
     # Bias correction (Bergsma's)
-    v_adj = v - (k - 1) / (n - 1) if n > 1 else v
-    return max(0.0, v_adj)
+    phi2 = chi2 / n
+    if n > 1:
+        phi2_adj = max(0.0, phi2 - ((r - 1) * (c - 1)) / (n - 1))
+        r_adj = r - ((r - 1) ** 2) / (n - 1)
+        c_adj = c - ((c - 1) ** 2) / (n - 1)
+        k_adj = min(r_adj, c_adj)
+        if k_adj <= 1.0:
+            return 0.0
+        v_adj = math.sqrt(phi2_adj / (k_adj - 1))
+    else:
+        v_adj = math.sqrt(phi2 / (k - 1))
+
+    return v_adj
 
 
 # ----------------------------------------------------------------------------

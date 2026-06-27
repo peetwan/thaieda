@@ -739,12 +739,59 @@ def _looks_like_datetime(values: list[str]) -> bool:
     date_count = sum(1 for v in values if date_like.search(v) or thai_date_re.search(v))
     if date_count / len(values) < 0.6:
         return False
-    # ลอง parse — ถ้าเป็น Thai month ให้แปลงก่อน
-    has_thai = any(thai_date_re.search(v) for v in values)
-    if has_thai:
-        # แปลง Thai month names เป็นตัวเลขก่อน parse
-        return True  # ถ้ามี Thai month names มากพอ ถือว่าเป็น datetime
-    parsed = pd.to_datetime(pd.Series(values), errors="coerce", format="mixed")
+    # ลอง parse — แปลง Thai month และ พ.ศ. ก่อน parse เสมอ
+    thai_month_map = {
+        "มกราคม": "01", "ม.ค.": "01", "มกรา": "01",
+        "กุมภาพันธ์": "02", "ก.พ.": "02", "กุมภา": "02",
+        "มีนาคม": "03", "มี.ค.": "03", "มีนา": "03",
+        "เมษายน": "04", "เม.ย.": "04", "เมษา": "04",
+        "พฤษภาคม": "05", "พ.ค.": "05", "พฤษภ": "05",
+        "มิถุนายน": "06", "มิ.ย.": "06", "มิถุน": "06",
+        "กรกฎาคม": "07", "ก.ค.": "07", "กรกฎา": "07",
+        "สิงหาคม": "08", "ส.ค.": "08", "สิงหา": "08",
+        "กันยายน": "09", "ก.ย.": "09", "กันยา": "09",
+        "ตุลาคม": "10", "ต.ค.": "10", "ตุลา": "10",
+        "พฤศจิกายน": "11", "พ.ย.": "11", "พฤศจิ": "11",
+        "ธันวาคม": "12", "ธ.ค.": "12", "ธันวา": "12",
+    }
+    thai_month_re = re.compile(
+        r"(\d{1,2})\s+(" + "|".join(thai_month_map.keys()) + r")\s+(\d{2,4})",
+        re.IGNORECASE,
+    )
+    year_re = re.compile(
+        r"\b(24\d{2}|25\d{2})\b|"
+        r"(\b\d{1,2}/\d{1,2}/)(\d{2})\b|"
+        r"(\b\d{1,2}-\d{1,2}-)(\d{2})\b"
+    )
+
+    def _replace_be_year(m):
+        if m.group(1):
+            return str(int(m.group(1)) - 543)
+        elif m.group(3):
+            prefix = m.group(2)
+            y_val = int(m.group(3))
+            be_year = (2500 + y_val) if y_val <= 75 else (2400 + y_val)
+            return f"{prefix}{be_year - 543}"
+        elif m.group(5):
+            prefix = m.group(4)
+            y_val = int(m.group(5))
+            be_year = (2500 + y_val) if y_val <= 75 else (2400 + y_val)
+            return f"{prefix}{be_year - 543}"
+        return m.group(0)
+
+    def _sub_month(m):
+        day = m.group(1).zfill(2)
+        month = thai_month_map.get(m.group(2), m.group(2))
+        year = m.group(3)
+        return f"{day}/{month}/{year}"
+
+    converted_values = []
+    for v in values:
+        v_conv = thai_month_re.sub(_sub_month, v)
+        v_conv = year_re.sub(_replace_be_year, v_conv)
+        converted_values.append(v_conv)
+
+    parsed = pd.to_datetime(pd.Series(converted_values), errors="coerce", format="mixed")
     return bool(parsed.notna().mean() > 0.90)
 
 

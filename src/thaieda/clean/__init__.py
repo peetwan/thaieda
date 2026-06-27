@@ -971,12 +971,28 @@ def normalize_dates(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
 
     converted = str_vals.map(_replace_thai_month)
 
-    # 2. แปลง พ.ศ. → ค.ศ. ในปี (4 หลัก ในช่วง 2440-2599)
-    year_re = re.compile(r"\b(24\d{2}|25\d{2})\b")
+    # 2. แปลง พ.ศ. → ค.ศ. ในปี (4 หลัก ในช่วง 2440-2599 หรือ 2 หลักที่เป็น พ.ศ. ในช่วงเหมาะสม)
+    year_re = re.compile(
+        r"\b(24\d{2}|25\d{2})\b|"
+        r"(\b\d{1,2}/\d{1,2}/)(\d{2})\b|"
+        r"(\b\d{1,2}-\d{1,2}-)(\d{2})\b"
+    )
 
     def _replace_be_year(text: str) -> str:
         def _sub(m):
-            return str(int(m.group(1)) - 543)
+            if m.group(1):
+                return str(int(m.group(1)) - 543)
+            elif m.group(3):
+                prefix = m.group(2)
+                y_val = int(m.group(3))
+                be_year = (2500 + y_val) if y_val <= 75 else (2400 + y_val)
+                return f"{prefix}{be_year - 543}"
+            elif m.group(5):
+                prefix = m.group(4)
+                y_val = int(m.group(5))
+                be_year = (2500 + y_val) if y_val <= 75 else (2400 + y_val)
+                return f"{prefix}{be_year - 543}"
+            return m.group(0)
 
         return year_re.sub(_sub, text)
 

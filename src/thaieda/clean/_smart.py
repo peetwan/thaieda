@@ -152,8 +152,6 @@ def _count_thai_numerals(df: pd.DataFrame) -> int:
         s = text_cols[col].dropna().astype(str)
         for numeral in _THAI_NUMERALS:
             count += s.str.contains(numeral, regex=False, na=False).sum()
-            if count > 0:
-                break
     return int(count)
 
 

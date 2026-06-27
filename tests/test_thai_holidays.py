@@ -75,6 +75,14 @@ class TestWeekend:
         assert is_thai_holiday("2025-01-05")
         assert holiday_name("2025-01-05") == "วันอาทิตย์"
 
+    def test_saturday_no_weekends(self):
+        """วันเสาร์ = ไม่ใช่ตัวแทนวันหยุดเมื่อตั้ง include_weekends=False."""
+        assert not is_thai_holiday("2025-01-04", include_weekends=False)
+
+    def test_sunday_no_weekends(self):
+        """วันอาทิตย์ = ไม่ใช่ตัวแทนวันหยุดเมื่อตั้ง include_weekends=False."""
+        assert not is_thai_holiday("2025-01-05", include_weekends=False)
+
 
 class TestNormalDays:
     """ทดสอบวันธรรมดา — ไม่ใช่วันหยุด."""

@@ -92,6 +92,14 @@ class TestNormalizeDates:
         out, result = normalize_dates(s)
         assert result.rows_affected == 1
         assert "02" in str(out.iloc[0])
+        assert "2024" in str(out.iloc[0])
+
+    def test_thai_month_2_digit_be_old(self):
+        s = pd.Series(["15 ม.ค. 08"], name="date")
+        out, result = normalize_dates(s)
+        assert result.rows_affected == 1
+        assert "01" in str(out.iloc[0])
+        assert "1965" in str(out.iloc[0])
 
     def test_no_change_needed(self):
         s = pd.Series(["2024-01-15"], name="date")
