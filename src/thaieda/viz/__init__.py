@@ -587,6 +587,11 @@ def create_scatter_matrix(df: pd.DataFrame, font_path: str | None = None) -> str
     data = numeric[cols].dropna()
     if len(data) < 2:
         return ""
+
+    # Subsample to prevent matplotlib from freezing/timing out on large scatter matrix
+    if len(data) > _PLOT_MAX_POINTS:
+        data = data.sample(_PLOT_MAX_POINTS, random_state=42)
+
     n = len(cols)
     labels = _wrap_labels([str(c) for c in cols])
 

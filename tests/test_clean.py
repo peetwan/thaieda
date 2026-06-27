@@ -116,6 +116,33 @@ def test_fix_repeated_chars():
     assert result.rows_affected == 2
 
 
+def test_fix_repeated_chars_skips_product_codes():
+    s = pd.Series([
+        "SKU-AAA111",
+        "PROD-0001",
+        "CA-2017-152156",
+        "AAB-222",
+        "AAA111",
+        "ปกติ",
+        "55555"
+    ])
+    cleaned, result = fix_repeated_chars(s, max_repeat=3)
+    assert cleaned.iloc[0] == "SKU-AAA111"
+    assert cleaned.iloc[1] == "PROD-0001"
+    assert cleaned.iloc[2] == "CA-2017-152156"
+    assert cleaned.iloc[3] == "AAB-222"
+    assert cleaned.iloc[4] == "AAA111"
+    assert cleaned.iloc[6] == "555"
+    assert result.rows_affected == 1
+
+    # Column name awareness test
+    s2 = pd.Series(["AAAAA", "BBBBB"], name="product_sku")
+    cleaned2, result2 = fix_repeated_chars(s2, max_repeat=3)
+    assert cleaned2.iloc[0] == "AAAAA"
+    assert cleaned2.iloc[1] == "BBBBB"
+    assert result2.rows_affected == 0
+
+
 # ------------------------------------------------------------- tone marks
 def test_fix_tone_mark_stacking():
     s = pd.Series(["น้้ำ", "ปกติ"])

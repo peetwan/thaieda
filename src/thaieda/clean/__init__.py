@@ -323,8 +323,29 @@ def normalize_nfkc(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
     )
 
 
-def _fix_repeated_str(text: str, max_repeat: int) -> str:
-    if _should_skip_repeated_char_fix(text):
+# Whitelist patterns สำหรับรหัสสินค้าและ ID
+_ID_LIKE_RE = re.compile(r"^(?=[A-Za-z0-9\-_]*[A-Za-z])(?=[A-Za-z0-9\-_]*\d)[A-Za-z0-9\-_]{3,}$")
+_HYPHENATED_ID_RE = re.compile(r"^[A-Za-z0-9]+[-_][A-Za-z0-9\-_]+$")
+_ALL_CAPS_ID_RE = re.compile(r"^[A-Z]{2,}\d+$")
+_ID_COLUMN_HINTS_RE = re.compile(
+    r"(id|code|sku|key|no|number|serial|ref|รหัส|เลขที่|ทะเบียน)",
+    re.IGNORECASE,
+)
+
+
+def _fix_repeated_str(
+    text: str,
+    max_repeat: int,
+    skip_id_like: bool = True,
+    column_name: str | None = None,
+    column_type: str | None = None,
+) -> str:
+    if _should_skip_repeated_char_fix(
+        text,
+        skip_id_like=skip_id_like,
+        column_name=column_name,
+        column_type=column_type,
+    ):
         return text
     # ยุบไม้ยมกที่ซ้ำ (ๆๆๆ) ให้เหลือตัวเดียว — การเขียน ๆ ซ้ำไม่มีความหมาย
     text = _YAMOK_REPEAT_RE.sub("ๆ", text)
@@ -333,17 +354,55 @@ def _fix_repeated_str(text: str, max_repeat: int) -> str:
     return pattern.sub(lambda m: m.group(1) * max_repeat, text)
 
 
-def _should_skip_repeated_char_fix(text: str) -> bool:
-    """True เมื่อค่าดูเป็นตัวเลข/วันที่ ไม่ใช่ข้อความธรรมชาติที่ควร normalize."""
+def _should_skip_repeated_char_fix(
+    text: str,
+    skip_id_like: bool = True,
+    column_name: str | None = None,
+    column_type: str | None = None,
+) -> bool:
+    """True เมื่อค่าดูเป็นตัวเลข/วันที่/รหัสสินค้า ไม่ใช่ข้อความธรรมชาติที่ควร normalize."""
     stripped = text.strip()
     if not stripped or _THAI_DIGIT_LAUGHTER_RE.match(stripped):
         return False
-    return bool(_NUMERIC_LIKE_RE.match(stripped) or _DATE_LIKE_RE.match(stripped))
+    if bool(_NUMERIC_LIKE_RE.match(stripped) or _DATE_LIKE_RE.match(stripped)):
+        return True
+
+    if skip_id_like:
+        # whitelist ของรูปแบบรหัสสินค้า
+        if bool(
+            _ID_LIKE_RE.match(stripped)
+            or _HYPHENATED_ID_RE.match(stripped)
+            or _ALL_CAPS_ID_RE.match(stripped)
+        ):
+            return True
+
+        # column name awareness
+        if column_name and _ID_COLUMN_HINTS_RE.search(column_name):
+            return True
+
+        # column type awareness
+        if column_type and str(column_type).lower() in ("id", "code", "sku"):
+            return True
+
+    return False
 
 
-def _vec_fix_repeated(s: pd.Series, max_repeat: int) -> pd.Series:
+def _vec_fix_repeated(
+    s: pd.Series,
+    max_repeat: int,
+    skip_id_like: bool = True,
+    column_name: str | None = None,
+    column_type: str | None = None,
+) -> pd.Series:
     """รุ่นเวกเตอร์ของ _fix_repeated_str — ยุบไม้ยมกซ้ำ แล้วยุบอักขระซ้ำเกิน max_repeat."""
-    skip = s.map(_should_skip_repeated_char_fix)
+    skip = s.map(
+        lambda val: _should_skip_repeated_char_fix(
+            val,
+            skip_id_like=skip_id_like,
+            column_name=column_name,
+            column_type=column_type,
+        )
+    )
     work = s.mask(skip, "")
     work = work.str.replace(_YAMOK_REPEAT_RE.pattern, "ๆ", regex=True)
     pattern = r"(.)\1{" + str(max_repeat) + r",}"
@@ -351,16 +410,34 @@ def _vec_fix_repeated(s: pd.Series, max_repeat: int) -> pd.Series:
     return fixed.where(~skip, s)
 
 
-def fix_repeated_chars(series: pd.Series, max_repeat: int = 3) -> tuple[pd.Series, CleaningResult]:
+def fix_repeated_chars(
+    series: pd.Series,
+    max_repeat: int = 3,
+    skip_id_like: bool = True,
+    column_type: str | None = None,
+) -> tuple[pd.Series, CleaningResult]:
     """ลดการซ้ำอักขระที่มากเกินไป (55555 → 555, ๆๆๆ → ๆ)."""
     if max_repeat < 1:
         raise ValueError("max_repeat must be >= 1")
+    col_name = str(series.name) if series.name is not None else ""
     return _apply_str_transform(
         series,
-        lambda s: _fix_repeated_str(s, max_repeat),
+        lambda s: _fix_repeated_str(
+            s,
+            max_repeat,
+            skip_id_like=skip_id_like,
+            column_name=col_name,
+            column_type=column_type,
+        ),
         operation="fix_repeated_chars",
         description_th=f"ลดการซ้ำอักขระที่เกิน {max_repeat} ตัว (เช่น 55555 → 555, ๆๆๆ → ๆ)",
-        vectorized=lambda s: _vec_fix_repeated(s, max_repeat),
+        vectorized=lambda s: _vec_fix_repeated(
+            s,
+            max_repeat,
+            skip_id_like=skip_id_like,
+            column_name=col_name,
+            column_type=column_type,
+        ),
     )
 
 

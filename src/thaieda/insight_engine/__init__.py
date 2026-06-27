@@ -450,7 +450,10 @@ def _agg_measure(key: pd.Series, measure: pd.Series) -> dict | None:
 
     คืน None ถ้าไม่มีข้อมูลพอ (น้อยกว่า 2 กลุ่ม)
     """
-    num = pd.to_numeric(measure, errors="coerce")
+    if pd.api.types.is_numeric_dtype(measure):
+        num = measure
+    else:
+        num = pd.to_numeric(measure, errors="coerce")
     frame = pd.DataFrame({"_g": key, "_m": num}).dropna()
     if frame.empty:
         return None
@@ -651,6 +654,13 @@ def _collect_candidates(
 ) -> list[dict]:
     """สแกนทุก perspective แล้วเก็บ candidate (ก่อนจัด gate/ranking)."""
     candidates: list[dict] = []
+
+    # Pre-coerce measure columns once to avoid redundant pd.to_numeric conversion in loops
+    coerced_measures = {}
+    for measure in measures:
+        if measure in df.columns:
+            coerced_measures[measure] = pd.to_numeric(df[measure], errors="coerce")
+
     for bd in breakdowns:
         key = _build_key(df, bd)
         if key is None:
@@ -672,7 +682,10 @@ def _collect_candidates(
         for measure, meta in measures.items():
             if measure == bd.column or measure not in df.columns:
                 continue
-            agg_data = _agg_measure(key, df[measure])
+            coerced_m = coerced_measures.get(measure)
+            if coerced_m is None:
+                continue
+            agg_data = _agg_measure(key, coerced_m)
             if agg_data is None:
                 continue
 

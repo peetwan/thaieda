@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 import pandas as pd
@@ -125,8 +126,11 @@ def plan_cleaning(df: pd.DataFrame) -> CleaningPlan:
 # helper — แต่ละการตรวจสอบ (vectorized)
 # ----------------------------------------------------------------------------
 _ZWSPACES = {"\u200b", "\u200c", "\u200d", "\ufeff"}
+_ZWSPACE_PATTERN = "[" + "".join(_ZWSPACES) + "]"
 _THAI_NUMERALS = "๐๑๒๓๔๕๖๗๘๙"
 _PLACEHOLDERS = {"-", "N/A", "n/a", "NA", "ไม่มี", "ไม่มีข้อมูล", "—", "?"}
+_MOJIBAKE_PATTERNS = ["Ã", "Â¸", "Ã©", "Ã§", "â€", "\ufffd"]
+_MOJIBAKE_PATTERN = "|".join(re.escape(p) for p in _MOJIBAKE_PATTERNS)
 
 
 def _count_zwspace(df: pd.DataFrame) -> int:
@@ -137,8 +141,7 @@ def _count_zwspace(df: pd.DataFrame) -> int:
     count = 0
     for col in text_cols.columns:
         s = text_cols[col].dropna().astype(str)
-        for zw in _ZWSPACES:
-            count += s.str.contains(zw, regex=False, na=False).sum()
+        count += s.str.contains(_ZWSPACE_PATTERN, regex=True, na=False).sum()
     return int(count)
 
 
@@ -150,8 +153,7 @@ def _count_thai_numerals(df: pd.DataFrame) -> int:
     count = 0
     for col in text_cols.columns:
         s = text_cols[col].dropna().astype(str)
-        for numeral in _THAI_NUMERALS:
-            count += s.str.contains(numeral, regex=False, na=False).sum()
+        count += s.str.contains(r"[๐-๙]", regex=True, na=False).sum()
     return int(count)
 
 
@@ -175,13 +177,10 @@ def _count_mojibake(df: pd.DataFrame) -> int:
     text_cols = df.select_dtypes(include=["object", "string"])
     if text_cols.empty:
         return 0
-    # สัญลักษณ์ mojibake ที่พบบ่อยจาก TIS-620 → UTF-8 ผิด
-    mojibake_patterns = ["Ã", "Â¸", "Ã©", "Ã§", "â€", "\ufffd"]
     count = 0
     for col in text_cols.columns:
         s = text_cols[col].dropna().astype(str)
-        for pattern in mojibake_patterns:
-            count += s.str.contains(pattern, regex=False, na=False).sum()
+        count += s.str.contains(_MOJIBAKE_PATTERN, regex=True, na=False).sum()
     return int(count)
 
 
@@ -193,12 +192,9 @@ def _count_buddhist_era(df: pd.DataFrame) -> int:
     count = 0
     for col in text_cols.columns:
         s = text_cols[col].dropna().astype(str)
-        # ปี พ.ศ. มักอยู่ในช่วง 2400-2600
-        be_years = s.str.extractall(r"(\d{4})")[0]
-        be_years = be_years.astype(int)
-        be_count = ((be_years > 2400) & (be_years < 2700)).sum()
-        count += int(be_count)
-    return count
+        # ปี พ.ศ. มักอยู่ในช่วง 2400-2699
+        count += s.str.contains(r"\b2[4-6]\d{2}\b", regex=True, na=False).sum()
+    return int(count)
 
 
 def _count_placeholders(df: pd.DataFrame) -> int:
@@ -209,8 +205,7 @@ def _count_placeholders(df: pd.DataFrame) -> int:
     count = 0
     for col in text_cols.columns:
         s = text_cols[col].dropna().astype(str)
-        for ph in _PLACEHOLDERS:
-            count += (s == ph).sum()
+        count += s.isin(_PLACEHOLDERS).sum()
     return int(count)
 
 
