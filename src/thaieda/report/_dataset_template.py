@@ -1,7 +1,6 @@
 """Jinja2 HTML template สำหรับรายงานชุดข้อมูลหลายตาราง (DatasetReport) — v0.5."""
 # ruff: noqa: E501, W293 — เทมเพลต HTML มีบรรทัดยาวโดยธรรมชาติ (แอตทริบิวต์/markup)
 
-
 from __future__ import annotations
 
 # ธีมเข้มเดียวกับ ProfileReport + Mermaid.js (CDN) สำหรับแผนผัง ER

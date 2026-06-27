@@ -117,15 +117,9 @@ def test_fix_repeated_chars():
 
 
 def test_fix_repeated_chars_skips_product_codes():
-    s = pd.Series([
-        "SKU-AAA111",
-        "PROD-0001",
-        "CA-2017-152156",
-        "AAB-222",
-        "AAA111",
-        "ปกติ",
-        "55555"
-    ])
+    s = pd.Series(
+        ["SKU-AAA111", "PROD-0001", "CA-2017-152156", "AAB-222", "AAA111", "ปกติ", "55555"]
+    )
     cleaned, result = fix_repeated_chars(s, max_repeat=3)
     assert cleaned.iloc[0] == "SKU-AAA111"
     assert cleaned.iloc[1] == "PROD-0001"
@@ -629,4 +623,3 @@ def test_fix_repeated_chars_heuristic_cuts_text():
     assert cleaned.iloc[0] == "หิววว"
     assert cleaned.iloc[1] == "อร่อยยย"
     assert result.rows_affected == 2
-

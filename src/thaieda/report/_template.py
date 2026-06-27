@@ -1,7 +1,6 @@
 """Jinja2 HTML template สำหรับรายงาน ThaiEDA — เก็บเป็นสตริงเพื่อให้แพ็กเกจ self-contained."""
 # ruff: noqa: E501, W293 — เทมเพลต HTML มีบรรทัดยาวโดยธรรมชาติ (แอตทริบิวต์/markup)
 
-
 from __future__ import annotations
 
 # ธีมเข้ม, modern, CSS ฝังในตัว, รูปเป็น base64 — ไม่พึ่งไฟล์ภายนอก
