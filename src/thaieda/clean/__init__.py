@@ -8,8 +8,10 @@
 from __future__ import annotations
 
 import contextlib
+import math
 import re
 import unicodedata
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -324,13 +326,64 @@ def normalize_nfkc(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
 
 
 # Whitelist patterns สำหรับรหัสสินค้าและ ID
-_ID_LIKE_RE = re.compile(r"^(?=[A-Za-z0-9\-_]*[A-Za-z])(?=[A-Za-z0-9\-_]*\d)[A-Za-z0-9\-_]{3,}$")
-_HYPHENATED_ID_RE = re.compile(r"^[A-Za-z0-9]+[-_][A-Za-z0-9\-_]+$")
-_ALL_CAPS_ID_RE = re.compile(r"^[A-Z]{2,}\d+$")
 _ID_COLUMN_HINTS_RE = re.compile(
     r"(id|code|sku|key|no|number|serial|ref|รหัส|เลขที่|ทะเบียน)",
     re.IGNORECASE,
 )
+
+
+def _id_likeness_score(text: str) -> float:
+    """คำนวณคะแนนความเป็น ID/code จากข้อมูล (0.0 - 1.0) เพื่อดูว่าเป็นรหัสสินค้าไม่ใช่ข้อความธรรมชาติ."""
+    if not text:
+        return 0.0
+
+    length = len(text)
+
+    # a) อัตราส่วนตัวเลขต่อความยาว (digit_ratio): ID มักมีตัวเลขเยอะ >= 0.3
+    digit_count = sum(c.isdigit() for c in text)
+    digit_ratio = digit_count / length
+    score_a = 1.0 if digit_ratio >= 0.3 else 0.0
+
+    # b) อัตราส่วนอักษรใหญ่ต่ออักษรอังกฤษ (upper_ratio): ID มักเป็น UPPERCASE >0.5
+    alphas = [c for c in text if c.isalpha()]
+    if alphas:
+        upper_count = sum(c.isupper() for c in alphas)
+        upper_ratio = upper_count / len(alphas)
+    else:
+        upper_ratio = 0.0
+    score_b = 1.0 if upper_ratio > 0.5 else 0.0
+
+    # c) มี hyphen/underscore/dot กลางสตริง (has_separator)
+    has_separator = False
+    if length > 2:
+        has_separator = any(c in "-_." for c in text[1:-1])
+    score_c = 1.0 if has_separator else 0.0
+
+    # d) ความยาวสั้น (len <= 20)
+    score_d = 1.0 if length <= 20 else 0.0
+
+    # e) ไม่มีช่องว่าง (no_spaces)
+    score_e = 1.0 if not any(c.isspace() for c in text) else 0.0
+
+    # f) มีทั้งตัวอักษรและตัวเลขผสม (has_alnum_mix): ไม่ใช่ตัวเลขล้วนหรือตัวอักษรล้วน
+    has_alpha = any(c.isalpha() for c in text)
+    has_digit = any(c.isdigit() for c in text)
+    score_f = 1.0 if (has_alpha and has_digit) else 0.0
+
+    # g) entropy ต่ำ — อักขระซ้ำเยอะ
+    counts = Counter(text)
+    entropy = 0.0
+    for count in counts.values():
+        p = count / length
+        entropy -= p * math.log2(p)
+
+    max_entropy = math.log2(length) if length > 1 else 1.0
+    entropy_ratio = entropy / max_entropy if max_entropy > 0 else 0.0
+    score_g = 1.0 if entropy_ratio < 0.85 else 0.0
+
+    # คำนวณคะแนนเฉลี่ย
+    total_score = (score_a + score_b + score_c + score_d + score_e + score_f + score_g) / 7.0
+    return total_score
 
 
 def _fix_repeated_str(
@@ -362,12 +415,8 @@ def _fix_repeated_str(
             result_tokens.append(token)
             continue
 
-        # ตรวจสอบ ID-like ในระดับ token
-        is_id_like = skip_id_like and bool(
-            _ID_LIKE_RE.match(token)
-            or _HYPHENATED_ID_RE.match(token)
-            or _ALL_CAPS_ID_RE.match(token)
-        )
+        # ตรวจสอบ ID-like ในระดับ token โดยใช้ _id_likeness_score
+        is_id_like = skip_id_like and (_id_likeness_score(token) >= 0.6)
 
         if is_id_like:
             result_tokens.append(token)
@@ -395,12 +444,8 @@ def _should_skip_repeated_char_fix(
         return True
 
     if skip_id_like:
-        # whitelist ของรูปแบบรหัสสินค้า
-        if bool(
-            _ID_LIKE_RE.match(stripped)
-            or _HYPHENATED_ID_RE.match(stripped)
-            or _ALL_CAPS_ID_RE.match(stripped)
-        ):
+        # whitelist ของรูปแบบรหัสสินค้า โดยใช้ _id_likeness_score
+        if _id_likeness_score(stripped) >= 0.6:
             return True
 
         # column name awareness

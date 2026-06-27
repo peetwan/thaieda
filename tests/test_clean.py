@@ -534,3 +534,99 @@ def test_expand_abbreviations_not_in_default_operations():
 
     assert "expand_abbreviations" not in DEFAULT_OPERATIONS
     assert "expand_abbreviations" in available_operations()
+
+
+def test_id_likeness_score():
+    from thaieda.clean import _id_likeness_score
+
+    # Known IDs (score >= 0.6)
+    assert _id_likeness_score("SKU-AAA111") >= 0.6
+    assert _id_likeness_score("PROD-0001") >= 0.6
+    assert _id_likeness_score("CA-2017-152156") >= 0.6
+    assert _id_likeness_score("AAAA111") >= 0.6
+    assert _id_likeness_score("TH-001") >= 0.6
+    assert _id_likeness_score("SKU.AAA111") >= 0.6
+
+    # Non-IDs (score < 0.6)
+    assert _id_likeness_score("55555") < 0.6
+    assert _id_likeness_score("มากกกกกก") < 0.6
+    assert _id_likeness_score("Hellooooo") < 0.6
+    assert _id_likeness_score("AAAAA") < 0.6
+    assert _id_likeness_score("กาแฟ") < 0.6
+
+
+def test_fix_repeated_chars_heuristic_protects_ids():
+    # 'SKU-AAA111' -> skip
+    s = pd.Series(["SKU-AAA111"])
+    cleaned, _ = fix_repeated_chars(s, max_repeat=3)
+    assert cleaned.iloc[0] == "SKU-AAA111"
+
+    # 'PROD-0001' -> skip
+    s = pd.Series(["PROD-0001"])
+    cleaned, _ = fix_repeated_chars(s, max_repeat=3)
+    assert cleaned.iloc[0] == "PROD-0001"
+
+    # 'CA-2017-152156' -> skip
+    s = pd.Series(["CA-2017-152156"])
+    cleaned, _ = fix_repeated_chars(s, max_repeat=3)
+    assert cleaned.iloc[0] == "CA-2017-152156"
+
+    # 'AAAA111' -> skip
+    s = pd.Series(["AAAA111"])
+    cleaned, _ = fix_repeated_chars(s, max_repeat=3)
+    assert cleaned.iloc[0] == "AAAA111"
+
+    # 'TH-001' -> skip
+    s = pd.Series(["TH-001"])
+    cleaned, _ = fix_repeated_chars(s, max_repeat=3)
+    assert cleaned.iloc[0] == "TH-001"
+
+    # 'รหัส AAAA-1111 สินค้าหมด' -> 'รหัส AAAA-1111 สินค้าหมด'
+    s = pd.Series(["รหัส AAAA-1111 สินค้าหมด"])
+    cleaned, _ = fix_repeated_chars(s, max_repeat=3)
+    assert cleaned.iloc[0] == "รหัส AAAA-1111 สินค้าหมด"
+
+    # 'รหัส AAAA-1111 สินค้าหมดดดด' -> ตัดเฉพาะ 'หมดดดด' เป็น 'หมดดด'
+    s = pd.Series(["รหัส AAAA-1111 สินค้าหมดดดด"])
+    cleaned, _ = fix_repeated_chars(s, max_repeat=3)
+    assert cleaned.iloc[0] == "รหัส AAAA-1111 สินค้าหมดดด"
+
+    # '55555' -> '555' (laughter, ไม่ใช่ ID)
+    s = pd.Series(["55555"])
+    cleaned, _ = fix_repeated_chars(s, max_repeat=3)
+    assert cleaned.iloc[0] == "555"
+
+    # 'มากกกกกก' -> 'มากกก'
+    s = pd.Series(["มากกกกกก"])
+    cleaned, _ = fix_repeated_chars(s, max_repeat=3)
+    assert cleaned.iloc[0] == "มากกก"
+
+    # 'Hellooooo' -> 'Hellooo'
+    s = pd.Series(["Hellooooo"])
+    cleaned, _ = fix_repeated_chars(s, max_repeat=3)
+    assert cleaned.iloc[0] == "Hellooo"
+
+    # 'AAAAA' -> 'AAA'
+    s = pd.Series(["AAAAA"])
+    cleaned, _ = fix_repeated_chars(s, max_repeat=3)
+    assert cleaned.iloc[0] == "AAA"
+
+    # 'กาแฟ' -> 'กาแฟ'
+    s = pd.Series(["กาแฟ"])
+    cleaned, _ = fix_repeated_chars(s, max_repeat=3)
+    assert cleaned.iloc[0] == "กาแฟ"
+
+    # 'SKU.AAA111' -> skip
+    s = pd.Series(["SKU.AAA111"])
+    cleaned, _ = fix_repeated_chars(s, max_repeat=3)
+    assert cleaned.iloc[0] == "SKU.AAA111"
+
+
+def test_fix_repeated_chars_heuristic_cuts_text():
+    # ข้อความภาษาไทยธรรมดาที่มีตัวซ้ำเยอะๆ ต้องถูกตัด
+    s = pd.Series(["หิวววววว", "อร่อยยยยยยย"])
+    cleaned, result = fix_repeated_chars(s, max_repeat=3)
+    assert cleaned.iloc[0] == "หิววว"
+    assert cleaned.iloc[1] == "อร่อยยย"
+    assert result.rows_affected == 2
+
