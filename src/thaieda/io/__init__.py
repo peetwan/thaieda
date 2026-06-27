@@ -212,7 +212,7 @@ def read_data(
 
     Args:
         path: พาธไฟล์ที่ต้องการอ่าน.
-        format: "auto" (เดาจากนามสกุล), "csv", "json" หรือ "jsonl".
+        format: "auto" (เดาจากนามสกุล), "csv", "tsv", "json", "jsonl", "excel" หรือ "parquet".
         encoding: "auto" (ลอง utf-8/tis-620/cp874/cp1252) หรือ encoding เฉพาะ.
         downcast: (v2.0) ลด dtype หลังอ่าน (int64→int32, float64→float32, object→category)
             เพื่อประหยัด memory บนเครื่อง low-resource (default: False).

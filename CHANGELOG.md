@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-06-27
+
+Major release introducing offline executive narrative, smart pre-analysis, smart cleaning pipeline, compare, and report hardening.
+
+### Added
+- Executive HTML narrative and offline `narrative/` summary generation (offline, deterministic, no LLM required).
+- Smart pre-analysis detects transaction/registry/survey/timeseries/mixed data.
+- Smart cleaning pipeline: ML imputation, dtype downcasting, and currency normalization.
+- `compare()` top-level API alias for dataset drift and schema comparison.
+- Full support and alignment for CSV, TSV, JSON, Excel, and Parquet in CLI, folders, and read tools.
+- Dynamic privacy-preserving LLM analysis with 5 modes (insight_only, synthetic, anonymized, dp_noise, full).
+
+### Fixed & Hardened
+- Resolved CI failures for Ruff linting and formatting (handling `E501`, `B007`, `F841`, `E402`, `F401`, `I001`, `W292`).
+- CI: Excluded Windows + Python 3.13 environments due to a scipy access violation bug.
+- Parquet tests: Added graceful skipping when no `pyarrow` or `fastparquet` engine is available.
+- Report hardening for large/wide datasets: added chart caps, table collapsing, and fast paths.
+- ID filtering: Filtered ID-like columns (e.g. postal/zip codes) from insight engine measures and kept per-column charts in the Columns tab.
+- Hardened data deduplication, duplicate columns, infinite values handling, and slim core installation.
+
+### Tests
+- Total tests: 898 (896 passed, 2 skipped), Ruff clean.
+
 ## [1.0.0] - 2026-06-25
 
 **First stable release — one-liner API + PyPI publish.**
