@@ -178,10 +178,10 @@ def _determinism_ratio(feature: pd.Series, target: pd.Series) -> float:
     f = feature[both].astype(str)
     t = target[both].astype(str)
     tmp = pd.DataFrame({"f": f.to_numpy(), "t": t.to_numpy()})
-    # สำหรับแต่ละค่า f นับ target ที่พบบ่อยสุด — แถวที่ตรง mode ถือว่า "ทำนายถูก"
-    grouped = tmp.groupby("f")["t"]
-    pure = grouped.transform(lambda s: s.value_counts().iloc[0])
-    return float(pure.sum()) / float(len(tmp))
+    # สำหรับแต่ละค่า f นับ target ที่พบบ่อยสุด — แถวที่ตรง mode ถือว่า "ทำนายถูก" (vectorized)
+    counts = tmp.groupby(["f", "t"], sort=False).size()
+    max_counts = counts.groupby(level="f").max()
+    return float(max_counts.sum()) / float(len(tmp))
 
 
 def _correlation_ratio(categories: pd.Series, values: pd.Series) -> float:

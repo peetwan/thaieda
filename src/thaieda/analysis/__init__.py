@@ -130,6 +130,18 @@ def _anova(num: np.ndarray, groups: list[np.ndarray], st) -> tuple[float, float]
     return float(f), float("nan")
 
 
+def _chi_square_numpy(observed: np.ndarray) -> float:
+    """คำนวณ chi-square statistic ด้วย numpy (กรณีไม่มี scipy หรือเป็น fallback)."""
+    row = observed.sum(axis=1, keepdims=True)
+    col = observed.sum(axis=0, keepdims=True)
+    total = observed.sum()
+    if total == 0:
+        return 0.0
+    expected = row @ col / total
+    nonzero = expected > 0
+    return float((((observed - expected) ** 2)[nonzero] / expected[nonzero]).sum())
+
+
 def _chi_square(observed: np.ndarray, st) -> tuple[float, float] | None:
     """Chi-square test of independence จากตาราง contingency — คืน (chi2, p)."""
     if observed.size == 0 or observed.sum() == 0 or min(observed.shape) < 2:
@@ -137,12 +149,7 @@ def _chi_square(observed: np.ndarray, st) -> tuple[float, float] | None:
     if st is not None:
         chi2, p, _, _ = st.chi2_contingency(observed)
         return float(chi2), float(p)
-    row = observed.sum(axis=1, keepdims=True)
-    col = observed.sum(axis=0, keepdims=True)
-    total = observed.sum()
-    expected = row @ col / total
-    nonzero = expected > 0
-    chi2 = float((((observed - expected) ** 2)[nonzero] / expected[nonzero]).sum())
+    chi2 = _chi_square_numpy(observed)
     return chi2, float("nan")
 
 
@@ -166,11 +173,7 @@ def _cramers_v(observed: np.ndarray, chi2: float | None = None) -> float:
 
     # คำนวณ chi2 ถ้าไม่ได้ส่งมา
     if chi2 is None:
-        row_marg = observed.sum(axis=1, keepdims=True)
-        col_marg = observed.sum(axis=0, keepdims=True)
-        expected = row_marg @ col_marg / n
-        nonzero = expected > 0
-        chi2 = float((((observed - expected) ** 2)[nonzero] / expected[nonzero]).sum())
+        chi2 = _chi_square_numpy(observed)
 
     v = math.sqrt(chi2 / (n * (k - 1)))
 

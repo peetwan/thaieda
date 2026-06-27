@@ -221,10 +221,10 @@ def _normalize_key_series(non_null: pd.Series) -> pd.Series:
 def _distinct_norm(
     non_null: pd.Series,
     sample_size: int | None,
-    cache: dict[tuple[str, str], set[str]],
-    cache_key: tuple[str, str],
+    cache: dict[tuple[str, str, int | None], set[str]],
+    cache_key: tuple[str, str, int | None],
 ) -> set[str]:
-    """คืนเซ็ตของค่าคีย์ที่ normalize แล้ว (ไม่ซ้ำ) — memoize ต่อ (ตาราง, คอลัมน์)."""
+    """คืนเซ็ตของค่าคีย์ที่ normalize แล้ว (ไม่ซ้ำ) — memoize ต่อ (ตาราง, คอลัมน์, sample_size)."""
     if cache_key in cache:
         return cache[cache_key]
     series = non_null
@@ -283,7 +283,7 @@ def _evaluate_pair(
     b: _ColInfo,
     validate: bool,
     sample_size: int | None,
-    cache: dict[tuple[str, str], set[str]],
+    cache: dict[tuple[str, str, int | None], set[str]],
 ) -> Relationship | None:
     """ตัดสินว่าคอลัมน์ a, b (ชื่อตรงกัน) เป็นความสัมพันธ์หรือไม่ + ทิศทาง + ความมั่นใจ.
 
@@ -320,9 +320,11 @@ def _evaluate_pair(
     method = "name"
 
     if validate:
-        child_d = _distinct_norm(child.non_null, sample_size, cache, (child.table, child.column))
+        child_d = _distinct_norm(
+            child.non_null, sample_size, cache, (child.table, child.column, sample_size)
+        )
         parent_d = _distinct_norm(
-            parent.non_null, sample_size, cache, (parent.table, parent.column)
+            parent.non_null, sample_size, cache, (parent.table, parent.column, sample_size)
         )
         overlap, orphan_count, orphan_ratio, _ = _overlap_stats(child_d, parent_d)
 
@@ -447,7 +449,7 @@ def match_relationships(
         for col in df.columns:
             name_map[str(col).strip().lower()].append((tname, str(col)))
 
-    cache: dict[tuple[str, str], set[str]] = {}
+    cache: dict[tuple[str, str, int | None], set[str]] = {}
     relationships: list[Relationship] = []
     seen: set[tuple[str, str, str, str]] = set()
 

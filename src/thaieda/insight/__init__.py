@@ -603,13 +603,17 @@ def _sentiment_distribution_insights(
 def _comissing_insights(df: pd.DataFrame) -> list[Insight]:
     """คู่คอลัมน์ที่ค่าว่าง "เกิดพร้อมกัน" (สหสัมพันธ์การขาดหายสูง) — อาจเป็น MNAR."""
     na = df.isna()
-    candidates = [c for c in df.columns if 0.05 <= float(na[c].mean()) < 1.0]
+    means = na.mean()
+    candidates = [c for c in df.columns if 0.05 <= float(means[c]) < 1.0]
     candidates = candidates[:_MAX_COMISSING_COLS]
+    if not candidates:
+        return []
+    na_float = na[candidates].astype(float)
     out: list[Insight] = []
     for i in range(len(candidates)):
         for j in range(i + 1, len(candidates)):
             a, b = candidates[i], candidates[j]
-            corr = float(na[a].astype(float).corr(na[b].astype(float)))
+            corr = float(na_float[a].corr(na_float[b]))
             if math.isnan(corr) or corr < _COMISSING_CORR:
                 continue
             out.append(

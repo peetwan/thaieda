@@ -184,6 +184,7 @@ def _mann_kendall(y: np.ndarray) -> tuple[float, float]:
     p-value ใช้ normal approximation พร้อม tie-correction และ continuity correction
     (คำนวณด้วย math.erf จึงไม่ต้องมี scipy)
     """
+    y = y[~np.isnan(y)]
     n = y.size
     if n < 3:
         return 0.0, 1.0
@@ -300,6 +301,8 @@ def _bucket_datetime(raw: pd.Series) -> tuple[pd.Series, str] | None:
     """
     # format="mixed": parse แต่ละค่าแยกกัน เลี่ยง UserWarning "Could not infer format" (U1)
     dt = pd.to_datetime(raw, errors="coerce", format="mixed")
+    if dt.dt.tz is not None:
+        dt = dt.dt.tz_localize(None)
     valid = dt.notna()
     if int(valid.sum()) < _TREND_MIN_BUCKETS:
         return None

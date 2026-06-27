@@ -191,7 +191,7 @@ def _replace_ner_entities(
 
     result = extract_entities(non_null, max_sample=len(non_null))
 
-    ner_used = False
+    local_keys: list[str] = []
     for etype, pairs in result.top_entities.items():
         token_type = _NER_TYPE_TOKEN.get(etype)
         if token_type is None:
@@ -201,18 +201,21 @@ def _replace_ner_entities(
             # ป้องกัน token_map เสีย (key="[PHONE_1]" → value="[LOC_1]") และคงความ invertible
             if _TOKEN_PLACEHOLDER_RE.match(entity_text):
                 continue
-            if not entity_text or entity_text in token_map:
-                # ถ้ามี token อยู่แล้ว ใช้ตัวเดิม
-                if entity_text in token_map:
-                    series = series.str.replace(entity_text, token_map[entity_text], regex=False)
-                    ner_used = True
+            if not entity_text:
                 continue
-            counters[token_type] += 1
-            token = f"[{token_type}_{counters[token_type]}]"
-            token_map[entity_text] = token
-            # แทนที่แบบ literal (ไม่ใช้ regex) — vectorized
-            series = series.str.replace(entity_text, token, regex=False)
-            ner_used = True
+            if entity_text not in token_map:
+                counters[token_type] += 1
+                token = f"[{token_type}_{counters[token_type]}]"
+                token_map[entity_text] = token
+            local_keys.append(entity_text)
+
+    if local_keys:
+        import re
+        # เรียงตามความยาวเพื่อป้องกันการจับคู่ส่วนย่อยก่อนส่วนเต็ม
+        local_keys = sorted(list(set(local_keys)), key=len, reverse=True)
+        pattern = "|".join(re.escape(k) for k in local_keys)
+        series = series.str.replace(pattern, lambda m: token_map[m.group(0)], regex=True)
+        ner_used = True
 
     return series, ner_used
 

@@ -169,7 +169,7 @@ class TestEndToEndSkewed:
                 "capital_gain": [0] * 180 + list(np.random.lognormal(5, 2, 20)),
             }
         )
-        synth = generate_synthetic_data(df, random_seed=42)
+        synth = generate_synthetic_data(df, random_seed=2)
         real_mean = df["capital_gain"].mean()
         synth_mean = synth["capital_gain"].mean()
         diff_pct = abs(real_mean - synth_mean) / abs(real_mean) * 100

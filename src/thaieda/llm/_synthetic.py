@@ -50,8 +50,7 @@ def generate_synthetic_data(
     Returns:
         DataFrame จำลองที่ปลอดภัยส่งให้ LLM.
     """
-    if random_seed is not None:
-        np.random.seed(random_seed)
+    rng = np.random.default_rng(random_seed)
 
     if n_rows is None:
         n_rows = len(df)
@@ -65,26 +64,26 @@ def generate_synthetic_data(
 
         # แยกตาม dtype
         if pd.api.types.is_numeric_dtype(series):
-            synthetic[col_name] = _gen_numeric(series, n_rows)
+            synthetic[col_name] = _gen_numeric(series, n_rows, rng=rng)
         elif pd.api.types.is_datetime64_any_dtype(series):
-            synthetic[col_name] = _gen_datetime(series, n_rows)
+            synthetic[col_name] = _gen_datetime(series, n_rows, rng=rng)
         elif pd.api.types.is_bool_dtype(series):
-            synthetic[col_name] = _gen_categorical(series, n_rows)
+            synthetic[col_name] = _gen_categorical(series, n_rows, rng=rng)
         elif series.dtype == object or pd.api.types.is_string_dtype(series):
             # แยก: categorical (low cardinality) vs text (high cardinality)
             nunique = series.nunique()
             if nunique <= 50:
-                synthetic[col_name] = _gen_categorical(series, n_rows)
+                synthetic[col_name] = _gen_categorical(series, n_rows, rng=rng)
             else:
-                synthetic[col_name] = _gen_text_placeholder(series, n_rows)
+                synthetic[col_name] = _gen_text_placeholder(series, n_rows, rng=rng)
         else:
-            synthetic[col_name] = _gen_categorical(series, n_rows)
+            synthetic[col_name] = _gen_categorical(series, n_rows, rng=rng)
 
         # รักษา missing rate
         if preserve_patterns:
             miss_rate = series.isna().mean()
             if miss_rate > 0:
-                miss_mask = np.random.random(n_rows) < miss_rate
+                miss_mask = rng.random(n_rows) < miss_rate
                 synthetic.loc[miss_mask, col_name] = np.nan
 
     return synthetic
@@ -93,7 +92,7 @@ def generate_synthetic_data(
 # ------------------------------------------------------------------------------
 # Numeric: fit distribution + sample
 # ------------------------------------------------------------------------------
-def _gen_numeric(series: pd.Series, n: int) -> pd.Series:
+def _gen_numeric(series: pd.Series, n: int, rng: np.random.Generator | None = None) -> pd.Series:
     """สร้าง numeric column จาก fitted distribution — v1.9.3.
 
     ปรับปรุง v1.9.3:
@@ -102,9 +101,12 @@ def _gen_numeric(series: pd.Series, n: int) -> pd.Series:
       * ใช้ quantile sampling เป็น fallback เมื่อไม่มี distribution ไหน fit ดี
       * clip แบบนุ่มนวล (IQR-based) แทน hard min/max
     """
+    if rng is None:
+        rng = np.random.default_rng()
+
     numeric = pd.to_numeric(series, errors="coerce").dropna()
     if len(numeric) < 5:
-        return pd.Series(numeric.sample(n, replace=True).values)
+        return pd.Series(numeric.sample(n, replace=True, random_state=rng).values)
 
     values = numeric.to_numpy(dtype="float64")
     if values.std() == 0:
@@ -113,18 +115,18 @@ def _gen_numeric(series: pd.Series, n: int) -> pd.Series:
     # --- v1.9.3: ตรวจจับ spike (zero-inflated หรือ spike ที่ค่าใด ๆ) ---
     spike_val, spike_rate, tail = _detect_spike(values)
     if spike_val is not None:
-        return _gen_spike_mixture(spike_val, spike_rate, tail, n, values)
+        return _gen_spike_mixture(spike_val, spike_rate, tail, n, values, rng=rng)
 
     # --- ไม่มี spike: fit distribution ปกติ ---
     try:
         from scipy import stats as st
     except ImportError:
-        return _gen_quantile_sample(values, n)
+        return _gen_quantile_sample(values, n, rng=rng)
 
     candidates = _fit_distributions(values, st)
 
     if not candidates:
-        return _gen_quantile_sample(values, n)
+        return _gen_quantile_sample(values, n, rng=rng)
 
     # เลือก best fit (p-value สูงสุด)
     best = max(candidates, key=lambda x: x[2])
@@ -132,9 +134,9 @@ def _gen_numeric(series: pd.Series, n: int) -> pd.Series:
 
     # ถ้า best p-value ต่ำมาก → ใช้ quantile sampling แทน
     if best_p < 0.01:
-        return _gen_quantile_sample(values, n)
+        return _gen_quantile_sample(values, n, rng=rng)
 
-    sampled = _sample_from_dist(dist_name, params, n)
+    sampled = _sample_from_dist(dist_name, params, n, rng=rng)
 
     # Clip แบบนุ่มนวล — ใช้ percentile 1/99 แทน hard min/max
     lo = float(np.percentile(values, 0.5))
@@ -167,13 +169,21 @@ def _detect_spike(values: np.ndarray) -> tuple[float | None, float, np.ndarray]:
 
 
 def _gen_spike_mixture(
-    spike_val: float, spike_rate: float, tail: np.ndarray, n: int, all_values: np.ndarray
+    spike_val: float,
+    spike_rate: float,
+    tail: np.ndarray,
+    n: int,
+    all_values: np.ndarray,
+    rng: np.random.Generator | None = None,
 ) -> pd.Series:
     """สร้างข้อมูลแบบ spike + tail mixture — v1.9.3.
 
     spike_rate ส่วน → spike_val
     (1 - spike_rate) ส่วน → sample จาก tail distribution
     """
+    if rng is None:
+        rng = np.random.default_rng()
+
     n_spike = int(n * spike_rate)
     n_tail = n - n_spike
 
@@ -182,22 +192,22 @@ def _gen_spike_mixture(
         from scipy import stats as st
     except ImportError:
         # ไม่มี scipy → quantile sample tail
-        tail_sampled = _gen_quantile_sample(tail, n_tail)
+        tail_sampled = _gen_quantile_sample(tail, n_tail, rng=rng)
     else:
         candidates = _fit_distributions(tail, st)
         if candidates:
             best = max(candidates, key=lambda x: x[2])
             dist_name, params, best_p, _ = best
             if best_p < 0.01:
-                tail_sampled = _gen_quantile_sample(tail, n_tail)
+                tail_sampled = _gen_quantile_sample(tail, n_tail, rng=rng)
             else:
-                tail_sampled = _sample_from_dist(dist_name, params, n_tail)
+                tail_sampled = _sample_from_dist(dist_name, params, n_tail, rng=rng)
                 # clip tail แบบนุ่มนวล
                 lo = float(np.percentile(tail, 0.5))
                 hi = float(np.percentile(tail, 99.5))
                 tail_sampled = np.clip(tail_sampled, lo, hi)
         else:
-            tail_sampled = _gen_quantile_sample(tail, n_tail)
+            tail_sampled = _gen_quantile_sample(tail, n_tail, rng=rng)
 
     # รวม spike + tail
     result = np.empty(n, dtype="float64")
@@ -207,7 +217,7 @@ def _gen_spike_mixture(
     )
 
     # shuffle
-    np.random.shuffle(result)
+    rng.shuffle(result)
 
     # ปัดเศษ
     if all_values.dtype == int or (all_values == all_values.astype(int)).all():
@@ -263,48 +273,58 @@ def _fit_distributions(values: np.ndarray, st: Any) -> list[tuple[str, Any, floa
     return candidates
 
 
-def _sample_from_dist(dist_name: str, params: Any, n: int) -> np.ndarray:
+def _sample_from_dist(
+    dist_name: str, params: Any, n: int, rng: np.random.Generator | None = None
+) -> np.ndarray:
     """sample จาก distribution ตามชื่อ — v1.9.3."""
+    if rng is None:
+        rng = np.random.default_rng()
+
     if dist_name == "normal":
         mu, sigma = params
-        return np.random.normal(mu, sigma, n)
+        return rng.normal(mu, sigma, n)
     elif dist_name == "lognormal":
         shape, loc, scale = params
-        return np.random.lognormal(mean=np.log(scale), sigma=shape, size=n) + loc
+        return rng.lognormal(mean=np.log(scale), sigma=shape, size=n) + loc
     elif dist_name == "exponential":
         loc, scale = params
-        return np.random.exponential(scale, n) + loc
+        return rng.exponential(scale, n) + loc
     elif dist_name == "gamma":
         a, loc, scale = params
         from scipy import stats as st
 
-        return st.gamma.rvs(a, loc=loc, scale=scale, size=n)
+        return st.gamma.rvs(a, loc=loc, scale=scale, size=n, random_state=rng)
     elif dist_name == "weibull":
         c, loc, scale = params
         from scipy import stats as st
 
-        return st.weibull_min.rvs(c, loc=loc, scale=scale, size=n)
+        return st.weibull_min.rvs(c, loc=loc, scale=scale, size=n, random_state=rng)
     elif dist_name == "uniform":
         loc, scale = params
-        return np.random.uniform(loc, loc + scale, n)
+        return rng.uniform(loc, loc + scale, n)
     else:
-        return np.random.choice(
+        return rng.choice(
             params[0] if isinstance(params, (list, np.ndarray)) else np.array([0]), size=n
         )
 
 
-def _gen_quantile_sample(values: np.ndarray, n: int) -> pd.Series:
+def _gen_quantile_sample(
+    values: np.ndarray, n: int, rng: np.random.Generator | None = None
+) -> pd.Series:
     """sample จาก empirical quantiles + noise เล็กน้อย — v1.9.3.
 
     ปลอดภัยกว่า bootstrap เพราะไม่คัดลอกค่าจริง —
     sample quantile แล้วเติม noise เล็กน้อยให้ไม่ตรงค่าจริง
     """
+    if rng is None:
+        rng = np.random.default_rng()
+
     # sample quantile จาก empirical CDF
-    quantiles = np.random.uniform(0.001, 0.999, n)
+    quantiles = rng.uniform(0.001, 0.999, n)
     sampled = np.quantile(values, quantiles)
 
     # เติม noise เล็กน้อย (1% ของ std) เพื่อ privacy — ไม่คัดลอกค่าจริง
-    noise = np.random.normal(0, max(values.std() * 0.01, 1e-6), n)
+    noise = rng.normal(0, max(values.std() * 0.01, 1e-6), n)
     sampled = sampled + noise
 
     # clip ให้ไม่ติดลบถ้าข้อมูลเดิมไม่ติดลบ
@@ -321,8 +341,13 @@ def _gen_quantile_sample(values: np.ndarray, n: int) -> pd.Series:
 # ------------------------------------------------------------------------------
 # Categorical: sample จาก proportions
 # ------------------------------------------------------------------------------
-def _gen_categorical(series: pd.Series, n: int) -> pd.Series:
+def _gen_categorical(
+    series: pd.Series, n: int, rng: np.random.Generator | None = None
+) -> pd.Series:
     """สร้าง categorical column จาก value proportions เดิม — v1.9: ตรวจ PII ก่อน."""
+    if rng is None:
+        rng = np.random.default_rng()
+
     import re
 
     vc = series.value_counts(normalize=True, dropna=False)
@@ -344,18 +369,23 @@ def _gen_categorical(series: pd.Series, n: int) -> pd.Series:
         # แทนด้วย placeholder — รักษา proportions แต่ไม่ส่งค่าจริง
         n_values = len(values)
         placeholders = [f"<category_{i}>" for i in range(n_values)]
-        sampled = np.random.choice(placeholders, size=n, p=probs)
+        sampled = rng.choice(placeholders, size=n, p=probs)
         return pd.Series(sampled)
 
-    sampled = np.random.choice(values, size=n, p=probs)
+    sampled = rng.choice(values, size=n, p=probs)
     return pd.Series(sampled)
 
 
 # ------------------------------------------------------------------------------
 # Datetime: sample จาก range + frequency
 # ------------------------------------------------------------------------------
-def _gen_datetime(series: pd.Series, n: int) -> pd.Series:
+def _gen_datetime(
+    series: pd.Series, n: int, rng: np.random.Generator | None = None
+) -> pd.Series:
     """สร้าง datetime column จาก date range + frequency pattern."""
+    if rng is None:
+        rng = np.random.default_rng()
+
     dates = pd.to_datetime(series, errors="coerce").dropna()
     if len(dates) == 0:
         return pd.Series([pd.NaT] * n)
@@ -366,11 +396,11 @@ def _gen_datetime(series: pd.Series, n: int) -> pd.Series:
 
     if date_range == 0:
         # ทุก row มีวันที่เดียวกัน — สุ่มใน ±1 วัน
-        sampled = date_min + pd.to_timedelta(np.random.uniform(-1, 1, n), unit="s")
+        sampled = date_min + pd.to_timedelta(rng.uniform(-1, 1, n), unit="s")
         return pd.Series(sampled)
 
     # Sample แบบ uniform ใน date range (preserves temporal coverage)
-    seconds = np.random.uniform(0, date_range, n)
+    seconds = rng.uniform(0, date_range, n)
     sampled = date_min + pd.to_timedelta(seconds, unit="s")
 
     # ถ้าข้อมูลจริงเป็น date only (no time component) — ปัดเป็น date
@@ -383,8 +413,13 @@ def _gen_datetime(series: pd.Series, n: int) -> pd.Series:
 # ------------------------------------------------------------------------------
 # Text: placeholder ตาม length distribution (ไม่ส่งข้อความจริง)
 # ------------------------------------------------------------------------------
-def _gen_text_placeholder(series: pd.Series, n: int) -> pd.Series:
+def _gen_text_placeholder(
+    series: pd.Series, n: int, rng: np.random.Generator | None = None
+) -> pd.Series:
     """สร้าง text placeholder — ไม่ส่งข้อความจริง แต่รักษา length distribution."""
+    if rng is None:
+        rng = np.random.default_rng()
+
     non_null = series.dropna().astype(str)
     if len(non_null) == 0:
         return pd.Series([""] * n)
@@ -396,7 +431,7 @@ def _gen_text_placeholder(series: pd.Series, n: int) -> pd.Series:
     samples = []
     for _ in range(n):
         # sample length จาก distribution จริง
-        target_len = max(1, int(np.random.normal(median_len, lengths.std())))
+        target_len = max(1, int(rng.normal(median_len, lengths.std())))
         target_len = max(1, min(target_len, median_len * 3))  # clip
         placeholder = f"<text_{target_len}chars>"
         samples.append(placeholder)
