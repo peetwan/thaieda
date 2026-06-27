@@ -395,13 +395,15 @@ class TestLanguageOption:
 class TestCategoricalDatetimeDowncast:
     """หลัง downcast คอลัมน์ date อาจเป็น category — one-liner ต้องไม่ crash."""
 
-    def test_clean_thai_fixture_with_downcast(self):
-        from pathlib import Path
-
-        path = Path(__file__).resolve().parents[1] / "eval" / "fixtures" / "clean-thai.csv"
-        if not path.exists():
-            pytest.skip("eval fixture not present")
-        df = pd.read_csv(path)
+    def test_clean_with_downcast_categorical_date(self):
+        """หลัง downcast คอลัมน์ date อาจเป็น category — one-liner ต้องไม่ crash."""
+        df = pd.DataFrame(
+            {
+                "date": (["2024-01-01", "2024-02-01", "2023-09-12"] * 34)[:100],
+                "city": (["กรุงเทพ", "เชียงใหม่", "ภูเก็ต"] * 34)[:100],
+                "amount": list(range(100)),
+            }
+        )
         result = thaieda.run(
             df,
             clean=True,
@@ -411,5 +413,5 @@ class TestCategoricalDatetimeDowncast:
             timeseries=False,
             insights_engine=False,
         )
-        assert result.overview["rows"] > 0
+        assert result.overview["rows"] == 100
         assert result.quality_comparison is not None
