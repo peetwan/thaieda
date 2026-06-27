@@ -141,9 +141,9 @@ Inside `run(df)`, ThaiEDA:
    tools where relevant.
 6. Runs target analysis when you pass `target_column="..."`.
 7. Runs time-series analysis when date-like and numeric columns are present.
-8. Searches for cross-column insights when `insights_engine=True`.
+8. Searches for cross-column insights when `insights_engine=True` (including Simpson's paradox and target leakage).
 9. Creates charts when `make_charts=True`.
-10. Generates an offline executive narrative and an HTML report.
+10. Performs smart pre-analysis (classifying dataset as transaction, registry, survey, timeseries, or mixed), generates an offline executive narrative, and builds the HTML report.
 11. Optionally calls an LLM only when you set `llm=True`.
 
 Important: `run(clean=True)` is meant to make the report more useful. If your
@@ -215,7 +215,7 @@ learning tools. It is the fast first step before those tools.
 | One-line HTML report | Yes in some tools | `thaieda.run(df).to_html(...)` |
 | Report-level cleaning | Limited | Built into `run(clean=True)` |
 | Full Thai-aware cleaning pipeline | Usually separate work | `thaieda.clean(df)` |
-| Cross-column insight discovery | Often limited | Built in |
+| Cross-column insight discovery | Often limited | Built in (outstanding, attribution, comparison, trend, Simpson's paradox, target leakage) |
 | Text anomaly detection | Usually separate work | Built in |
 | Multi-file schema discovery | Usually separate work | `profile_dataset(...)` |
 | Dataset drift comparison | Usually separate work | `compare(df1, df2)` |
@@ -398,6 +398,8 @@ Useful flags:
 --sample N
 --quiet
 --json output.json
+--cleaned-output PATH   # For 'run' command
+--operations OPS        # For 'clean' command
 ```
 
 ## Supported Inputs and Outputs
@@ -456,7 +458,7 @@ ruff check src tests
 ruff format src tests
 ```
 
-The package source lives in `src/thaieda/`. Tests live in `tests/`.
+The package source lives in `src/thaieda/`. Tests live in `tests/` (901 tests: 899 passed, 2 skipped).
 
 ## Project Status
 
