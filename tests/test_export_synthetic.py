@@ -12,6 +12,22 @@ import pytest
 from thaieda.llm import export_synthetic_data
 
 
+def _has_parquet_engine() -> bool:
+    """ตรวจว่ามี pyarrow หรือ fastparquet หรือไม่."""
+    try:
+        import pyarrow  # noqa: F401
+
+        return True
+    except ImportError:
+        pass
+    try:
+        import fastparquet  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
 class TestExportSyntheticData:
     """Export synthetic data เป็นไฟล์."""
 
@@ -53,6 +69,10 @@ class TestExportSyntheticData:
         read = pd.read_json(path)
         assert len(read) == 200
 
+    @pytest.mark.skipif(
+        not _has_parquet_engine(),
+        reason="ต้องติดตั้ง pyarrow หรือ fastparquet สำหรับ Parquet",
+    )
     def test_export_parquet(self, sample_df, tmp_path):
         """export เป็น Parquet."""
         path = tmp_path / "synthetic.parquet"
