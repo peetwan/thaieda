@@ -29,7 +29,15 @@ addresses, mixed Thai/English text, and charts that need Thai font handling.
 pip install thaieda
 ```
 
-You can also install the historical all-in-one extra:
+That installs the slim core: pandas, numpy, matplotlib, and Jinja2. Install
+extras when you need Thai NLP tokenizers, Excel/Parquet I/O, ML anomaly
+detection, or richer visualization:
+
+```bash
+pip install "thaieda[thai,viz,excel,parquet]"
+```
+
+You can also install every optional backend:
 
 ```bash
 pip install "thaieda[all]"
@@ -401,6 +409,8 @@ Useful flags:
 | CLI `run`, `profile`, `clean` | CSV, TSV, JSON, JSONL/NDJSON via auto detection, Excel, Parquet |
 | `profile_dataset(path)` folder scan | CSV, TSV, JSON, JSONL, NDJSON |
 | `export_synthetic_data(...)` | CSV, TSV, XLSX, JSON, Parquet |
+
+Excel and Parquet support require the `excel` and `parquet` extras, or `thaieda[all]`.
 
 ## API Map
 

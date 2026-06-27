@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 
 from thaieda import __version__
+from thaieda._validation import ensure_unique_column_names
 from thaieda.analysis import TargetAssociation, analyze_target
 from thaieda.anomaly import AnomalyIssue, detect_anomalies
 from thaieda.clean import (
@@ -477,6 +478,7 @@ class ProfileReport:
     ) -> None:
         if not isinstance(df, pd.DataFrame):
             raise TypeError("ProfileReport expects a pandas DataFrame.")
+        ensure_unique_column_names(df, context="ProfileReport")
         if target_column is not None and target_column not in df.columns:
             raise KeyError(f"target_column {target_column!r} not found in DataFrame.")
         self.df = df

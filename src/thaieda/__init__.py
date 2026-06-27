@@ -302,12 +302,18 @@ def run(
 
     rows_removed = int(report.overview.get("rows_removed_by_cleaning", 0) or 0)
     if rows_removed > 0:
-        notes.append(
-            "clean=True removed duplicate rows: "
-            f"{report.overview.get('rows_before_cleaning')} -> "
-            f"{report.overview.get('rows_after_cleaning')} rows "
-            f"({rows_removed} removed)."
-        )
+        rows_before = report.overview.get("rows_before_cleaning")
+        rows_after = report.overview.get("rows_after_cleaning")
+        if lang == "en":
+            notes.append(
+                "clean=True removed duplicate rows: "
+                f"{rows_before} -> {rows_after} rows ({rows_removed} removed)."
+            )
+        else:
+            notes.append(
+                "clean=True ลบแถวซ้ำ (duplicate rows): "
+                f"{rows_before} -> {rows_after} แถว (ลบ {rows_removed} แถว)."
+            )
 
     return EDAResult(
         report=report,

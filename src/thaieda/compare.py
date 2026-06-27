@@ -20,6 +20,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from thaieda._validation import ensure_unique_column_names
+
 __all__ = ["compare", "compare_datasets", "compare_reports"]
 
 
@@ -30,6 +32,19 @@ def _finite_numeric(series: pd.Series) -> pd.Series:
         return numeric
     finite = np.isfinite(numeric.to_numpy(dtype="float64"))
     return numeric[finite]
+
+
+def _coerce_dataframe(obj: Any, name: str) -> pd.DataFrame:
+    """Accept DataFrame, ProfileReport-like (.df), or EDAResult-like (.report.df)."""
+    if isinstance(obj, pd.DataFrame):
+        df = obj
+    else:
+        report = getattr(obj, "report", None)
+        df = getattr(report, "df", None) if report is not None else getattr(obj, "df", None)
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError(f"{name} ต้องเป็น pandas DataFrame, ProfileReport, หรือ EDAResult.")
+    ensure_unique_column_names(df, context=name)
+    return df
 
 
 # ----------------------------------------------------------------------------
@@ -51,8 +66,8 @@ def _get_scipy_stats():
 # compare_datasets — เปรียบเทียบ DataFrame สองชุด คืน dict ผลลัพธ์
 # ----------------------------------------------------------------------------
 def compare_datasets(
-    df1: pd.DataFrame,
-    df2: pd.DataFrame,
+    df1: Any,
+    df2: Any,
     labels: tuple[str, ...] = ("A", "B"),
 ) -> dict[str, Any]:
     """เปรียบเทียบ DataFrame สองชุดแบบเคียงข้างกัน คืน dict ผลลัพธ์ที่มีโครงสร้าง.
@@ -76,10 +91,8 @@ def compare_datasets(
         TypeError: ถ้า df1 หรือ df2 ไม่ใช่ pandas DataFrame.
         ValueError: ถ้า labels ไม่ใช่ tuple ความยาว 2.
     """
-    if not isinstance(df1, pd.DataFrame):
-        raise TypeError("df1 ต้องเป็น pandas DataFrame")
-    if not isinstance(df2, pd.DataFrame):
-        raise TypeError("df2 ต้องเป็น pandas DataFrame")
+    df1 = _coerce_dataframe(df1, "df1")
+    df2 = _coerce_dataframe(df2, "df2")
     if not isinstance(labels, tuple) or len(labels) != 2:
         raise ValueError("labels ต้องเป็น tuple ความยาว 2")
 
@@ -261,8 +274,8 @@ def compare_datasets(
 # compare_reports — สร้างรายงาน HTML เคียงข้างกัน
 # ----------------------------------------------------------------------------
 def compare_reports(
-    df1: pd.DataFrame,
-    df2: pd.DataFrame,
+    df1: Any,
+    df2: Any,
     labels: tuple[str, ...] = ("A", "B"),
     lang: str = "th",
 ) -> str:

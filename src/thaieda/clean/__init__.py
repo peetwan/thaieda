@@ -13,6 +13,7 @@ import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+import numpy as np
 import pandas as pd
 
 # ----------------------------------------------------------------------------
@@ -1002,12 +1003,43 @@ def normalize_dates(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
     )
 
 
+def _is_missing_scalar(value: object) -> bool:
+    """True for scalar missing values; False for list-like objects."""
+    missing = pd.isna(value)
+    if isinstance(missing, (bool, np.bool_)):
+        return bool(missing)
+    return False
+
+
+def _typed_dedup_token(value: object) -> tuple[str, str]:
+    """Hash token that keeps values with different Python types distinct."""
+    if _is_missing_scalar(value):
+        return ("<NA>", "")
+    value_type = type(value)
+    return (f"{value_type.__module__}.{value_type.__qualname__}", repr(value))
+
+
 def remove_duplicate_rows(df: pd.DataFrame) -> tuple[pd.DataFrame, CleaningResult]:
     """ตรวจหาและลบแถวที่ซ้ำกันทั้งหมด (v0.8).
 
     คืน DataFrame ที่ลบ duplicate แล้ว + CleaningResult บอกจำนวนที่ลบ
     """
-    dup_count = int(df.duplicated().sum())
+    if df.empty:
+        return df, CleaningResult(
+            operation="remove_duplicate_rows",
+            rows_affected=0,
+            column="(entire df)",
+            description_th="ไม่พบแถวซ้ำ",
+        )
+
+    key_frame = pd.DataFrame(index=df.index)
+    for idx in range(df.shape[1]):
+        key_frame[idx] = df.iloc[:, idx].astype(object).map(_typed_dedup_token)
+
+    # แถวที่ว่างทั้งแถวอาจเป็น record ที่ต่างกันแต่ข้อมูลยังไม่สมบูรณ์ จึงไม่ยุบรวมกัน
+    all_missing_rows = df.isna().all(axis=1)
+    duplicate_mask = key_frame.duplicated(keep="first") & ~all_missing_rows
+    dup_count = int(duplicate_mask.sum())
     if dup_count == 0:
         return df, CleaningResult(
             operation="remove_duplicate_rows",
@@ -1015,7 +1047,7 @@ def remove_duplicate_rows(df: pd.DataFrame) -> tuple[pd.DataFrame, CleaningResul
             column="(entire df)",
             description_th="ไม่พบแถวซ้ำ",
         )
-    cleaned = df.drop_duplicates().reset_index(drop=True)
+    cleaned = df.loc[~duplicate_mask].reset_index(drop=True)
     return cleaned, CleaningResult(
         operation="remove_duplicate_rows",
         rows_affected=dup_count,

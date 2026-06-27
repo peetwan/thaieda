@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
+from thaieda._validation import ensure_unique_column_names
 from thaieda.clean import (
     _THAI_MONTH_MAP,
     CleaningResult,
@@ -148,6 +149,7 @@ def clean(
     """
     if not isinstance(df, pd.DataFrame):
         raise TypeError("thaieda.clean() ต้องรับ pandas DataFrame.")
+    ensure_unique_column_names(df, context="thaieda.clean()")
 
     _valid_missing = {"flag", "median", "mode", "drop", "unknown", "ml"}
     if handle_missing not in _valid_missing:

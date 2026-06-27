@@ -704,6 +704,38 @@ def check_missing_values(series: pd.Series, column: str) -> QualityIssue | None:
     )
 
 
+def check_infinite_values(series: pd.Series, column: str) -> QualityIssue | None:
+    """รายงานค่า +/-inf ในคอลัมน์ตัวเลข เพราะทำให้สถิติและกราฟเพี้ยนได้."""
+    total = len(series)
+    if total == 0:
+        return None
+    numeric = pd.to_numeric(series, errors="coerce").to_numpy(dtype="float64")
+    inf_mask = np.isinf(numeric)
+    count = int(inf_mask.sum())
+    if count == 0:
+        return None
+    examples = [str(v) for v in series.loc[pd.Series(inf_mask, index=series.index)].head(5)]
+    return QualityIssue(
+        check_name="infinite_values",
+        severity="warning",
+        column=column,
+        count=count,
+        percentage=_pct(count, total),
+        description=(
+            f"Column contains {count} infinite value(s) (+/-inf), which can distort "
+            "statistics, charts, and anomaly detection."
+        ),
+        description_th=(
+            f"คอลัมน์มีค่าอนันต์ (+/-inf) {count} ค่า ซึ่งอาจทำให้สถิติ กราฟ และการตรวจ outlier เพี้ยน"
+        ),
+        examples=examples,
+        suggestion=(
+            "Replace +/-inf with NaN, cap them to a domain limit, or fix the upstream source."
+        ),
+        suggestion_th="แทน +/-inf ด้วย NaN, จำกัดค่าตาม domain, หรือแก้จากต้นทางข้อมูล",
+    )
+
+
 def run_quality_checks(
     df: pd.DataFrame,
     column_types: dict[str, ColumnType],
@@ -722,6 +754,11 @@ def run_quality_checks(
         ctype = column_types.get(col_name, ColumnType.EMPTY)
 
         if (issue := check_missing_values(series, col_name)) is not None:
+            issues.append(issue)
+        if (
+            ctype == ColumnType.NUMERIC
+            and (issue := check_infinite_values(series, col_name)) is not None
+        ):
             issues.append(issue)
 
         if ctype == ColumnType.EMPTY:
@@ -1234,6 +1271,7 @@ __all__ = [
     "check_whitespace",
     "check_keyboard_layout_suspect",
     "check_missing_values",
+    "check_infinite_values",
     "check_placeholder_values",
     "check_constant_column",
     "run_quality_checks",

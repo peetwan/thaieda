@@ -354,7 +354,7 @@ def detect_numeric_outliers(series: pd.Series) -> AnomalyIssue | None:
     """ตรวจหา outlier ในคอลัมน์ตัวเลข — เลือกวิธี (z-score/MAD/IQR) ตามการกระจายข้อมูล."""
     col = _col_name(series)
     numeric = pd.to_numeric(series, errors="coerce").to_numpy(dtype="float64")
-    valid_mask = ~np.isnan(numeric)
+    valid_mask = np.isfinite(numeric)
     valid = numeric[valid_mask]
     n = int(valid.size)
     if n < _MIN_NUMERIC_SAMPLE:
@@ -440,9 +440,9 @@ def sklearn_available() -> bool:
 
 
 def _numeric_valid(series: pd.Series) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """คืน (ค่าตัวเลขที่ไม่ใช่ NaN, ตำแหน่งแถวของค่าเหล่านั้น, อาร์เรย์เต็มหลัง coerce)."""
+    """คืน (ค่าตัวเลข finite, ตำแหน่งแถวของค่าเหล่านั้น, อาร์เรย์เต็มหลัง coerce)."""
     numeric = pd.to_numeric(series, errors="coerce").to_numpy(dtype="float64")
-    valid_mask = ~np.isnan(numeric)
+    valid_mask = np.isfinite(numeric)
     return numeric[valid_mask], np.flatnonzero(valid_mask), numeric
 
 
