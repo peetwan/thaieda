@@ -1091,7 +1091,7 @@ def _detect_strong_correlations(df: pd.DataFrame, measures: dict[str, dict]) -> 
     if len(measure_cols) < 2:
         return []
 
-    numeric = df[measure_cols].apply(pd.to_numeric, errors="coerce").dropna()
+    numeric = df[measure_cols].apply(pd.to_numeric, errors="coerce")
     if len(numeric) < 10:
         return []
 
@@ -1108,6 +1108,11 @@ def _detect_strong_correlations(df: pd.DataFrame, measures: dict[str, dict]) -> 
             if pair in seen:
                 continue
             seen.add(pair)
+
+            # ตรวจสอบว่ามีข้อมูลร่วมกันอย่างน้อย 10 แถว ป้องกัน correlation บนข้อมูลน้อยเกินไป
+            valid_mask = numeric[col_a].notna() & numeric[col_b].notna()
+            if valid_mask.sum() < 10:
+                continue
 
             # v1.8: เลือก method ตามค่า correlation สูงสุด
             r_pearson = float(pearson_matrix.get(col_a, {}).get(col_b, 0.0))

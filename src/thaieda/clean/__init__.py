@@ -1091,7 +1091,7 @@ _THAI_MONTH_MAP = {
     "ธันวา": "12",
 }
 _THAI_MONTH_RE = re.compile(
-    r"(\d{1,2})\s+(" + "|".join(_THAI_MONTH_MAP.keys()) + r")\s+(\d{2,4})",
+    r"(\d{1,2})\s+(" + "|".join(re.escape(k) for k in _THAI_MONTH_MAP) + r")\s+(\d{2,4})",
     re.IGNORECASE,
 )
 
@@ -1123,8 +1123,6 @@ def normalize_dates(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
 
         return _THAI_MONTH_RE.sub(_sub, text)
 
-    converted = str_vals.map(_replace_thai_month)
-
     # 2. แปลง พ.ศ. → ค.ศ. ในปี (4 หลัก ในช่วง 2440-2599 หรือ 2 หลักที่เป็น พ.ศ. ในช่วงเหมาะสม)
     year_re = re.compile(
         r"\b(24\d{2}|25\d{2})\b|"
@@ -1132,25 +1130,38 @@ def normalize_dates(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
         r"(\b\d{1,2}-\d{1,2}-)(\d{2})\b"
     )
 
-    def _replace_be_year(text: str) -> str:
+    def _normalize_single_date(text: str) -> str:
+        # ตรวจสอบว่าในข้อความดิบมีอักษรภาษาไทยหรือไม่ ก่อนที่ชื่อเดือนไทยจะถูกแปลงเป็นตัวเลข
+        has_thai = bool(re.search(r"[\u0e00-\u0e7f]", text))
+
+        # 1. แปลงเดือนไทย
+        text_month_replaced = _replace_thai_month(text)
+
+        # 2. แปลงปี BE
         def _sub(m):
             if m.group(1):
                 return str(int(m.group(1)) - 543)
             elif m.group(3):
-                prefix = m.group(2)
                 y_val = int(m.group(3))
+                # หากไม่มีอักษรภาษาไทย และเป็นปี 2 หลักที่มีค่า <= 30 (ปี ค.ศ. ปัจจุบัน)
+                # เราถือว่าเป็นปี ค.ศ. อยู่แล้วโดยไม่ต้องแปลงค่าเพื่อป้องกัน Data Corruption
+                if not has_thai and y_val <= 30:
+                    return m.group(0)
+                prefix = m.group(2)
                 be_year = (2500 + y_val) if y_val <= 75 else (2400 + y_val)
                 return f"{prefix}{be_year - 543}"
             elif m.group(5):
-                prefix = m.group(4)
                 y_val = int(m.group(5))
+                if not has_thai and y_val <= 30:
+                    return m.group(0)
+                prefix = m.group(4)
                 be_year = (2500 + y_val) if y_val <= 75 else (2400 + y_val)
                 return f"{prefix}{be_year - 543}"
             return m.group(0)
 
-        return year_re.sub(_sub, text)
+        return year_re.sub(_sub, text_month_replaced)
 
-    converted = converted.map(_replace_be_year)
+    converted = str_vals.map(_normalize_single_date)
 
     # 3. เปรียบเทียบก่อน/หลัง
     changed = converted.to_numpy() != str_vals.to_numpy()

@@ -138,10 +138,10 @@ def flag_holiday_spikes(
 
 def _to_date(dt: str | date | datetime) -> date | None:
     """แปลง input เป็น date — รองรับ str/date/datetime."""
-    if isinstance(dt, date):
-        return dt
     if isinstance(dt, datetime):
         return dt.date()
+    if isinstance(dt, date):
+        return dt
     if isinstance(dt, str):
         try:
             return datetime.fromisoformat(dt).date()

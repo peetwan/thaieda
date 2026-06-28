@@ -258,6 +258,9 @@ def _add_dp_noise(summary: dict[str, Any], epsilon: float) -> dict[str, Any]:
         noisy_numeric[col]["max"] = float(stats["max"]) + _laplace_noise(
             _MEAN_SENSITIVITY / epsilon
         )
+        # ลบข้อมูลสถิติที่ไม่ได้ใส่ noise (เช่น std, quantiles) เพื่อรักษา Differential Privacy ป้องกันข้อมูลรั่วไหล
+        for k in ["std", "25%", "50%", "75%", "q25", "q50", "q75", "median"]:
+            noisy_numeric[col].pop(k, None)
     noisy["numeric_stats"] = noisy_numeric
 
     # categorical — unique_count sensitivity = 1, top_freq sensitivity = 1

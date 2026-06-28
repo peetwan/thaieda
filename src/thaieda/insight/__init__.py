@@ -694,6 +694,8 @@ def _is_bimodal(values: np.ndarray) -> bool:
     วิธี: ทำฮิสโทแกรม -> ปรับเรียบเล็กน้อย -> นับจุดยอดเฉพาะที่ (local maxima) ที่เด่นพอ
     แล้วตรวจว่าระหว่างจุดยอดสองอันที่สูงสุดมี "หุบเขา" ที่ลึกพอหรือไม่ (กัน false positive)
     """
+    # กรองเฉพาะค่าที่เป็น finite ป้องกัน ValueError จาก np.histogram เมื่อเจอ inf/NINF
+    values = values[np.isfinite(values)]
     if values.size < 2 * _MIN_DISTRIBUTION_SAMPLE:
         return False
     # bimodal เป็นคุณสมบัติของการแจกแจงแบบต่อเนื่อง — คอลัมน์ตัวเลขที่มีค่าไม่ซ้ำน้อย

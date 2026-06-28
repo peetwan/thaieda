@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -233,7 +234,7 @@ def analyze_target(
         if col_kind is None:
             continue
 
-        assoc = _associate(df, name, target, target_kind, col_kind, st, alpha)
+        assoc = _associate(df, col, name, target, target_kind, col_kind, st, alpha)
         if assoc is not None:
             results.append(assoc)
 
@@ -248,7 +249,8 @@ def analyze_target(
 
 def _associate(
     df: pd.DataFrame,
-    col: str,
+    col: Any,
+    col_name: str,
     target: pd.Series,
     target_kind: str,
     col_kind: str,
@@ -270,8 +272,13 @@ def _associate(
         if out is None:
             return None
         r, p = out
-        desc = f"สหสัมพันธ์ Pearson ระหว่าง '{col}' กับ '{target_name}' = {r:.3f} — {_sig_th(p, alpha)}"
-        return TargetAssociation(col, target_name, "correlation", r, p, desc, effect_size=abs(r))
+        desc = (
+            f"สหสัมพันธ์ Pearson ระหว่าง '{col_name}' กับ '{target_name}' = {r:.3f} — "
+            f"{_sig_th(p, alpha)}"
+        )
+        return TargetAssociation(
+            col_name, target_name, "correlation", r, p, desc, effect_size=abs(r)
+        )
 
     # numeric × categorical (ทิศใดก็ได้) -> ANOVA F
     if "numeric" in (target_kind, col_kind) and "categorical" in (target_kind, col_kind):
@@ -288,8 +295,8 @@ def _associate(
         if out is None:
             return None
         f, p = out
-        desc = f"ANOVA F ของ '{col}' เทียบกับ '{target_name}' = {f:.3f} — {_sig_th(p, alpha)}"
-        return TargetAssociation(col, target_name, "anova", f, p, desc)
+        desc = f"ANOVA F ของ '{col_name}' เทียบกับ '{target_name}' = {f:.3f} — {_sig_th(p, alpha)}"
+        return TargetAssociation(col_name, target_name, "anova", f, p, desc)
 
     # categorical × categorical -> Chi-square + Cramér's V (v1.8)
     if target_kind == "categorical" and col_kind == "categorical":
@@ -310,10 +317,10 @@ def _associate(
         else:
             strength_th = "ความสัมพันธ์ชัดเจน"
         desc = (
-            f"Chi-square ระหว่าง '{col}' กับ '{target_name}' = {chi2:.3f} — "
+            f"Chi-square ระหว่าง '{col_name}' กับ '{target_name}' = {chi2:.3f} — "
             f"{_sig_th(p, alpha)} (Cramér's V = {v:.3f}, {strength_th})"
         )
-        return TargetAssociation(col, target_name, "chi_square", chi2, p, desc, effect_size=v)
+        return TargetAssociation(col_name, target_name, "chi_square", chi2, p, desc, effect_size=v)
 
     return None
 

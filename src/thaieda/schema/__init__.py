@@ -18,6 +18,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -444,10 +445,10 @@ def match_relationships(
         รายการ Relationship เรียงตามความมั่นใจ (มากไปน้อย).
     """
     # จับกลุ่มตามชื่อคอลัมน์ที่ normalize แล้ว
-    name_map: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    name_map: dict[str, list[tuple[str, Any]]] = defaultdict(list)
     for tname, df in tables.items():
         for col in df.columns:
-            name_map[str(col).strip().lower()].append((tname, str(col)))
+            name_map[str(col).strip().lower()].append((tname, col))
 
     cache: dict[tuple[str, str, int | None], set[str]] = {}
     relationships: list[Relationship] = []
@@ -458,7 +459,7 @@ def match_relationships(
             continue
         infos: list[_ColInfo] = []
         for tname, col in occ:
-            info = _col_info(tname, col, tables[tname][col])
+            info = _col_info(tname, str(col), tables[tname][col])
             if info is not None:
                 infos.append(info)
         for i in range(len(infos)):

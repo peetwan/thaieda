@@ -162,11 +162,23 @@ def _format_summary(summary: dict[str, Any], use_thai: bool) -> str:
         label = "สถิติเชิงตัวเลข" if use_thai else "Numeric Statistics"
         lines.append(f"\n### {label}")
         for col, stats in numeric_stats.items():
+            mean_str = f"mean={stats['mean']:.2f}" if "mean" in stats else "mean=N/A"
+            std_str = f"std={stats['std']:.2f}" if "std" in stats else "std=N/A"
+            min_str = f"min={stats['min']:.2f}" if "min" in stats else "min=N/A"
+            max_str = f"max={stats['max']:.2f}" if "max" in stats else "max=N/A"
+
+            q25 = stats.get("q25", stats.get("25%"))
+            q25_str = f"q25={q25:.2f}" if q25 is not None else "q25=N/A"
+
+            q50 = stats.get("q50", stats.get("50%"))
+            q50_str = f"q50={q50:.2f}" if q50 is not None else "q50=N/A"
+
+            q75 = stats.get("q75", stats.get("75%"))
+            q75_str = f"q75={q75:.2f}" if q75 is not None else "q75=N/A"
+
             lines.append(
                 f"- **{col}**: "
-                f"mean={stats['mean']:.2f}, std={stats['std']:.2f}, "
-                f"min={stats['min']:.2f}, max={stats['max']:.2f}, "
-                f"q25={stats['q25']:.2f}, q50={stats['q50']:.2f}, q75={stats['q75']:.2f}"
+                f"{mean_str}, {std_str}, {min_str}, {max_str}, {q25_str}, {q50_str}, {q75_str}"
             )
 
     # categorical stats

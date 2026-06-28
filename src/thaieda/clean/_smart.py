@@ -124,10 +124,11 @@ def _count_extra_whitespace(series_list: list[pd.Series]) -> int:
     """นับเซลล์ที่มี whitespace ซ้ำหรือหน้าหลัง (vectorized)."""
     count = 0
     for s in series_list:
-        # whitespace ซ้ำ (2 ขึ้นไป)
-        count += s.str.contains(r"  +", regex=True, na=False).sum()
-        # หน้าหรือหลัง whitespace
-        count += s.str.contains(r"^\s|\s$", regex=True, na=False).sum()
+        # ใช้ logical OR ระหว่างสองเงื่อนไขเพื่อป้องกันการนับซ้ำในเซลล์เดียวกัน
+        mask = s.str.contains(r"  +", regex=True, na=False) | s.str.contains(
+            r"^\s|\s$", regex=True, na=False
+        )
+        count += mask.sum()
     return int(count)
 
 

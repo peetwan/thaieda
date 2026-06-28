@@ -179,7 +179,11 @@ def check_thai_id(
         elif _ID_ATTEMPT_RE.match(str_value) or (str_value.isdigit() and len(str_value) != 13):
             format_invalid += 1
             if len(examples) < 3:
-                examples.append(str_value)
+                # ทำการ mask เพื่อป้องกัน PII รั่วไหลในรายงานกรณีที่เลขบัตรประชาชนพิมพ์มาไม่ครบหลัก
+                if len(str_value) >= 7:
+                    examples.append(str_value[:3] + "..." + str_value[-3:])
+                else:
+                    examples.append(str_value)
 
     invalid_total = checksum_invalid + format_invalid
     if invalid_total == 0:

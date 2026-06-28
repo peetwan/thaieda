@@ -442,8 +442,13 @@ def analyze_timeseries(
     dt_index = _datetime_index(series)
     work = series
     if dt_index is not None:
+        # กรองค่า NaT ออกก่อนเพื่อไม่ให้รบกวนการเรียงลำดับและการหาช่องว่างเวลา
+        valid_time = dt_index.notna()
+        work = series.loc[valid_time]
+        dt_index = dt_index[valid_time]
+
         order = dt_index.argsort()
-        work = series.iloc[order]
+        work = work.iloc[order]
         dt_index = dt_index[order]
 
     numeric = pd.to_numeric(work, errors="coerce")
@@ -526,8 +531,12 @@ def analyze_timeseries(
         and n >= 2 * period_for_decompose
         and n <= _MAX_STL_POINTS
     ):
-        parts = _stl_decompose(values, period_for_decompose)
-        engine_used = "statsmodels"
+        try:
+            parts = _stl_decompose(values, period_for_decompose)
+            engine_used = "statsmodels"
+        except Exception:  # noqa: BLE001 — fallback เมื่อ STL ของ statsmodels ล้มเหลวกับข้อมูลสั้น/ผิดคาด
+            parts = _basic_decompose(values, period_for_decompose)
+            engine_used = "basic"
     else:
         parts = _basic_decompose(values, period_for_decompose)
 

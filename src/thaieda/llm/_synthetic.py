@@ -105,8 +105,10 @@ def _gen_numeric(series: pd.Series, n: int, rng: np.random.Generator | None = No
         rng = np.random.default_rng()
 
     numeric = pd.to_numeric(series, errors="coerce").dropna()
+    if len(numeric) == 0:
+        return pd.Series([np.nan] * n)
     if len(numeric) < 5:
-        return pd.Series(numeric.sample(n, replace=True, random_state=rng).values)
+        return pd.Series(rng.choice(numeric.values, size=n, replace=True))
 
     values = numeric.to_numpy(dtype="float64")
     if values.std() == 0:
@@ -351,6 +353,8 @@ def _gen_categorical(
     import re
 
     vc = series.value_counts(normalize=True, dropna=False)
+    if len(vc) == 0:
+        return pd.Series([np.nan] * n)
     values = vc.index.tolist()
     probs = vc.values
 
@@ -365,14 +369,17 @@ def _gen_categorical(
     )
     has_pii = any(re.search(p, all_text) for p in pii_patterns)
 
+    # สุ่มด้วยดัชนี (index) เพื่อหลีกเลี่ยง error mixed types ใน Generator.choice
+    indices = rng.choice(len(values), size=n, p=probs)
+
     if has_pii:
         # แทนด้วย placeholder — รักษา proportions แต่ไม่ส่งค่าจริง
         n_values = len(values)
         placeholders = [f"<category_{i}>" for i in range(n_values)]
-        sampled = rng.choice(placeholders, size=n, p=probs)
+        sampled = [placeholders[i] for i in indices]
         return pd.Series(sampled)
 
-    sampled = rng.choice(values, size=n, p=probs)
+    sampled = [values[i] for i in indices]
     return pd.Series(sampled)
 
 
