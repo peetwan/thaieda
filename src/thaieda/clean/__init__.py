@@ -926,9 +926,8 @@ def normalize_currency(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
     stripped = str_vals.str.replace(_CURRENCY_WORD_RE, "", regex=True)
     stripped = stripped.str.replace(_CURRENCY_STRIP_RE, "", regex=True)
     # เซลล์ที่เหลือเป็นตัวเลขล้วน (และต้นฉบับมีตัวเลขจริง) = เป็นจำนวนเงินทั้งเซลล์
-    is_pure = (
-        stripped.str.fullmatch(_CURRENCY_NUMBER_RE).fillna(False)
-        & str_vals.str.contains(r"\d", na=False)
+    is_pure = stripped.str.fullmatch(_CURRENCY_NUMBER_RE).fillna(False) & str_vals.str.contains(
+        r"\d", na=False
     )
     pure_ratio = float(is_pure.sum()) / n if n else 0.0
 
