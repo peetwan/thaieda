@@ -1036,6 +1036,55 @@ def _looks_like_distinct_short_code_pair(a: str, b: str) -> bool:
     return bool(code_re.fullmatch(a_s) and code_re.fullmatch(b_s))
 
 
+# code/รุ่น/พาร์ทนัมเบอร์: ตัวอักษร+ตัวเลข+ตัวคั่นทั่วไป (เช่น EMB-145LR, CL-600-2B19, DC-9-82(MD-82))
+_CODE_LIKE_RE = re.compile(r"^[A-Za-z0-9 _/#().+\-]+$")
+
+
+def _looks_like_distinct_code_pair(a: str, b: str) -> bool:
+    """True ถ้าทั้งคู่เป็น 'รหัส' ที่มีตัวเลข (รุ่น/พาร์ทนัมเบอร์/เวอร์ชัน/รหัสไปรษณีย์).
+
+    ค่าอย่าง 'EMB-145LR' กับ 'EMB-145' หรือ 'CL-600-2B19' กับ 'CL-600-2C10'
+    มีสตริงคล้ายกันสูงก็จริง แต่เป็นคนละรหัสโดยตั้งใจ ไม่ใช่การพิมพ์ผิด —
+    การตรวจ fuzzy-duplicate มีไว้จับ typo ของ label ข้อความ (เช่นชื่อสถานที่)
+    ไม่ใช่รหัส จึงไม่ควรเสนอให้ standardize. ขยายหลักการเดียวกับ
+    `_looks_like_distinct_short_code_pair` ให้ครอบคลุมรหัสที่ยาวกว่า 10 ตัว.
+    """
+    a_s, b_s = a.strip(), b.strip()
+    if not (any(ch.isdigit() for ch in a_s) and any(ch.isdigit() for ch in b_s)):
+        return False
+    return bool(_CODE_LIKE_RE.fullmatch(a_s) and _CODE_LIKE_RE.fullmatch(b_s))
+
+
+def _differs_by_distinct_word(a: str, b: str) -> bool:
+    """True ถ้าคู่วลีหลายคำต่างกันที่ 'คนละคำ' (ไม่ใช่ typo ของคำเดียวกัน).
+
+    เช่น 'Fixed wing multi engine' กับ 'Fixed wing single engine' หรือ
+    'AMERICAN AIRCRAFT INC' กับ 'AVIAT AIRCRAFT INC' — สตริงคล้ายกันสูงเพราะใช้
+    คำส่วนใหญ่ร่วมกัน แต่คำที่ต่าง ('multi'/'single', 'AMERICAN'/'AVIAT') เป็นคนละคำ
+    จริง ไม่มีคู่ที่ใกล้เคียงในอีกฝั่ง จึงเป็นคนละหมวด ไม่ใช่การพิมพ์ผิด.
+    ตรงข้ามกับ typo เช่น 'San Fransisco'/'San Francisco' ที่คำต่างยังคล้ายกัน
+    จึงยังถูกจับเป็น near-duplicate ตามเดิม.
+    """
+    ta, tb = a.split(), b.split()
+    if len(ta) < 2 and len(tb) < 2:
+        return False
+    set_a, set_b = set(ta), set(tb)
+    only_a = set_a - set_b
+    only_b = set_b - set_a
+    if not only_a and not only_b:
+        return False
+
+    def has_distinct_word(extra: set[str], other: list[str]) -> bool:
+        for tok in extra:
+            if len(tok) < 2:
+                continue
+            if not any(_string_similarity(tok, o) > 0.8 for o in other):
+                return True
+        return False
+
+    return has_distinct_word(only_a, tb) or has_distinct_word(only_b, ta)
+
+
 def _fuzzy_duplicate_anomaly(
     counts: Counter[str], items: list[tuple[int, str]], col: str
 ) -> AnomalyIssue | None:
@@ -1051,7 +1100,13 @@ def _fuzzy_duplicate_anomaly(
             similarity = _string_similarity(a, b)
             if similarity > 0.8:
                 # เช่น INLAND ↔ ISLAND เป็น label/code สั้นที่ต่างกันจริง ไม่ควร standardize
-                if _looks_like_distinct_short_code_pair(a, b):
+                # รหัส/รุ่น (EMB-145LR ↔ EMB-145) และวลีที่ต่างกันคนละคำ
+                # (Fixed wing multi ↔ single engine) ก็เป็นคนละหมวดจริง ไม่ใช่ typo
+                if (
+                    _looks_like_distinct_short_code_pair(a, b)
+                    or _looks_like_distinct_code_pair(a, b)
+                    or _differs_by_distinct_word(a, b)
+                ):
                     continue
                 pairs.append((a, b))
                 involved.update((a, b))

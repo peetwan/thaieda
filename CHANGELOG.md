@@ -24,11 +24,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (ค่าเดียวครอบ >97% ของแถว เช่น timestamp `created_at`/`updated_at` ที่มีค่าเดียวกันเกือบ
   ทั้งชุด) อีกต่อไป — เดิมให้ business insight แบบ tautology ("กลุ่ม X โดดเด่น ... 929 เท่า"
   จากกลุ่ม 929 แถวเทียบกับ 1 แถว) ซึ่งไม่มีความหมายเชิงวิเคราะห์.
+- การตรวจ `fuzzy_duplicates` (หมวดหมู่คล้ายกันจนน่าสงสัยว่าซ้ำ) ไม่ flag คู่ที่เป็น
+  "รหัส/รุ่น" หรือ "วลีที่ต่างกันคนละคำ" เป็น near-duplicate อีกต่อไป — ขยายหลักการของ
+  `_looks_like_distinct_short_code_pair` (เดิมจำกัดเฉพาะรหัสสั้น <10 ตัว) ให้ครอบคลุม
+  รหัสที่มีตัวเลขทุกความยาว (เช่น `EMB-145LR` vs `EMB-145`, `CL-600-2B19` vs
+  `CL-600-2C10`, `737-924ER` vs `737-924`) และวลีหลายคำที่ต่างกันด้วยคนละคำจริง
+  (เช่น `Fixed wing multi engine` vs `Fixed wing single engine`,
+  `AMERICAN AIRCRAFT INC` vs `AVIAT AIRCRAFT INC`) ซึ่งเป็นคนละหมวดโดยตั้งใจ ไม่ใช่
+  การพิมพ์ผิด — ตัด false positive บนคอลัมน์ `model`/`manufacturer`/`type` (เครื่องบิน
+  nycflights13) และ `Ticket` (titanic) ส่วน typo จริงของ label ข้อความ (เช่น
+  `กรุงเทพ` vs `กรุงเทพฯ`, `San Francisco` vs `San Fransisco`) ยังถูกตรวจจับตามเดิม.
 
 ### Tests
 - เพิ่ม regression test กัน false positive ของ repeated-char spam บนตัวเลข/ขอบเขตคำ
 - เพิ่ม regression test กัน bimodal false positive บนคอลัมน์รหัส/หมวด (Pclass/cylinders)
 - เพิ่ม regression test กัน insight บน breakdown ที่แทบคงที่ (near-constant)
+- เพิ่ม regression test กัน fuzzy-duplicate false positive บนรหัส/รุ่นและวลีต่างคำ
+  พร้อมยืนยันว่า typo จริงของข้อความยังถูกตรวจจับ
 
 ## [2.2.0] - 2026-06-27
 
