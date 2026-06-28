@@ -31,8 +31,9 @@ ThaiEDA answers one simple question: **"Can I trust this dataset, and what shoul
 | **One-liner API** | `run()` / `EDA()` — ตรวจจับ ทำความสะอาด ตรวจสอบคุณภาพ ค้นหาข้อมูลเชิงลึก แสดงแผนภูมิ และรายงานผลลัพธ์เป็น HTML ได้ในคำสั่งเดียว | Full AutoEDA pipeline in one function call |
 | **Blueprint mode** | รายงานสรุปที่กระชับและนำไปใช้งานต่อได้ทันที เหมาะสำหรับงาน Machine Learning หรือข้อมูลตารางทั่วไปเมื่อกำหนดคอลัมน์เป้าหมาย (`target_column`) | Shorter actionable reports with modeling blueprint |
 | **Cleaning** | จัดการ Unicode, อักขระเว้นวรรคที่มองไม่เห็น (zero-width), แปลงเลขไทยเป็นอารบิก, แปลงปี พ.ศ. → ค.ศ., ปรับรูปแบบสกุลเงิน, ลบแถวซ้ำ, จัดการค่าว่าง (รวมถึงการเติมค่าด้วย Machine Learning) และการลดขนาดหน่วยความจำ (downcast) | Thai-aware cleaning with audit trail |
-| **Insights** | ระบบวิเคราะห์ความสัมพันธ์ระหว่างคอลัมน์ — ตรวจจับความสัมพันธ์ของข้อมูล, ค่าผิดปกติ (outliers), แนวโน้ม, ความขัดแย้งของซิมป์สัน (Simpson's paradox) และปัญหาข้อมูลรั่วไหล (**target leakage**) ทั้งในระดับ Tier A และ Tier B | Statistical insight discovery with BH correction |
+| **Insights** | ระบบวิเคราะห์ความสัมพันธ์ระหว่างคอลัมน์ — ตรวจจับความสัมพันธ์ของข้อมูล, ค่าผิดปกติ (outliers) แบบเลือกวิธีตามการกระจาย (z-score / MAD / IQR / GESD เพื่อรองรับข้อมูลเบ้), แนวโน้ม, ความขัดแย้งของซิมป์สัน (Simpson's paradox) และปัญหาข้อมูลรั่วไหล (**target leakage**) ทั้งในระดับ Tier A และ Tier B พร้อมกรองข้อค้นพบที่ไม่มีความหมายออก (รหัส/ดัชนีแถว, คอลัมน์ที่แทบคงที่, รหัส/รุ่นที่คล้ายกัน) เพื่อลดสัญญาณรบกวน | Statistical insight discovery with BH correction + distribution-aware robust outliers, low false positives |
 | **Reports** | รายงานรูปแบบ HTML รองรับทั้งภาษาไทยและภาษาอังกฤษ, บทสรุปแบบบรรยายสำหรับผู้บริหาร (offline narrative) และการแสดงผลบน Jupyter Notebook ที่สวยงาม | Executive HTML reports + template narratives |
+| **Performance & Robustness** | word cloud และ pipeline ทำความสะอาดเร็วขึ้นมากบนข้อมูลข้อความขนาดใหญ่ (เช่น `run(make_charts=True)` บนข้อมูลภาษาไทย ~24k แถว เร็วขึ้นจาก ~68s เหลือ ~14s) และ degrade อย่างสุภาพเมื่อ backend ตัดคำ/NER ไม่พร้อมใช้งาน (ออฟไลน์/ติดตั้งไม่ครบ) แทนการล้มทั้ง pipeline | Faster on large text data; graceful offline degradation |
 | **Schema** | ตรวจหาคีย์หลักและคีย์นอก (PK/FK) เชื่อมโยงข้ามไฟล์ พร้อมสร้างแผนภาพ Mermaid diagram | Multi-file schema discovery |
 | **LLM** | สรุปวิเคราะห์ด้วยโมเดลภาษาขนาดใหญ่ พร้อมโหมดรักษาความเป็นส่วนตัวของข้อมูล 5 ระดับ (รองรับ OpenAI, Anthropic และ Ollama) | Privacy-preserving optional LLM summaries |
 
@@ -421,7 +422,7 @@ src/thaieda/
 python -m pytest tests/ -q
 ```
 
-ชุดทดสอบภายในระบบมีมากกว่า **950+ เคสทดสอบ (tests)** ครอบคลุมทั้งขั้นตอนการทำความสะอาดข้อมูล (Cleaning Pipeline), รูปแบบการค้นพบข้อค้นพบเชิงลึก (Insight Patterns), โหมดวิเคราะห์พิมพ์เขียว (Blueprint Mode), การตรวจจับข้อมูลรั่วไหล (Leakage Detection) ตลอดจนการทดสอบกับชุดข้อมูลจริงที่มีจุดผิดพลาดในโครงสร้างใน `tests/fixtures/dirty_datasets/`
+ชุดทดสอบภายในระบบมีมากกว่า **990+ เคสทดสอบ (tests)** ครอบคลุมทั้งขั้นตอนการทำความสะอาดข้อมูล (Cleaning Pipeline), รูปแบบการค้นพบข้อค้นพบเชิงลึก (Insight Patterns), โหมดวิเคราะห์พิมพ์เขียว (Blueprint Mode), การตรวจจับข้อมูลรั่วไหล (Leakage Detection), การกันผลบวกลวง (false-positive regression tests) ตลอดจนการทดสอบกับชุดข้อมูลจริงที่มีจุดผิดพลาดในโครงสร้างใน `tests/fixtures/dirty_datasets/`
 
 ---
 
