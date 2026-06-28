@@ -502,7 +502,5 @@ def test_geo_id_advisory_skips_non_numeric_identifier_columns():
         text_metrics={},
         column_types=column_types,
     )
-    advisory = [
-        i for i in summary.insights if "พิกัด" in i.title_th or "ตัวระบุ" in i.title_th
-    ]
+    advisory = [i for i in summary.insights if "พิกัด" in i.title_th or "ตัวระบุ" in i.title_th]
     assert advisory == [], [i.title_th for i in advisory]
