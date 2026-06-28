@@ -170,6 +170,12 @@ LABELS: dict[str, dict[str, str]] = {
     # --- cleaning diff (การทำความสะอาดที่ดำเนินการจริง) ---
     "cleaning_diff": {"en": "Data Cleaning Applied", "th": "การทำความสะอาด"},
     "total_cells_changed": {"en": "Total cells changed", "th": "รวมเซลล์ที่เปลี่ยน"},
+    "values_changed": {"en": "Values changed", "th": "ค่าที่แก้ไข"},
+    "rows_removed": {"en": "Rows removed", "th": "แถวที่ถูกลบ"},
+    "high_row_loss_warn": {
+        "en": "high row loss — verify this was intended",
+        "th": "ลบแถวจำนวนมาก — ควรตรวจสอบว่าตั้งใจ",
+    },
     "most_impactful": {"en": "Most impactful", "th": "การดำเนินการที่มีผลมากสุด"},
     # --- text metrics ---
     "text_metrics": {"en": "Text Metrics", "th": "สถิติข้อความ"},

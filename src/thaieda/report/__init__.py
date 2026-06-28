@@ -276,6 +276,22 @@ _DATA_TYPE_GUIDANCE: dict[str, dict[str, Any]] = {
 }
 
 
+# สัดส่วนแถวที่ถูกลบซึ่งถือว่า "สูงผิดปกติ" → เด้งเตือนในสรุปการทำความสะอาด
+_HIGH_ROW_LOSS_PCT = 50.0
+
+
+def _is_row_removing_op(op: str, column: str) -> bool:
+    """True ถ้า operation นี้ 'ลบแถว' (เปลี่ยนจำนวนแถว) ไม่ใช่การแก้ค่าระดับเซลล์ (D6).
+
+    remove_duplicate_rows ลบแถวเสมอ; ส่วน handle_missing_values จะลบแถวเฉพาะกรณี
+    drop ทั้ง DataFrame (column == '(entire df)') — ถ้าเป็นรายคอลัมน์คือการเติมค่า (impute)
+    ซึ่งนับเป็นการแก้ระดับเซลล์.
+    """
+    if op == "remove_duplicate_rows":
+        return True
+    return op == "handle_missing_values" and column == "(entire df)"
+
+
 # ขอบเขตอักษรไทย (U+0E00–U+0E7F) — ใช้เติมช่องว่างรอบคำอังกฤษที่ติดกับอักษรไทย
 _THAI_CHAR_RANGE = "\u0e00-\u0e7f"
 _THAI_THEN_LATIN_RE = re.compile(rf"([{_THAI_CHAR_RANGE}])([A-Za-z])")
@@ -2439,10 +2455,27 @@ class ProfileReport:
         cleaning_diff = [c.to_dict() for c in self._cleaning_diff]
         cleaning_diff_summary = None
         if self._cleaning_diff:
-            total_changed = sum(c.rows_affected for c in self._cleaning_diff)
+            # แยกหน่วยให้ชัด: การลบแถวอ้างอิงจากจำนวนแถวก่อน/หลังจริง (authoritative)
+            # ส่วน "ค่าที่แก้ไข" นับเฉพาะการแก้ระดับเซลล์ (ไม่รวมการลบแถวซ้ำ/แถวว่าง และ downcast)
+            rows_removed = max(self._rows_before_cleaning - self._rows_after_cleaning, 0)
+            values_changed = sum(
+                c.rows_affected
+                for c in self._cleaning_diff
+                if not _is_row_removing_op(c.operation, c.column)
+                and c.operation != "downcast_dtypes"
+            )
+            rows_removed_pct = round(
+                (rows_removed / self._rows_before_cleaning * 100.0)
+                if self._rows_before_cleaning
+                else 0.0,
+                2,
+            )
             top = max(self._cleaning_diff, key=lambda c: c.rows_affected)
             cleaning_diff_summary = {
-                "total_cells_changed": total_changed,
+                "values_changed": values_changed,
+                "rows_removed": rows_removed,
+                "rows_removed_pct": rows_removed_pct,
+                "high_row_loss": rows_removed_pct >= _HIGH_ROW_LOSS_PCT,
                 "most_impactful_op": top.operation,
                 "most_impactful_th": top.description_th,
                 "most_impactful_rows": top.rows_affected,

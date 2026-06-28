@@ -7,7 +7,29 @@ import json
 import pandas as pd
 import pytest
 
-from thaieda.report import ProfileReport, _space_thai_latin, profile
+from thaieda.report import (
+    ProfileReport,
+    _is_row_removing_op,
+    _space_thai_latin,
+    profile,
+)
+
+
+def test_is_row_removing_op_distinguishes_rows_from_cells():
+    assert _is_row_removing_op("remove_duplicate_rows", "(entire df)") is True
+    # handle_missing_values ลบแถวเฉพาะตอน drop ทั้ง DataFrame
+    assert _is_row_removing_op("handle_missing_values", "(entire df)") is True
+    # รายคอลัมน์ = การเติมค่า (impute) ไม่ใช่การลบแถว
+    assert _is_row_removing_op("handle_missing_values", "age") is False
+    assert _is_row_removing_op("strip_whitespace", "name") is False
+
+
+def test_cleaning_summary_separates_rows_removed_from_values_changed():
+    df = pd.DataFrame({"name": ["  Alice ", "BOB", "  Alice ", "bob", "Carol"] * 4})
+    html = profile(df, clean=True, lang="th").to_html()
+    # หน่วยต้องแยกชัด: "ค่าที่แก้ไข" (เซลล์) กับ "แถวที่ถูกลบ" (แถว) — ไม่เรียกรวมว่า "เซลล์"
+    assert "ค่าที่แก้ไข" in html
+    assert "แถวที่ถูกลบ" in html
 
 
 def test_space_thai_latin_inserts_space_around_english():
