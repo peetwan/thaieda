@@ -20,7 +20,7 @@ import pandas as pd
 from thaieda.analysis import TargetAssociation
 from thaieda.anomaly import AnomalyIssue
 from thaieda.clean import CleaningResult
-from thaieda.detect import ColumnType
+from thaieda.detect import ColumnType, is_nonmeasure_numeric
 from thaieda.ner import NERResult
 from thaieda.quality import QualityIssue
 from thaieda.text import TextMetrics
@@ -736,6 +736,9 @@ def _distribution_insights(
             continue
         if date_dimension and _is_date_component_name(col):
             continue
+        # ข้ามคอลัมน์ identifier/รหัส/พิกัด — skew/transform ของ id/lat/long ไม่มีความหมาย
+        if is_nonmeasure_numeric(df[col], ctype):
+            continue
         numeric = pd.to_numeric(df[col], errors="coerce").dropna()
         if len(numeric) < _MIN_DISTRIBUTION_SAMPLE or numeric.nunique() <= 1:
             continue
@@ -785,6 +788,11 @@ def _distribution_insights(
 def _correlation_insights(df: pd.DataFrame) -> list[Insight]:
     """คู่คอลัมน์ตัวเลขที่สหสัมพันธ์สูง (|r| > 0.7) — อาจซ้ำซ้อน (multicollinearity)."""
     numeric = df.select_dtypes(include="number")
+    # ข้ามคอลัมน์ identifier/รหัส/พิกัด — สหสัมพันธ์ของ id/lat/long ไม่สื่อถึง multicollinearity จริง
+    numeric = numeric.drop(
+        columns=[c for c in numeric.columns if is_nonmeasure_numeric(df[c])],
+        errors="ignore",
+    )
     if _has_date_dimension_context(df):
         numeric = numeric.drop(
             columns=[c for c in numeric.columns if _is_date_component_name(str(c))],

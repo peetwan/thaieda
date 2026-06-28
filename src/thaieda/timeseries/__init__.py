@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from thaieda.detect import ColumnType, detect_all
+from thaieda.detect import ColumnType, detect_all, is_nonmeasure_numeric
 
 # ----------------------------------------------------------------------------
 # ค่าคงที่
@@ -604,10 +604,14 @@ def analyze_dataframe_timeseries(
 
     # --- เลือกคอลัมน์ตัวเลข (ไม่รวมคอลัมน์เวลา) ---
     types = detect_all(df)
+    # ข้าม identifier/รหัส/พิกัด (id, *_id, lat/long, zip) — ไม่ใช่อนุกรมเวลา
+    # กัน false positive เช่น "zip_code มีแนวโน้มเพิ่มตามเวลา" / spike บน lat/long
     numeric_cols = [
         str(c)
         for c in df.columns
-        if str(c) != str(chosen) and types.get(str(c)) == ColumnType.NUMERIC
+        if str(c) != str(chosen)
+        and types.get(str(c)) == ColumnType.NUMERIC
+        and not is_nonmeasure_numeric(df[c], types.get(str(c)))
     ]
 
     results: dict[str, TimeseriesResult] = {}

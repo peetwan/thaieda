@@ -30,7 +30,7 @@ import pandas as pd
 
 from thaieda.analysis import _anova, _scipy_stats
 from thaieda.anomaly import _choose_outlier_method
-from thaieda.detect import ColumnType, _name_hints_id
+from thaieda.detect import ColumnType, is_nonmeasure_numeric
 from thaieda.schema import _normalize_key_series
 
 # ----------------------------------------------------------------------------
@@ -444,8 +444,8 @@ def _select_measures(
     for col, ctype in column_types.items():
         if ctype != ColumnType.NUMERIC or col not in df.columns:
             continue
-        # กรอง FK ที่ชื่อบอกใบ้ว่าเป็น ID (เช่น store_id, customer_id) — ไม่ใช่ measure ที่มีความหมาย
-        if _name_hints_id(df[col]):
+        # กรอง identifier/รหัส/พิกัด (เช่น store_id, customer_id, lat/long) — ไม่ใช่ measure ที่มีความหมาย
+        if is_nonmeasure_numeric(df[col], ctype):
             skipped_fk.append(col)
             continue
         numeric = pd.to_numeric(df[col], errors="coerce").dropna()

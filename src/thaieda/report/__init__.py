@@ -23,7 +23,12 @@ from thaieda.clean import CleaningResult, clean_thai_text
 from thaieda.clean._pipeline import CleaningReport
 from thaieda.clean._pipeline import clean as clean_dataframe
 from thaieda.clean._smart import CleaningPlan, plan_cleaning
-from thaieda.detect import ColumnType, _detect_language, detect_all
+from thaieda.detect import (
+    ColumnType,
+    _detect_language,
+    detect_all,
+    is_nonmeasure_numeric,
+)
 from thaieda.i18n import TECHNICAL_TO_PLAIN, label
 from thaieda.insight import Insight, InsightSummary, generate_insights
 from thaieda.insight_engine import InsightEngineResult, discover_insights
@@ -1058,8 +1063,10 @@ class ProfileReport:
             ctype = self._column_types.get(col)
             if col == str(time_col) or col in self._ignored_columns or ctype != ColumnType.NUMERIC:
                 continue
-            if _is_id_like_column(col, ctype) or _is_low_cardinality_code_or_boolean(
-                self.df[c], col
+            if (
+                _is_id_like_column(col, ctype)
+                or is_nonmeasure_numeric(self.df[c], ctype)
+                or _is_low_cardinality_code_or_boolean(self.df[c], col)
             ):
                 skipped_metric_cols.append(col)
                 continue

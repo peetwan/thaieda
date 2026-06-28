@@ -18,7 +18,12 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from thaieda.detect import ColumnType, detect_all, detect_column_type
+from thaieda.detect import (
+    ColumnType,
+    detect_all,
+    detect_column_type,
+    is_nonmeasure_numeric,
+)
 
 # ----------------------------------------------------------------------------
 # ค่าคงที่
@@ -1441,7 +1446,9 @@ def _detect_anomalies_frame(
         series = df[col]
         ctype = column_types.get(col_name, ColumnType.EMPTY)
 
-        if ctype == ColumnType.NUMERIC:
+        # คอลัมน์ตัวเลขที่เป็น identifier/รหัส/พิกัด (id, *_id, lat/long, zip) ไม่ใช่ "ค่าวัด"
+        # การตรวจ outlier บนพิกัด/รหัสจึงไม่มีความหมาย (เช่น lat ที่ห่างจากค่าเฉลี่ย ไม่ใช่ค่าผิดปกติ)
+        if ctype == ColumnType.NUMERIC and not is_nonmeasure_numeric(series, ctype):
             if (issue := detect_numeric_outliers(series)) is not None:
                 issues.append(issue)
             # วิธี ML — เสริมวิธีเชิงสถิติเมื่อข้อมูลพอ (>100 แถว) และมี sklearn
