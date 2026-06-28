@@ -365,6 +365,9 @@ def _is_row_removing_op(op: str, column: str) -> bool:
 _THAI_CHAR_RANGE = "\u0e00-\u0e7f"
 _THAI_THEN_LATIN_RE = re.compile(rf"([{_THAI_CHAR_RANGE}])([A-Za-z])")
 _LATIN_THEN_THAI_RE = re.compile(rf"([A-Za-z])([{_THAI_CHAR_RANGE}])")
+# วงเล็บปิดท้ายโทเคนอังกฤษ เช่น '(non-linear)' ก็เป็นขอบของโทเคนอังกฤษเช่นกัน —
+# เติมช่องว่างเมื่อชนกับอักษรไทย เพื่อกัน '(non-linear)สูง' (ไม่รวมเครื่องหมายคำพูด)
+_CLOSEBRACKET_THEN_THAI_RE = re.compile(rf"([)\]}}])([{_THAI_CHAR_RANGE}])")
 
 
 def _space_thai_latin(text: str) -> str:
@@ -372,10 +375,12 @@ def _space_thai_latin(text: str) -> str:
 
     ไทยไม่เว้นวรรคระหว่างคำไทยด้วยกัน แต่ตามแบบแผนการพิมพ์ ควรมีช่องว่างคั่น
     เมื่อมีคำ/โทเคนอังกฤษแทรก เช่น 'สหสัมพันธ์ Pearsonสูง' → 'สหสัมพันธ์ Pearson สูง'
-    (แตะเฉพาะรอยต่อ ไทย↔ตัวอักษรละติน — ไม่ยุ่งกับตัวเลข เครื่องหมาย หรือชื่อคอลัมน์ในเครื่องหมายคำพูด)
+    รวมถึงวงเล็บที่ปิดท้ายโทเคนอังกฤษ เช่น 'Spearman (non-linear)สูง' → '... (non-linear) สูง'
+    (แตะเฉพาะรอยต่อ ไทย↔ตัวอักษรละติน/วงเล็บปิด — ไม่ยุ่งกับตัวเลข หรือชื่อคอลัมน์ในเครื่องหมายคำพูด)
     """
     out = _THAI_THEN_LATIN_RE.sub(r"\1 \2", str(text or ""))
     out = _LATIN_THEN_THAI_RE.sub(r"\1 \2", out)
+    out = _CLOSEBRACKET_THEN_THAI_RE.sub(r"\1 \2", out)
     return out
 
 

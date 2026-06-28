@@ -483,3 +483,26 @@ def test_geo_id_advisory_insights_for_nonmeasure_numeric_columns():
     assert "พื้นที่" in geo[0].recommendation_th
     assert "คีย์" in idi[0].recommendation_th
     assert all(i.severity == "info" for i in geo + idi)
+
+
+def test_geo_id_advisory_skips_non_numeric_identifier_columns():
+    # คอลัมน์ ID/รหัสที่เป็น "ข้อความ" ไม่เคยเป็นผู้สมัครของการวิเคราะห์เชิงปริมาณ
+    # จึงไม่ควรมีคำแนะนำว่า "ข้ามการวิเคราะห์เชิงปริมาณให้แล้ว" (ทำให้เข้าใจผิด)
+    df = pd.DataFrame(
+        {
+            "user_id": [f"u{i:03d}" for i in range(60)],
+            "value": np.random.RandomState(0).normal(size=60),
+        }
+    )
+    column_types = detect_all(df)
+    summary = generate_insights(
+        df,
+        quality_issues=[],
+        anomaly_issues=[],
+        text_metrics={},
+        column_types=column_types,
+    )
+    advisory = [
+        i for i in summary.insights if "พิกัด" in i.title_th or "ตัวระบุ" in i.title_th
+    ]
+    assert advisory == [], [i.title_th for i in advisory]

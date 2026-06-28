@@ -785,12 +785,16 @@ def _distribution_insights(
 # ----------------------------------------------------------------------------
 # insight สหสัมพันธ์ระหว่างคู่คอลัมน์ตัวเลข (อาจซ้ำซ้อนกัน)
 # ----------------------------------------------------------------------------
-def _correlation_insights(df: pd.DataFrame) -> list[Insight]:
+def _correlation_insights(
+    df: pd.DataFrame, column_types: dict[str, ColumnType] | None = None
+) -> list[Insight]:
     """คู่คอลัมน์ตัวเลขที่สหสัมพันธ์สูง (|r| > 0.7) — อาจซ้ำซ้อน (multicollinearity)."""
     numeric = df.select_dtypes(include="number")
     # ข้ามคอลัมน์ identifier/รหัส/พิกัด — สหสัมพันธ์ของ id/lat/long ไม่สื่อถึง multicollinearity จริง
+    # ส่ง ctype ด้วย เพื่อกรองคอลัมน์ที่ถูกจัดเป็น ID จาก "ค่า" (เช่น ดัชนีแถว) ไม่ใช่แค่ชื่อ
+    types = column_types or {}
     numeric = numeric.drop(
-        columns=[c for c in numeric.columns if is_nonmeasure_numeric(df[c])],
+        columns=[c for c in numeric.columns if is_nonmeasure_numeric(df[c], types.get(str(c)))],
         errors="ignore",
     )
     if _has_date_dimension_context(df):
@@ -958,6 +962,11 @@ def _geo_id_advisory_insights(
     id_cols: list[str] = []
     for col, ctype in column_types.items():
         if col not in df.columns:
+            continue
+        # คำแนะนำนี้บอกว่า "ข้ามการวิเคราะห์เชิงปริมาณให้แล้ว" จึงควรพูดถึงเฉพาะคอลัมน์
+        # ที่เก็บค่าเป็นตัวเลขจริง (เคยเป็นผู้สมัครของ skew/correlation/outlier) — คอลัมน์
+        # ID/เบอร์โทรที่เป็นข้อความไม่เคยถูกวิเคราะห์เชิงปริมาณอยู่แล้ว จึงไม่ต้องแจ้ง
+        if not pd.api.types.is_numeric_dtype(df[col]):
             continue
         if not is_nonmeasure_numeric(df[col], ctype):
             continue
@@ -1185,7 +1194,7 @@ def generate_insights(
     insights.extend(_ner_summary_insights(ner_results))
     insights.extend(_sentiment_distribution_insights(df, column_types))
     insights.extend(_distribution_insights(df, column_types))
-    insights.extend(_correlation_insights(df))
+    insights.extend(_correlation_insights(df, column_types))
     insights.extend(_type_mismatch_insights(df, column_types))
     insights.extend(_comissing_insights(df))
     insights.extend(_target_insights(target_associations))

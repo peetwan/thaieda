@@ -81,6 +81,15 @@ def test_space_thai_latin_leaves_numbers_and_quoted_names():
     assert _space_thai_latin("คอลัมน์ 'col_a' ดี") == "คอลัมน์ 'col_a' ดี"
 
 
+def test_space_thai_latin_spaces_closing_bracket_before_thai():
+    # วงเล็บที่ปิดท้ายโทเคนอังกฤษและชนอักษรไทย ต้องถูกคั่นด้วยช่องว่าง
+    assert (
+        _space_thai_latin("Spearman (non-linear)สูง")
+        == "Spearman (non-linear) สูง"
+    )
+    assert _space_thai_latin("(non-linear)เป็นลบ") == "(non-linear) เป็นลบ"
+
+
 @pytest.fixture
 def sample_df():
     return pd.DataFrame(
