@@ -1,16 +1,9 @@
 (function () {
   "use strict";
 
-  // ---- Theme toggle (persisted) ----
+  // ---- Theme toggle ----
+  // Initial theme is applied by an inline script in <head> to avoid a flash.
   var root = document.documentElement;
-  var stored = null;
-  try { stored = localStorage.getItem("thaieda-theme"); } catch (e) {}
-  if (stored === "light" || stored === "dark") {
-    root.setAttribute("data-theme", stored);
-  } else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) {
-    root.setAttribute("data-theme", "light");
-  }
-
   var toggle = document.getElementById("theme-toggle");
   if (toggle) {
     toggle.addEventListener("click", function () {
