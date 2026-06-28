@@ -19,7 +19,7 @@ ThaiEDA answers one simple question: **"Can I trust this dataset, and what shoul
 - **Repository:** [github.com/peetwan/thaieda](https://github.com/peetwan/thaieda)
 - **PyPI:** [pypi.org/project/thaieda](https://pypi.org/project/thaieda/)
 - **License:** Apache-2.0
-- **Current version:** v2.2.0
+- **Current version:** v2.2.1
 
 ---
 
