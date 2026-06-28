@@ -140,6 +140,7 @@ LABELS: dict[str, dict[str, str]] = {
     "check": {"en": "Check", "th": "การตรวจสอบ"},
     "column": {"en": "Column", "th": "คอลัมน์"},
     "count": {"en": "Count", "th": "จำนวน"},
+    "of_rows": {"en": "of rows", "th": "ของแถว"},
     "percentage": {"en": "Percentage", "th": "ร้อยละ"},
     "examples": {"en": "Examples", "th": "ตัวอย่าง"},
     "suggestion": {"en": "Suggestion", "th": "ข้อเสนอแนะ"},

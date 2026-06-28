@@ -9,7 +9,7 @@ from __future__ import annotations
 REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
     <div class="issue {{ iss.severity }}">
       <div><span class="sev {{ iss.severity }}">{{ sev_icons[iss.severity] }} {{ L('severity_' ~ iss.severity) }}</span><b>{{ iss.column }}</b> · <span class="ng">{{ iss.check_name }}</span></div>
-      <div class="meta">{{ L('count') }}: {{ "{:,}".format(iss.count) }} ({{ iss.percentage }}%)</div>
+      <div class="meta">{{ L('rows_affected') }}: {{ "{:,}".format(iss.count) }} ({{ iss.percentage }}% {{ L('of_rows') }})</div>
       <div class="desc-th">{{ iss.description_th }}</div>
       {% if iss.examples %}<div class="examples">{% for ex in iss.examples[:5] %}<span class="ex mono">{{ ex }}</span>{% endfor %}</div>{% endif %}
       <div class="so-what"><span class="lbl">{{ L('so_what') }}</span> {{ iss.suggestion_th }}</div>
@@ -18,7 +18,7 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
 {% endmacro %}{% macro render_anomaly(an, sev_icons, L) %}
     <div class="issue {{ an.severity }}">
       <div><span class="sev {{ an.severity }}">{{ sev_icons[an.severity] }} {{ L('severity_' ~ an.severity) }}</span><b>{{ an.column }}</b> · <span class="ng">{{ an.check_name }}</span> <span class="badge">{{ an.type_label }}</span></div>
-      <div class="meta">{{ L('count') }}: {{ "{:,}".format(an.count) }} ({{ an.percentage }}%)</div>
+      <div class="meta">{{ L('rows_affected') }}: {{ "{:,}".format(an.count) }} ({{ an.percentage }}% {{ L('of_rows') }})</div>
       <div class="desc-th">{{ an.description_th }}</div>
       {% if an.examples %}<div class="examples">{% for ex in an.examples[:5] %}<span class="ex mono">{{ ex }}</span>{% endfor %}</div>{% endif %}
       <div class="so-what"><span class="lbl">{{ L('so_what') }}</span> {{ an.suggestion_th }}</div>
