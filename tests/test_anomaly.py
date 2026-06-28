@@ -123,6 +123,19 @@ def test_fuzzy_duplicates_detected():
     assert fuzzy[0].severity == "warning"
 
 
+def test_fuzzy_duplicates_count_is_minority_rows_not_all_involved():
+    """count/percentage ต้องสะท้อน 'แถวที่จะถูกแก้' (ฝั่งส่วนน้อยของแต่ละ cluster)
+    ไม่ใช่ผลรวมทุกแถวของหมวดที่เกี่ยวข้อง ซึ่ง overclaim สัดส่วนที่กระทบ.
+    """
+    s = pd.Series(["กรุงเทพ"] * 970 + ["กรุงเทพฯ"] * 30)
+    issues = detect_categorical_anomalies(s)
+    fuzzy = [i for i in issues if i.check_name == "fuzzy_duplicates"]
+    assert fuzzy
+    # ค่ามาตรฐาน = 'กรุงเทพ' (970), ฝั่งส่วนน้อย = 'กรุงเทพฯ' (30) → กระทบ 30 แถว = 3%
+    assert fuzzy[0].count == 30
+    assert fuzzy[0].percentage == pytest.approx(3.0, abs=0.01)
+
+
 def test_fuzzy_duplicates_skips_distinct_codes():
     """รหัส/รุ่น (model/part number) ที่สตริงคล้ายกันสูงแต่เป็นคนละค่าจริง
 

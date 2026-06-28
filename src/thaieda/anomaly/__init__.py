@@ -1090,13 +1090,38 @@ def _differs_by_distinct_word(a: str, b: str) -> bool:
     return has_distinct_word(only_a, tb) or has_distinct_word(only_b, ta)
 
 
+def _connected_components(pairs: list[tuple[str, str]]) -> list[set[str]]:
+    """จัดกลุ่มค่าที่เชื่อมโยงกันผ่านคู่ near-duplicate ให้เป็น cluster (connected components).
+
+    เช่น คู่ (A,B) และ (B,C) → cluster เดียว {A,B,C}. ใช้เพื่อคิด "จำนวนแถวที่จะถูกแก้"
+    เมื่อทำให้เป็นค่ามาตรฐานเดียว (ยุบทุกค่าในกลุ่มเข้าหาค่าที่พบบ่อยสุด).
+    """
+    parent: dict[str, str] = {}
+
+    def find(x: str) -> str:
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: str, b: str) -> None:
+        parent[find(a)] = find(b)
+
+    for a, b in pairs:
+        union(a, b)
+    groups: dict[str, set[str]] = {}
+    for node in parent:
+        groups.setdefault(find(node), set()).add(node)
+    return list(groups.values())
+
+
 def _fuzzy_duplicate_anomaly(
     counts: Counter[str], items: list[tuple[int, str]], col: str
 ) -> AnomalyIssue | None:
     """หมวดหมู่ที่คล้ายกันมาก (SequenceMatcher ratio > 0.8) แต่ไม่เหมือนกัน และไม่ใช่แค่ตัวพิมพ์ใหญ่/เล็ก."""
     cats = [c for c, _ in counts.most_common(300)]
     pairs: list[tuple[str, str]] = []
-    involved: set[str] = set()
     for i in range(len(cats)):
         for j in range(i + 1, len(cats)):
             a, b = cats[i], cats[j]
@@ -1114,7 +1139,6 @@ def _fuzzy_duplicate_anomaly(
                 ):
                     continue
                 pairs.append((a, b))
-                involved.update((a, b))
                 if len(pairs) >= _MAX_INDICES:
                     break
         if len(pairs) >= _MAX_INDICES:
@@ -1122,8 +1146,20 @@ def _fuzzy_duplicate_anomaly(
 
     if not pairs:
         return None
-    indices = [pos for pos, v in items if v in involved][:_MAX_INDICES]
-    count = sum(counts[c] for c in involved)
+    # "จำนวนแถวที่จะถูกแก้" = ทุกแถวในแต่ละ cluster ยกเว้นค่าที่พบบ่อยสุด (ถือเป็นค่ามาตรฐาน) —
+    # ไม่ใช่จำนวนแถวรวมของทุกหมวดที่เกี่ยวข้อง (ซึ่ง overclaim เช่น 'Married-civ-spouse' กับ
+    # 'Married-AF-spouse' ที่ต่างกันจริง จะดูเหมือนกระทบ 46% ทั้งที่ฝั่งส่วนน้อยมีไม่กี่แถว)
+    clusters = _connected_components(pairs)
+    affected = 0
+    minority: set[str] = set()
+    for cluster in clusters:
+        canonical = max(cluster, key=lambda c: counts[c])
+        for c in cluster:
+            if c != canonical:
+                affected += counts[c]
+                minority.add(c)
+    indices = [pos for pos, v in items if v in minority][:_MAX_INDICES]
+    count = affected
 
     examples = [f"{a} ↔ {b}" for a, b in pairs[:_MAX_INDICES]]
     return AnomalyIssue(
