@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -122,6 +123,52 @@ def test_detect_datetime():
 def test_detect_id():
     s = pd.Series(range(100), name="user_id")
     assert detect_column_type(s) == ColumnType.ID
+
+
+def test_detect_numeric_row_index_serial():
+    """ดัชนีแถว/ตัวนับเชิงตัวเลขที่ชื่อตามแบบแผนดัชนี (rownames=1..N, Pokédex '#')
+
+    ต้องถูกจัดเป็น ID ไม่ใช่ NUMERIC — กัน insight ไร้ความหมาย เช่นผลรวม/สหสัมพันธ์
+    ของดัชนีแถว. ต้องครบทั้งชื่อดัชนี *และ* ค่าที่เป็นลำดับครบช่วงจริง.
+    """
+    rownames = pd.Series(range(1, 3001), name="rownames")
+    assert detect_column_type(rownames) == ColumnType.ID
+
+    # complete enumeration ที่มีค่าซ้ำบ้าง (เช่น Pokédex # ที่ฟอร์มพิเศษใช้เลขเดียวกัน)
+    pokedex = pd.Series(list(range(1, 722)) + list(range(1, 80)), name="#")
+    assert detect_column_type(pokedex) == ColumnType.ID
+
+
+def test_sequence_variable_without_index_name_stays_numeric():
+    """ลำดับจำนวนเต็มที่ชื่อไม่ใช่ชื่อดัชนี (เช่น x = arange(n) ที่ใช้ทำ correlation/แนวโน้ม)
+
+    ต้องคงเป็น NUMERIC — ไม่ถูกตีเป็น ID เพราะค่าบังเอิญเป็นลำดับ มิฉะนั้นจะวิเคราะห์
+    ความสัมพันธ์/แนวโน้มกับตัวแปรนี้ไม่ได้ (กัน false positive ฝั่งกลับกัน).
+    """
+    x = pd.Series(range(100), name="x")
+    assert detect_column_type(x) == ColumnType.NUMERIC
+
+
+def test_numeric_measure_not_misread_as_serial():
+    """ค่าวัดจริงต้องไม่ถูกเข้าใจผิดเป็นตัวระบุลำดับแม้ชื่อจะเป็นดัชนี.
+
+    - ช่วงเล็ก/ค่าซ้ำเยอะ (นาที 0–59 วนซ้ำ) — ครบช่วงแต่ไม่ซ้ำต่ำ
+    - ค่าต่อเนื่องไม่ซ้ำสูงแต่ไม่เติมช่วงครบ
+    - float ที่บังเอิญลงตัว (ค่าวัด ไม่ใช่ดัชนี)
+    - ลำดับสั้น (< เกณฑ์แถวขั้นต่ำ)
+    """
+    minute = pd.Series(list(range(60)) * 200, name="index")
+    assert detect_column_type(minute) == ColumnType.NUMERIC
+
+    rng = np.random.default_rng(3)
+    sparse = pd.Series(rng.integers(172, 232, size=342), name="idx")
+    assert detect_column_type(sparse) == ColumnType.NUMERIC
+
+    float_seq = pd.Series([float(i) for i in range(100)], name="seq")
+    assert detect_column_type(float_seq) == ColumnType.NUMERIC
+
+    short_seq = pd.Series(range(1, 9), name="idx")
+    assert detect_column_type(short_seq) == ColumnType.NUMERIC
 
 
 # ------------------------------------------------------------------ is_thai_text

@@ -439,6 +439,33 @@ _THAI_LAUGHTER_RE = re.compile(r"^5{3,}$")
 _ID_CODE_RE = re.compile(r"^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+$")
 
 
+def _has_repeated_char_spam(text: str) -> bool:
+    """True ถ้ามี run อักขระซ้ำที่บ่งชี้สแปม/การยืดเสียง (elongation) จริง.
+
+    แยกเกณฑ์ตามชนิดอักขระเพื่อลด false positive บนข้อมูลสะอาด:
+    - ตัวเลขซ้ำ = ส่วนหนึ่งของจำนวน/ปี/รหัส/ไปรษณีย์/timestamp (เช่น 2000, 10000,
+      ".000" ในเวลา ISO) ไม่ใช่สแปม — ยกเว้นเลข '5' ซ้ำ (หัวเราะแบบไทย 555).
+    - ตัวอักษรในคำ (ไทย/ละติน) ซ้ำ 3 ตัวเกิดได้ตามขอบเขตคำ/พยางค์ (เช่น ถนน+นคร→"นนน",
+      เลขโรมัน "iii") จึง flag เฉพาะ 4 ตัวขึ้นไป — สอดคล้องกับ fix_repeated_chars
+      ที่ยอมให้ซ้ำได้ถึง max_repeat=3.
+    - อักขระอื่น (ไม้ยมก ๆ, เครื่องหมายวรรคตอน ฯลฯ) ซ้ำ 3+ = สแปมเสมอ.
+    """
+    for match in _REPEAT_SPAM_RE.finditer(text):
+        char = match.group(1)
+        run_len = len(match.group(0))
+        category = unicodedata.category(char)
+        if category == "Nd":  # ตัวเลข — เป็นส่วนของจำนวน ไม่ใช่สแปม (ยกเว้น 555 = หัวเราะ)
+            if char == "5":
+                return True
+            continue
+        if category in ("Lo", "Ll", "Lu", "Lt"):  # ตัวอักษรในคำ — flag เฉพาะ 4+ ตัว
+            if run_len >= 4:
+                return True
+            continue
+        return True  # ไม้ยมก/เครื่องหมาย/สัญลักษณ์ ซ้ำ 3+ = สแปม
+    return False
+
+
 def _skip_repeated_spam_check(text: str) -> bool:
     """ข้าม repeated-char spam ใน code/category/ID ที่ไม่ใช่ข้อความธรรมชาติ.
 
@@ -481,9 +508,10 @@ def check_normalization(series: pd.Series, column: str) -> QualityIssue | None:
     comb_order = obj.str.contains(_COMBINING_ORDER_RE, regex=True, na=False)
     # AC-6: วรรณยุกต์หลายตัวบนพยัญชนะตัวเดียว (grapheme ผิดหลัก เช่น ก่้) — REPORT-ONLY
     multi_tone = obj.str.contains(_MULTI_TONE_ON_BASE_RE, regex=True, na=False)
-    # repeated-char spam: (.)\1{2,} แต่ข้าม code/ID/หัวเราะ ตามกฎ _skip_repeated_spam_check เดิม
-    # ใช้ .map กับ regex ที่มี capturing group (เลี่ยง UserWarning ของ .str.contains)
-    repeat_raw = obj.map(lambda v: _REPEAT_SPAM_RE.search(v) is not None)
+    # repeated-char spam: ตรวจ run อักขระซ้ำแบบแยกเกณฑ์ตามชนิดอักขระ (ดู _has_repeated_char_spam)
+    # เพื่อไม่ flag ตัวเลขในจำนวน/timestamp หรือพยัญชนะซ้ำ 3 ตัวตามขอบเขตคำที่ถูกต้อง
+    # แล้วยังข้าม code/ID ตามกฎ _skip_repeated_spam_check เดิม
+    repeat_raw = obj.map(_has_repeated_char_spam)
     skip_spam = obj.map(_skip_repeated_spam_check).astype(bool)
     repeat_spam = repeat_raw & ~skip_spam
     # full-width: NFKC เปลี่ยนค่า "และ" มีอักขระ full-width จริง

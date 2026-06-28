@@ -228,6 +228,26 @@ def test_bimodal_insight():
     assert any("bimodal" in i.title_th for i in dist)
 
 
+def test_bimodal_not_flagged_for_low_cardinality_codes():
+    """รหัส/หมวดที่เข้ารหัสเป็นเลขและมีค่าไม่ซ้ำน้อย (เช่น Pclass=1/2/3, cylinders)
+
+    ต้องไม่ถูก flag เป็น bimodal — bin ว่างคั่นระหว่างค่าจำนวนเต็มทำให้เกิดหุบเขาปลอม.
+    การแจกแจงต่อเนื่องที่ bimodal จริง (ค่าไม่ซ้ำมาก) ยังต้องถูกตรวจจับตามเดิม.
+    """
+    rng = np.random.default_rng(7)
+    pclass = pd.DataFrame({"Pclass": rng.choice([1, 2, 3], size=400)})
+    summary = generate_insights(pclass, [], [], {}, column_types={"Pclass": ColumnType.NUMERIC})
+    dist = [i for i in summary.insights if i.category == "distribution"]
+    assert not any("bimodal" in i.title_th for i in dist)
+
+    cylinders = pd.DataFrame({"cylinders": rng.choice([3, 4, 5, 6, 8], size=400)})
+    summary = generate_insights(
+        cylinders, [], [], {}, column_types={"cylinders": ColumnType.NUMERIC}
+    )
+    dist = [i for i in summary.insights if i.category == "distribution"]
+    assert not any("bimodal" in i.title_th for i in dist)
+
+
 # ------------------------------------------------------------- correlation insights
 def test_correlation_insight_high_pair():
     rng = np.random.default_rng(2)

@@ -5,6 +5,54 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- การตรวจ `normalization` (repeated-char spam) ไม่ flag อักขระซ้ำที่ถูกต้องตามธรรมชาติ
+  เป็นปัญหาคุณภาพอีกต่อไป โดยแยกเกณฑ์ตามชนิดอักขระ ลด false positive บนข้อมูลสะอาด:
+  ตัวเลขซ้ำในจำนวน/ปี/รหัสไปรษณีย์/timestamp (เช่น `2000`, `10000`, `.000` ในเวลา ISO)
+  และพยัญชนะ/ตัวอักษรซ้ำ 3 ตัวตามขอบเขตคำ (เช่น `ถนน`+`นคร`→`นนน`, เลขโรมัน `iii`)
+  จะไม่ถูก flag — ตัด warning เท็จออกจากชุดข้อมูลจริง (mpg, ที่อยู่ไทย ฯลฯ) ส่วนการยืดเสียง
+  จริง (ซ้ำ 4+ ตัว), ไม้ยมก `ๆ` ซ้ำ และหัวเราะ `555` ยังถูกตรวจจับตามเดิม สอดคล้องกับ
+  `fix_repeated_chars` ที่ยอมให้ซ้ำได้ถึง `max_repeat=3`.
+- insight การกระจาย `bimodal` ไม่ flag คอลัมน์ตัวเลขที่เป็นรหัส/หมวดซึ่งมีค่าไม่ซ้ำน้อย
+  (เช่น `Pclass`=1/2/3, `cylinders`) อีกต่อไป — bin ว่างคั่นระหว่างค่าจำนวนเต็มทำให้เกิด
+  "หุบเขา" ปลอมจน heuristic เข้าใจผิดว่าเป็น 2 จุดยอด ตอนนี้ต้องมีค่าไม่ซ้ำ ≥10 จึงตรวจ
+  ส่วนการแจกแจงต่อเนื่องที่ bimodal จริง (เช่น `displacement`, `flipper_length_mm`)
+  ยังถูกตรวจจับตามเดิม.
+- cross-column insight engine ไม่ผลิตข้อค้นพบบนคอลัมน์ breakdown ที่ "แทบคงที่"
+  (ค่าเดียวครอบ >97% ของแถว เช่น timestamp `created_at`/`updated_at` ที่มีค่าเดียวกันเกือบ
+  ทั้งชุด) อีกต่อไป — เดิมให้ business insight แบบ tautology ("กลุ่ม X โดดเด่น ... 929 เท่า"
+  จากกลุ่ม 929 แถวเทียบกับ 1 แถว) ซึ่งไม่มีความหมายเชิงวิเคราะห์.
+- การตรวจ `fuzzy_duplicates` (หมวดหมู่คล้ายกันจนน่าสงสัยว่าซ้ำ) ไม่ flag คู่ที่เป็น
+  "รหัส/รุ่น" หรือ "วลีที่ต่างกันคนละคำ" เป็น near-duplicate อีกต่อไป — ขยายหลักการของ
+  `_looks_like_distinct_short_code_pair` (เดิมจำกัดเฉพาะรหัสสั้น <10 ตัว) ให้ครอบคลุม
+  รหัสที่มีตัวเลขทุกความยาว (เช่น `EMB-145LR` vs `EMB-145`, `CL-600-2B19` vs
+  `CL-600-2C10`, `737-924ER` vs `737-924`) และวลีหลายคำที่ต่างกันด้วยคนละคำจริง
+  (เช่น `Fixed wing multi engine` vs `Fixed wing single engine`,
+  `AMERICAN AIRCRAFT INC` vs `AVIAT AIRCRAFT INC`) ซึ่งเป็นคนละหมวดโดยตั้งใจ ไม่ใช่
+  การพิมพ์ผิด — ตัด false positive บนคอลัมน์ `model`/`manufacturer`/`type` (เครื่องบิน
+  nycflights13) และ `Ticket` (titanic) ส่วน typo จริงของ label ข้อความ (เช่น
+  `กรุงเทพ` vs `กรุงเทพฯ`, `San Francisco` vs `San Fransisco`) ยังถูกตรวจจับตามเดิม.
+- การจำแนกประเภทคอลัมน์รู้จัก "ดัชนีแถว/ตัวนับเชิงตัวเลข" (row index / serial) ที่ชื่อ
+  ตามแบบแผน (`rownames`, `index`, `idx`, `#`, `seq`, `serial`, ...) และค่าเป็นลำดับ
+  จำนวนเต็มที่เติมช่วงเกือบครบ(complete enumeration) ว่าเป็น `ID` ไม่ใช่ `NUMERIC` —
+  เดิมคอลัมน์อย่าง `rownames` (1..N) หรือ Pokédex `#` (1..721) ถูกนำไปคำนวณสถิติ/
+  correlation/เทียบกลุ่ม ทำให้เกิดข้อค้นพบไร้ความหมาย (เช่น "ผลรวม `rownames` ตามกลุ่ม",
+  "`#` สหสัมพันธ์กับ `Generation` r=0.98" ซึ่งเป็น tautology). การจำแนกต้องครบทั้ง
+  *ชื่อดัชนี* และ *ค่าที่เป็นลำดับจริง* เพื่อกัน false positive ฝั่งกลับ — ตัวแปรลำดับ
+  ที่ใช้วิเคราะห์จริง (เช่น `x = arange(n)` สำหรับ correlation/แนวโน้ม), ค่าวัดที่บังเอิญ
+  ครบช่วงแต่ซ้ำเยอะ (เดือน/นาที), และ float ที่ลงตัว ยังคงเป็น `NUMERIC` ตามเดิม.
+
+### Tests
+- เพิ่ม regression test กัน false positive ของ repeated-char spam บนตัวเลข/ขอบเขตคำ
+- เพิ่ม regression test กัน bimodal false positive บนคอลัมน์รหัส/หมวด (Pclass/cylinders)
+- เพิ่ม regression test กัน insight บน breakdown ที่แทบคงที่ (near-constant)
+- เพิ่ม regression test กัน fuzzy-duplicate false positive บนรหัส/รุ่นและวลีต่างคำ
+  พร้อมยืนยันว่า typo จริงของข้อความยังถูกตรวจจับ
+- เพิ่ม regression test การจำแนกดัชนีแถว/serial (`rownames`, `#`) เป็น `ID` พร้อมยืนยันว่า
+  ตัวแปรลำดับที่ใช้ correlation (`x`), ค่าวัดครบช่วง, และ float ที่ลงตัว ยังเป็น `NUMERIC`
+
 ## [2.2.0] - 2026-06-27
 
 ### Changed
