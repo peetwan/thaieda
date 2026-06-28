@@ -4,11 +4,32 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>ThaiEDA — AutoEDA & Smart Data Cleaning for Thai Data</title>
-<meta name="description" content="ThaiEDA — AutoEDA และเครื่องมือทำความสะอาดข้อมูลอัจฉริยะสำหรับข้อมูลภาษาไทยและข้อมูลผสมภาษา. One-line Exploratory Data Analysis and smart data cleaning for Thai and mixed-language datasets." />
+<meta name="description" content="ThaiEDA — ไลบรารี Python สำหรับ AutoEDA และทำความสะอาดข้อมูลภาษาไทยอัตโนมัติ จัดการปี พ.ศ., เลขไทย, อักขระล่องหน และ mojibake ในคำสั่งเดียว. One-line Exploratory Data Analysis and smart data cleaning for Thai and mixed-language datasets." />
+<meta name="keywords" content="ThaiEDA, AutoEDA, EDA, data cleaning, Thai data, Thai NLP, pandas, exploratory data analysis, ทำความสะอาดข้อมูล, วิเคราะห์ข้อมูลภาษาไทย, data quality, Python" />
+<meta name="author" content="ThaiEDA" />
+<meta name="robots" content="index, follow" />
+<link rel="canonical" href="https://peetwan.github.io/thaieda/" />
+<meta name="theme-color" content="#0a0a0b" />
+
+<!-- Open Graph -->
 <meta property="og:title" content="ThaiEDA — AutoEDA & Smart Data Cleaning for Thai Data" />
 <meta property="og:description" content="วิเคราะห์และทำความสะอาดข้อมูลภาษาไทยได้ในคำสั่งเดียว — One-line EDA & smart cleaning for Thai datasets." />
 <meta property="og:type" content="website" />
-<meta name="theme-color" content="#0a0a0b" />
+<meta property="og:url" content="https://peetwan.github.io/thaieda/" />
+<meta property="og:site_name" content="ThaiEDA" />
+<meta property="og:locale" content="th_TH" />
+<meta property="og:locale:alternate" content="en_US" />
+<meta property="og:image" content="https://peetwan.github.io/thaieda/og-image.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="ThaiEDA — AutoEDA & Smart Data Cleaning for Thai Data" />
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="ThaiEDA — AutoEDA & Smart Data Cleaning for Thai Data" />
+<meta name="twitter:description" content="วิเคราะห์และทำความสะอาดข้อมูลภาษาไทยได้ในคำสั่งเดียว — One-line EDA & smart cleaning for Thai datasets." />
+<meta name="twitter:image" content="https://peetwan.github.io/thaieda/og-image.png" />
+
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23f4ead5'/%3E%3Ctext x='16' y='22' font-size='18' font-family='monospace' font-weight='700' text-anchor='middle' fill='%230a0a0b'%3ET%3C/text%3E%3C/svg%3E" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -26,6 +47,37 @@
   })();
 </script>
 <link rel="stylesheet" href="styles.css" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "ThaiEDA",
+  "description": "AutoEDA และเครื่องมือทำความสะอาดข้อมูลอัจฉริยะสำหรับข้อมูลภาษาไทยและข้อมูลผสมภาษา — One-line EDA & smart data cleaning for Thai and mixed-language datasets.",
+  "url": "https://peetwan.github.io/thaieda/",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "Cross-platform",
+  "programmingLanguage": "Python",
+  "softwareRequirements": "Python 3.10+",
+  "license": "https://www.apache.org/licenses/LICENSE-2.0",
+  "downloadUrl": "https://pypi.org/project/thaieda/",
+  "codeRepository": "https://github.com/peetwan/thaieda",
+  "image": "https://peetwan.github.io/thaieda/og-image.png",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    { "@type": "Question", "name": "ThaiEDA ต่างจากเครื่องมือ profiling อื่นอย่างไร?", "acceptedAnswer": { "@type": "Answer", "text": "เครื่องมือทั่วไปเก่งเรื่องนับค่าว่างและกราฟมาตรฐาน แต่ ThaiEDA ออกแบบมาเพื่อข้อมูลภาษาไทยโดยเฉพาะ — ปี พ.ศ., เลขไทย, อักขระล่องหน, mojibake, เบอร์โทร/บัตรประชาชน — และรวมการทำความสะอาด การวัดคุณภาพ และการหา insight ไว้ในคำสั่งเดียว" } },
+    { "@type": "Question", "name": "ต้องติดตั้ง dependency เพิ่มเองไหม?", "acceptedAnswer": { "@type": "Answer", "text": "ตั้งแต่ v2.2.0 เป็นต้นไป แพ็กเกจหลักและ dependencies ทั้งหมด (pandas, pythainlp, plotly, scikit-learn ฯลฯ) จะถูกติดตั้งพร้อมใช้งานอัตโนมัติด้วย pip install thaieda" } },
+    { "@type": "Question", "name": "รองรับภาษาอังกฤษหรือข้อมูลผสมภาษาไหม?", "acceptedAnswer": { "@type": "Answer", "text": "รองรับครับ ThaiEDA จัดการข้อมูลผสมไทย-อังกฤษได้ และสร้างรายงานได้ทั้งสองภาษา (เลือกด้วย --lang en)" } },
+    { "@type": "Question", "name": "ใช้ได้บน Jupyter Notebook ไหม?", "acceptedAnswer": { "@type": "Answer", "text": "ได้ครับ ผลลัพธ์แสดงผลบน Jupyter ได้สวยงาม และยังเรียกผ่าน CLI หรือ Python API ได้ตามสะดวก" } },
+    { "@type": "Question", "name": "ข้อมูลของฉันปลอดภัยไหมเมื่อใช้ฟีเจอร์ LLM?", "acceptedAnswer": { "@type": "Answer", "text": "ฟีเจอร์ LLM เป็นทางเลือก (optional) และมีโหมดรักษาความเป็นส่วนตัว 5 ระดับ รองรับทั้ง OpenAI, Anthropic และ Ollama (รันในเครื่องได้)" } }
+  ]
+}
+</script>
 </head>
 <body>
 <a class="skip-link" href="#main">ข้ามไปยังเนื้อหา / Skip to content</a>
