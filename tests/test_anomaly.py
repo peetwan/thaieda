@@ -123,6 +123,43 @@ def test_fuzzy_duplicates_detected():
     assert fuzzy[0].severity == "warning"
 
 
+def test_fuzzy_duplicates_skips_distinct_codes():
+    """รหัส/รุ่น (model/part number) ที่สตริงคล้ายกันสูงแต่เป็นคนละค่าจริง
+
+    เช่น 'EMB-145LR' vs 'EMB-145', 'CL-600-2B19' vs 'CL-600-2C10' — ต่างกันโดย
+    ตั้งใจ ไม่ใช่ typo จึงต้องไม่ถูก flag เป็น near-duplicate (เคยเป็น false positive
+    บนคอลัมน์ model/manufacturer ของชุดข้อมูลเครื่องบิน nycflights13).
+    """
+    models = (
+        ["EMB-145LR"] * 30
+        + ["EMB-145"] * 25
+        + ["CL-600-2B19"] * 20
+        + ["CL-600-2C10"] * 18
+        + ["737-924ER"] * 15
+        + ["737-924"] * 12
+    )
+    issues = detect_categorical_anomalies(pd.Series(models))
+    assert not any(i.check_name == "fuzzy_duplicates" for i in issues)
+
+
+def test_fuzzy_duplicates_skips_distinct_word_phrases():
+    """วลีหลายคำที่ต่างกันคนละคำจริง ต้องไม่ถูก flag เป็น near-duplicate.
+
+    'Fixed wing multi engine' vs 'Fixed wing single engine' ใช้คำส่วนใหญ่ร่วมกัน
+    ทำให้ similarity สูง แต่ 'multi'/'single' เป็นคนละคำ — เป็นคนละหมวด ไม่ใช่ typo.
+    """
+    phrases = ["Fixed wing multi engine"] * 40 + ["Fixed wing single engine"] * 35
+    issues = detect_categorical_anomalies(pd.Series(phrases))
+    assert not any(i.check_name == "fuzzy_duplicates" for i in issues)
+
+
+def test_fuzzy_duplicates_still_detects_word_typo():
+    """typo ระดับตัวอักษรในวลี (คำที่ต่างยังคล้ายกัน) ต้องยังถูกจับเป็น near-duplicate."""
+    s = pd.Series(["San Francisco"] * 20 + ["San Fransisco"] * 3 + ["Boston"] * 10)
+    issues = detect_categorical_anomalies(s)
+    assert any(i.check_name == "fuzzy_duplicates" for i in issues)
+
+
 def test_rare_categories_detected():
     s = pd.Series(["A"] * 100 + ["B"] * 100 + ["typo_x"])
     issues = detect_categorical_anomalies(s)
