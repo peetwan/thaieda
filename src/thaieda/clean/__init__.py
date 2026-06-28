@@ -879,8 +879,18 @@ _CURRENCY_DETECT_RE = re.compile(
 # อักขระที่ต้องตัดออกเพื่อให้เหลือตัวเลขล้วน: สัญลักษณ์ + comma คั่นหลักพัน + ช่องว่าง
 _CURRENCY_STRIP_RE = re.compile(r"[" + re.escape(_CURRENCY_SYMBOL_CHARS) + r",\s]")
 
-# สัดส่วนขั้นต่ำของค่าที่มีสัญลักษณ์สกุลเงิน เพื่อถือว่าคอลัมน์เป็น "คอลัมน์สกุลเงิน"
-_CURRENCY_MIN_RATIO = 0.10
+# ตัวเลขล้วน (หลังตัดสัญลักษณ์/คำสกุลเงิน/comma แล้ว) — ใช้ตรวจ "ทั้งเซลล์เป็นจำนวนเงิน"
+_CURRENCY_NUMBER_RE = re.compile(r"[+-]?\d+(?:\.\d+)?")
+
+# เกณฑ์การตัดสินว่าเป็น "คอลัมน์สกุลเงิน":
+#   - ต้องมีอย่างน้อย 10% ของเซลล์ที่มีสัญลักษณ์/คำสกุลเงินจริง (มีสัญญาณสกุลเงิน)
+#   - และ ≥ 50% ของเซลล์ที่ไม่ว่าง "ทั้งเซลล์เป็นจำนวนเงินล้วน" (ไม่ใช่ข้อความที่บังเอิญพูดถึงราคา)
+#   - และต้องไม่ใช่คอลัมน์ "ข้อความอิสระ" (รีวิว/โพสต์) — กันเคสแปลงทั้งคอลัมน์เป็น NaN
+_CURRENCY_SYMBOL_MIN_RATIO = 0.10
+_CURRENCY_PURE_MIN_RATIO = 0.50
+# คอลัมน์ที่เซลล์ยาว/มีหลายคำ ถือเป็นข้อความอิสระ → ไม่ใช่คอลัมน์สกุลเงิน
+_CURRENCY_FREETEXT_MEDIAN_LEN = 25
+_CURRENCY_FREETEXT_MEDIAN_TOKENS = 4
 
 
 def normalize_currency(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
@@ -908,22 +918,44 @@ def normalize_currency(series: pd.Series) -> tuple[pd.Series, CleaningResult]:
         return series, CleaningResult(operation="normalize_currency", rows_affected=0, column=col)
 
     str_vals = series[notna].astype(str).str.strip()
-    has_symbol = str_vals.str.contains(_CURRENCY_DETECT_RE, na=False)
     n = int(str_vals.shape[0])
-    ratio = float(has_symbol.sum()) / n if n else 0.0
+    has_symbol = str_vals.str.contains(_CURRENCY_DETECT_RE, na=False)
+    symbol_ratio = float(has_symbol.sum()) / n if n else 0.0
 
-    # เกณฑ์ตรวจจับ: ต้องมีสัญลักษณ์สกุลเงิน > 10% จึงถือว่าเป็นคอลัมน์สกุลเงิน
-    if ratio <= _CURRENCY_MIN_RATIO:
+    # ตัดสัญลักษณ์ + คำย่อ + comma เพื่อตรวจว่า "ทั้งเซลล์เป็นจำนวนเงินล้วน" หรือไม่
+    stripped = str_vals.str.replace(_CURRENCY_WORD_RE, "", regex=True)
+    stripped = stripped.str.replace(_CURRENCY_STRIP_RE, "", regex=True)
+    # เซลล์ที่เหลือเป็นตัวเลขล้วน (และต้นฉบับมีตัวเลขจริง) = เป็นจำนวนเงินทั้งเซลล์
+    is_pure = (
+        stripped.str.fullmatch(_CURRENCY_NUMBER_RE).fillna(False)
+        & str_vals.str.contains(r"\d", na=False)
+    )
+    pure_ratio = float(is_pure.sum()) / n if n else 0.0
+
+    # free-text veto: คอลัมน์ที่เซลล์ยาวหรือมีหลายคำ = ข้อความอิสระ (รีวิว/โพสต์) ไม่ใช่สกุลเงิน
+    median_len = float(str_vals.str.len().median())
+    median_tokens = float(str_vals.str.split().str.len().median())
+    is_free_text = (
+        median_len >= _CURRENCY_FREETEXT_MEDIAN_LEN
+        or median_tokens >= _CURRENCY_FREETEXT_MEDIAN_TOKENS
+    )
+
+    # เกณฑ์ตรวจจับ: มีสัญญาณสกุลเงิน (≥10%) + เกินครึ่งเป็นจำนวนเงินล้วน (≥50%) + ไม่ใช่ข้อความอิสระ
+    if (
+        symbol_ratio < _CURRENCY_SYMBOL_MIN_RATIO
+        or pure_ratio < _CURRENCY_PURE_MIN_RATIO
+        or is_free_text
+    ):
         return series, CleaningResult(
             operation="normalize_currency",
             rows_affected=0,
             column=col,
-            description_th=f"ไม่ใช่คอลัมน์สกุลเงิน (มีสัญลักษณ์ {ratio * 100:.0f}% ≤ 10%)",
+            description_th=(
+                f"ไม่ใช่คอลัมน์สกุลเงิน (สัญลักษณ์ {symbol_ratio * 100:.0f}%, "
+                f"จำนวนเงินล้วน {pure_ratio * 100:.0f}%, ความยาวกลาง {median_len:.0f} อักขระ)"
+            ),
         )
 
-    # ตัดสัญลักษณ์ + คำย่อ + comma แล้วแปลงเป็นตัวเลข
-    stripped = str_vals.str.replace(_CURRENCY_WORD_RE, "", regex=True)
-    stripped = stripped.str.replace(_CURRENCY_STRIP_RE, "", regex=True)
     coerced = pd.to_numeric(stripped, errors="coerce")
     ok = coerced.notna()
 
