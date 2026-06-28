@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- `ner_available()` no longer crashes the entire `run()`/`profile()` pipeline when
+  the Thai NER corpus/backend is missing or cannot be downloaded (offline). It now
+  catches all probe failures (`FileNotFoundError`/`OSError`/etc.) and returns
+  `False` so NER is skipped gracefully, as intended.
+- `_get_ner()` treats a missing/undownloadable corpus (`OSError`/`FileNotFoundError`)
+  like a missing backend — it falls through to the next candidate engine and
+  finally raises the helpful `thaieda[ner]` install hint instead of leaking the
+  raw pythainlp error.
+- `get_tokenizer()` auto modes (`auto`/`auto-fast`/`auto-quality`) now degrade to
+  the next engine when an installed backend fails to import (e.g. `attacut` when
+  the underlying `torch` DLL fails to load) instead of crashing, matching the
+  documented "degrade gracefully" behavior.
+
 ## [2.2.0] - 2026-06-27
 
 ### Changed
