@@ -41,6 +41,7 @@ from thaieda.timeseries import (
     TimeseriesResult,
     analyze_timeseries,
     detect_timeseries_columns,
+    is_panel_time_axis,
 )
 
 # จำนวนกราฟต่อคอลัมน์สูงสุดที่สร้าง (กันรายงานใหญ่เกินไปบนชุดข้อมูลที่มีคอลัมน์ข้อความเยอะ)
@@ -1051,6 +1052,17 @@ class ProfileReport:
         time_values = pd.to_datetime(self.df[time_col], errors="coerce", format="mixed")
         valid = time_values.notna()
         if int(valid.sum()) < 5:
+            return
+        # ข้อมูล panel/snapshot (หลายแถวใช้ timestamp เดียวกัน เช่น ค่าตรวจวัดหลายสถานี ณ เวลาเดียว)
+        # ไม่ใช่อนุกรมเวลารายแถว — วิเคราะห์ TS จะได้ trend/spike ปลอม จึงข้ามพร้อมแจ้งเหตุผล
+        if is_panel_time_axis(time_values[valid]):
+            self._notes.append(
+                "timeseries analysis skipped (time axis has many duplicate timestamps "
+                "— looks like panel/snapshot data, not a row-level time series)"
+                if self.lang == "en"
+                else "ข้าม timeseries (แกนเวลามีค่าซ้ำมาก — ดูเป็นข้อมูล panel/ภาพรวม ณ ช่วงเวลาเดียว "
+                "ไม่ใช่อนุกรมเวลารายแถว)"
+            )
             return
         indexed = self.df.loc[valid].copy()
         indexed.index = pd.DatetimeIndex(time_values[valid])

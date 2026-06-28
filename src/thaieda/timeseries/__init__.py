@@ -25,6 +25,10 @@ from thaieda.detect import ColumnType, detect_all, is_nonmeasure_numeric
 # ----------------------------------------------------------------------------
 # จำนวนจุดข้อมูลขั้นต่ำที่ทำให้การวิเคราะห์ timeseries มีความหมาย
 _MIN_TS_POINTS = 5
+# สัดส่วน "ช่วงเวลาไม่ซ้ำ / จำนวนแถว" ขั้นต่ำที่ยังถือว่าเป็นอนุกรมเวลาระดับแถว —
+# ถ้าต่ำกว่านี้ แปลว่าหลายแถวใช้ timestamp เดียวกันมาก (ข้อมูล panel/snapshot
+# เช่น ค่าตรวจวัดของหลายสถานี ณ เวลาเดียวกัน) ไม่ใช่อนุกรมเวลารายแถว จึงไม่ควรวิเคราะห์ TS
+_MIN_UNIQUE_TS_RATIO = 0.5
 # จำนวนจุดสูงสุดที่ยอมใช้ STL decomposition (statsmodels) ในโหมด auto — STL บนซีรีส์ยาวมาก
 # (หลายแสนจุด) ช้ามาก (O(n) ต่อรอบ × หลายรอบ) เกินนี้ถอยไปใช้ decomposition พื้นฐานที่เป็น
 # เวกเตอร์และเร็วกว่ามาก. โหมด engine="statsmodels" ที่ผู้ใช้ระบุเองยังบังคับใช้ STL ตามเดิม
@@ -386,6 +390,24 @@ def detect_timeseries_columns(df: pd.DataFrame) -> dict[str, ColumnType]:
     return out
 
 
+def is_panel_time_axis(timestamps: pd.Series | pd.DatetimeIndex) -> bool:
+    """แกนเวลานี้ดูเป็นข้อมูล panel/snapshot (หลายแถวใช้ timestamp เดียวกัน) หรือไม่.
+
+    อนุกรมเวลาระดับแถวที่แท้จริง timestamp ควร "ไม่ซ้ำ" เป็นส่วนใหญ่ (เรียงตามเวลา 1 แถว/จุด)
+    ถ้าจำนวน timestamp ที่ไม่ซ้ำมีน้อยเมื่อเทียบกับจำนวนแถว (เช่น ค่าตรวจวัดของหลายสถานี
+    ณ เวลาเดียวกัน) แปลว่าเป็นข้อมูล panel/ภาพรวม ณ ช่วงเวลาเดียว ไม่ควรวิเคราะห์เป็น TS รายแถว
+    เพราะจะได้ trend/spike ปลอมจากการเรียงแถวที่ timestamp เท่ากัน
+    """
+    idx = pd.Index(timestamps)
+    n = int(idx.notna().sum())
+    if n == 0:
+        return False
+    n_unique = int(idx.dropna().nunique())
+    if n_unique < _MIN_TS_POINTS:
+        return True
+    return (n_unique / n) < _MIN_UNIQUE_TS_RATIO
+
+
 def analyze_timeseries(
     series: pd.Series,
     freq: str = "auto",
@@ -598,6 +620,9 @@ def analyze_dataframe_timeseries(
     valid = time_values.notna()
     if int(valid.sum()) < _MIN_TS_POINTS:
         return {}
+    # ข้อมูล panel/snapshot (หลายแถวใช้ timestamp เดียวกัน) ไม่ใช่อนุกรมเวลารายแถว → ไม่วิเคราะห์
+    if is_panel_time_axis(time_values[valid]):
+        return {}
     indexed = df.loc[valid].copy()
     indexed.index = pd.DatetimeIndex(time_values[valid])
     indexed = indexed.sort_index()
@@ -626,6 +651,7 @@ __all__ = [
     "TimeseriesComponent",
     "TimeseriesResult",
     "detect_timeseries_columns",
+    "is_panel_time_axis",
     "analyze_timeseries",
     "analyze_dataframe_timeseries",
 ]
