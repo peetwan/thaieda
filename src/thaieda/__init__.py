@@ -43,7 +43,7 @@ try:
 
     __version__ = _pkg_version("thaieda")
 except Exception:
-    __version__ = "2.2.1"
+    __version__ = "2.3.0"
 __all__ = [
     "profile",
     "ProfileReport",
