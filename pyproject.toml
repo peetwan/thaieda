@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "thaieda"
-version = "2.2.0"
+version = "2.2.1"
 description = "AutoEDA สำหรับข้อมูลภาษาไทย — Exploratory data analysis that speaks Thai"
 readme = "README.md"
 license = { text = "Apache-2.0" }
