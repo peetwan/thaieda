@@ -149,6 +149,55 @@ def test_auto_quality_no_engine_raises(monkeypatch):
         tk.get_tokenizer("auto-quality")
 
 
+def _patch_factories_with_failures(monkeypatch, available, failing):
+    """เหมือน _patch_factories แต่ทำให้บาง engine 'ติดตั้งแต่สร้างไม่ได้' (โยน OSError)."""
+    import thaieda.tokenize as tk
+
+    def make(name):
+        def factory():
+            if name in failing:
+                raise OSError(f"{name} backend failed to load")
+            return _DummyTokenizer(name)
+
+        return factory
+
+    monkeypatch.setattr(tk, "_engine_available", lambda e: available[e])
+    monkeypatch.setattr(
+        tk,
+        "_FACTORIES",
+        {
+            "pythainlp": make("pythainlp:newmm"),
+            "nlpo3": make("nlpo3"),
+            "attacut": make("attacut"),
+        },
+    )
+
+
+def test_auto_quality_degrades_when_attacut_import_fails(monkeypatch):
+    # attacut ติดตั้งอยู่แต่ import พัง (เช่น torch DLL) -> ต้องถอยไป pythainlp ไม่ใช่ crash
+    import thaieda.tokenize as tk
+
+    _patch_factories_with_failures(
+        monkeypatch,
+        available={"pythainlp": True, "nlpo3": True, "attacut": True},
+        failing={"attacut"},
+    )
+    assert tk.get_tokenizer("auto-quality").name == "pythainlp:newmm"
+
+
+def test_auto_raises_when_all_installed_engines_fail_to_load(monkeypatch):
+    # ทุก engine ติดตั้งแต่สร้างไม่ได้ -> fail loudly ด้วย ImportError (ไม่ใช่ OSError ดิบ)
+    import thaieda.tokenize as tk
+
+    _patch_factories_with_failures(
+        monkeypatch,
+        available={"pythainlp": True, "nlpo3": True, "attacut": True},
+        failing={"pythainlp:newmm", "pythainlp", "nlpo3", "attacut"},
+    )
+    with pytest.raises(ImportError):
+        tk.get_tokenizer("auto")
+
+
 @pytest.mark.skipif(not _HAS_ENGINE, reason="ไม่มี Thai tokenizer engine ติดตั้ง")
 def test_auto_modes_return_tokenizer_instance():
     # integration: โหมด auto ทุกแบบต้องคืน Tokenizer ที่ระบุชื่อ engine ได้

@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- `ner_available()` no longer crashes the entire `run()`/`profile()` pipeline when
+  the Thai NER corpus/backend is missing or cannot be downloaded (offline). It now
+  catches all probe failures (`FileNotFoundError`/`OSError`/etc.) and returns
+  `False` so NER is skipped gracefully, as intended.
+- `_get_ner()` treats a missing/undownloadable corpus (`OSError`/`FileNotFoundError`)
+  like a missing backend — it falls through to the next candidate engine and
+  finally raises the helpful `thaieda[ner]` install hint instead of leaking the
+  raw pythainlp error.
+- `get_tokenizer()` auto modes (`auto`/`auto-fast`/`auto-quality`) now degrade to
+  the next engine when an installed backend fails to import (e.g. `attacut` when
+  the underlying `torch` DLL fails to load) instead of crashing, matching the
+  documented "degrade gracefully" behavior.
+
+### Performance
+- `fix_repeated_chars` now uses the memoized per-unique-value path instead of a
+  non-memoized vectorized `Series.map`. `_fix_repeated_str` is a pure, relatively
+  expensive function (token split + `_id_likeness_score` per token); memoizing by
+  unique value makes it ~15× faster on duplicate-heavy text columns
+  (e.g. 200k rows / few unique values: 3.3s → 0.2s) with identical output.
+- `remove_duplicate_rows` only applies the per-cell typed-token map to `object`
+  columns (where mixed Python types can occur); numeric/bool/datetime/category
+  columns are hashed natively by pandas. This preserves the exact type-aware
+  dedup semantics while running ~20× faster on numeric-heavy frames.
+- `plan_cleaning` (smart cleaning) converts text columns to string once and
+  reuses them across all detectors, instead of re-running
+  `select_dtypes` + `astype(str)` six times per call.
+- `create_wordcloud` ตัดคำทีละ segment (คั่นด้วยช่องว่าง ≈ ทีละเอกสาร) แทนการตัดสตริง
+  ก้อนเดียวที่ต่อหลายพันเอกสารเข้าด้วยกัน — tokenizer แบบ dictionary (newmm) ช้าแบบ
+  superlinear กับสตริงยาว ทำให้การสร้างกราฟ word cloud เป็นคอขวดหลักของ pipeline บน
+  คอลัมน์ข้อความเยอะ ๆ บน Wisesight (24k แถวข้อความไทย) `thaieda.run(make_charts=True)`
+  เร็วขึ้นจาก ~68s เหลือ ~14s (ตัวฟังก์ชัน word cloud เอง ~63s → ~0.7s, ~89×) โดยผลลัพธ์
+  token เทียบเท่าเดิม (ช่องว่างเป็นขอบเขตคำอยู่แล้ว)
+
+### Tests
+- เพิ่ม regression test ยืนยันว่า `create_wordcloud` ไม่ตัดคำสตริงก้อนเดียวที่ยาวมาก
+
 ## [2.2.0] - 2026-06-27
 
 ### Changed

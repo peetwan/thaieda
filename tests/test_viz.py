@@ -9,6 +9,7 @@ import base64
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from thaieda.detect import ColumnType
 from thaieda.viz import (
@@ -247,3 +248,39 @@ def test_create_acf_plot_returns_png():
 
 def test_acf_plot_empty_when_too_few_points():
     assert create_acf_plot(pd.Series([1.0])) == ""
+
+
+class _RecordingTokenizer:
+    """Tokenizer ที่บันทึกความยาวสูงสุดของสตริงที่ถูกส่งเข้า tokenize."""
+
+    name = "recording"
+
+    def __init__(self) -> None:
+        self.max_input_len = 0
+        self.n_calls = 0
+
+    def tokenize(self, text: str) -> list[str]:
+        self.max_input_len = max(self.max_input_len, len(text))
+        self.n_calls += 1
+        return text.split()
+
+
+def test_wordcloud_tokenizes_per_segment_not_whole_blob():
+    """create_wordcloud ต้องตัดคำทีละ segment (≈ ทีละเอกสาร) ไม่ใช่ทั้งก้อนยาว ๆ.
+
+    ป้อนหลายพันเอกสารคั่นช่องว่าง — tokenizer ต้องไม่เคยรับสตริงที่ยาวเท่าก้อนรวม
+    (กัน regression กลับไปตัดคำสตริงก้อนเดียวที่ทำให้ pipeline ช้ามากบนข้อมูลข้อความเยอะ).
+    """
+    pytest.importorskip("wordcloud")
+    from thaieda.viz import create_wordcloud
+
+    docs = [f"word{i} term{i}" for i in range(3000)]
+    blob = " ".join(docs)
+    tok = _RecordingTokenizer()
+
+    _assert_png_base64(create_wordcloud(blob, tok))
+
+    # แต่ละ segment สั้น (≤ ~10 ตัวอักษร) — ต้องเล็กกว่าก้อนรวมหลายเท่า
+    assert tok.max_input_len < 50
+    assert tok.max_input_len < len(blob)
+    assert tok.n_calls >= len(docs)
