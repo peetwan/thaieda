@@ -20,7 +20,7 @@ import pandas as pd
 from thaieda.analysis import TargetAssociation
 from thaieda.anomaly import AnomalyIssue
 from thaieda.clean import CleaningResult
-from thaieda.detect import ColumnType, is_nonmeasure_numeric
+from thaieda.detect import ColumnType, _name_hints_geo, is_nonmeasure_numeric
 from thaieda.ner import NERResult
 from thaieda.quality import QualityIssue
 from thaieda.text import TextMetrics
@@ -943,6 +943,57 @@ def _timeseries_insights(ts_results: dict[str, TimeseriesResult]) -> list[Insigh
     return out
 
 
+def _geo_id_advisory_insights(
+    df: pd.DataFrame, column_types: dict[str, ColumnType] | None
+) -> list[Insight]:
+    """คำแนะนำตามบริบทสำหรับคอลัมน์พิกัด/ตัวระบุ ที่เก็บเป็นตัวเลข (D5).
+
+    คอลัมน์เช่น lat/long, id, zip_code ถูกข้ามจากการวิเคราะห์เชิงปริมาณแล้ว (skew,
+    correlation, log-transform, time series) จึงไม่มีข้อค้นพบ/คำแนะนำเชิงสถิติ — เติม
+    คำแนะนำที่ถูกบริบทแทน: geo → วิเคราะห์เชิงพื้นที่/แผนที่; id/รหัส → ใช้เป็นคีย์เชื่อมข้อมูล.
+    """
+    if column_types is None:
+        return []
+    geo_cols: list[str] = []
+    id_cols: list[str] = []
+    for col, ctype in column_types.items():
+        if col not in df.columns:
+            continue
+        if not is_nonmeasure_numeric(df[col], ctype):
+            continue
+        if _name_hints_geo(df[col]):
+            geo_cols.append(col)
+        else:
+            id_cols.append(col)
+
+    out: list[Insight] = []
+    if geo_cols:
+        cols_th = ", ".join(f"'{c}'" for c in geo_cols)
+        out.append(
+            Insight(
+                "structure",
+                "info",
+                "พบคอลัมน์พิกัดภูมิศาสตร์ (lat/long)",
+                f"คอลัมน์ {cols_th} เป็นพิกัด ไม่ใช่ค่าวัดเชิงปริมาณ "
+                "จึงข้ามการทำ skew/log-transform, correlation และ time series ให้แล้ว",
+                "ใช้การวิเคราะห์เชิงพื้นที่ (แผนที่/clustering ตามระยะทาง) แทนสถิติเชิงปริมาณ",
+            )
+        )
+    if id_cols:
+        cols_th = ", ".join(f"'{c}'" for c in id_cols)
+        out.append(
+            Insight(
+                "structure",
+                "info",
+                "พบคอลัมน์ตัวระบุ/รหัส (identifier)",
+                f"คอลัมน์ {cols_th} เป็นตัวระบุ/รหัส (เช่น id, รหัสไปรษณีย์) "
+                "จึงข้ามการวิเคราะห์เชิงปริมาณ (skew/correlation/outlier) ให้แล้ว",
+                "ใช้เป็นคีย์สำหรับเชื่อม/จัดกลุ่มข้อมูล ไม่ควรใช้เป็นฟีเจอร์เชิงตัวเลขในโมเดล",
+            )
+        )
+    return out
+
+
 # ----------------------------------------------------------------------------
 # executive summary
 # ----------------------------------------------------------------------------
@@ -1139,6 +1190,7 @@ def generate_insights(
     insights.extend(_comissing_insights(df))
     insights.extend(_target_insights(target_associations))
     insights.extend(_timeseries_insights(timeseries_results))
+    insights.extend(_geo_id_advisory_insights(df, column_types))
 
     dup = _duplicate_row_insight(df)
     if dup is not None:
