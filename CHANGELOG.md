@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- การตรวจ `normalization` (repeated-char spam) ไม่ flag อักขระซ้ำที่ถูกต้องตามธรรมชาติ
+  เป็นปัญหาคุณภาพอีกต่อไป โดยแยกเกณฑ์ตามชนิดอักขระ ลด false positive บนข้อมูลสะอาด:
+  ตัวเลขซ้ำในจำนวน/ปี/รหัสไปรษณีย์/timestamp (เช่น `2000`, `10000`, `.000` ในเวลา ISO)
+  และพยัญชนะ/ตัวอักษรซ้ำ 3 ตัวตามขอบเขตคำ (เช่น `ถนน`+`นคร`→`นนน`, เลขโรมัน `iii`)
+  จะไม่ถูก flag — ตัด warning เท็จออกจากชุดข้อมูลจริง (mpg, ที่อยู่ไทย ฯลฯ) ส่วนการยืดเสียง
+  จริง (ซ้ำ 4+ ตัว), ไม้ยมก `ๆ` ซ้ำ และหัวเราะ `555` ยังถูกตรวจจับตามเดิม สอดคล้องกับ
+  `fix_repeated_chars` ที่ยอมให้ซ้ำได้ถึง `max_repeat=3`.
+
+### Tests
+- เพิ่ม regression test กัน false positive ของ repeated-char spam บนตัวเลข/ขอบเขตคำ
+
 ## [2.2.0] - 2026-06-27
 
 ### Changed

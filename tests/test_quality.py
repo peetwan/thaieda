@@ -120,6 +120,36 @@ def test_repeated_char_spam_detected():
     assert "repeated-char spam" in issue.description
 
 
+def test_repeated_char_spam_ignores_numbers_and_word_boundaries():
+    """อักขระซ้ำที่ถูกต้องตามธรรมชาติต้องไม่ถูก flag เป็น repeated-char spam.
+
+    กัน false positive ที่พบทั่วไปบนข้อมูลสะอาด:
+    - ตัวเลขซ้ำในจำนวน/ปี/รหัสไปรษณีย์/timestamp (2000, 10000, ".000" ใน ISO time)
+    - พยัญชนะไทยซ้ำ 3 ตัวตามขอบเขตคำ (ถนน+นคร → "นนน", โคก+กก → "กกก")
+    - ตัวอักษรละตินซ้ำ 3 ตัว (เลขโรมัน "iii")
+    การยืดเสียงจริง (ซ้ำ 4+ ตัว) และไม้ยมกซ้ำยังต้องถูก flag ตามเดิม.
+    """
+    clean = pd.Series(
+        [
+            "plymouth fury iii",
+            "mercury capri 2000",
+            "volkswagen model 111",
+            "2019-08-09T03:33:09.000+07:00",
+            "10000",
+            "ถนนนครไชยศรี",
+            "โคกกกม่วง",
+        ]
+    )
+    issue = check_normalization(clean, "name")
+    assert issue is None or "repeated-char spam" not in issue.description
+
+    # การยืดเสียง/สแปมจริงยังต้องถูกตรวจจับ
+    spam = pd.Series(["ดีมากกกกก", "ปกติ"])
+    issue_spam = check_normalization(spam, "comment")
+    assert issue_spam is not None
+    assert "repeated-char spam" in issue_spam.description
+
+
 def test_normalization_duplicate_tone_marks():
     # วรรณยุกต์ซ้อนกัน (ไม้โทสองตัว)
     s = pd.Series(["น้้ำ", "ปกติ"])
