@@ -289,6 +289,29 @@ def test_isolation_forest_detects_outliers():
 
 
 @requires_sklearn
+def test_ml_rare_outliers_are_warning():
+    # outlier หายากจริง (สัดส่วนน้อย ≤5%) → severity = warning
+    rng = np.random.default_rng(42)
+    s = pd.Series(list(rng.normal(50, 1.0, 1000)) + [500.0, -400.0, 1000.0])
+    issue = detect_lof(s)
+    assert issue is not None
+    assert issue.percentage <= 5.0
+    assert issue.severity == "warning"
+
+
+@requires_sklearn
+def test_isolation_forest_broad_flag_downgraded_to_info():
+    # การกระจายหางหนัก (lognormal): IF flag เป็นสัดส่วนมาก (~19%) = ไม่ใช่ของหายาก
+    # ต้องลด severity เป็น info (advisory) แทน warning เพื่อลด noise
+    rng = np.random.default_rng(0)
+    s = pd.Series(rng.lognormal(0, 1, 300))
+    issue = detect_isolation_forest(s)
+    assert issue is not None
+    assert issue.percentage > 5.0
+    assert issue.severity == "info"
+
+
+@requires_sklearn
 def test_lof_detects_outliers():
     s = _numeric_with_outliers()
     issue = detect_lof(s)

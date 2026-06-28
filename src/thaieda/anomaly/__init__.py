@@ -48,6 +48,10 @@ _MAX_LOF_DUP_RATIO = 0.5
 # (contamination='auto' อาจ flag จำนวนมากบนการกระจายแบบ uniform/discrete ซึ่งไม่มี outlier จริง)
 # ความผิดปกติควรเป็นของหายาก จึงตัดผลที่กว้างเกินไปทิ้งเพื่อลด noise ในรายงาน
 _MAX_ML_OUTLIER_FRAC = 0.20
+# สัดส่วน outlier จากวิธี ML ที่ยังถือว่า "หายากพอจะเป็นความผิดปกติจริง" → severity = warning
+# เกินนี้ (เช่น IF/LOF flag 10–20% ของแถว) ไม่ใช่ของหายากแล้ว แต่เป็นการกระจายตามธรรมชาติของหาง
+# จึงลดเป็น info (advisory ให้ cross-check) แทน warning เพื่อลด false alarm/noise ในรายงาน
+_ML_OUTLIER_WARNING_FRAC = 0.05
 # จำนวนแถวขั้นต่ำสำหรับกฎ "หมวดหมู่หายาก <1%"
 _RARE_MIN_TOTAL = 100
 # จำนวน index ตัวอย่างสูงสุดที่เก็บต่อหนึ่ง issue
@@ -511,9 +515,11 @@ def detect_isolation_forest(series: pd.Series) -> AnomalyIssue | None:
     ]
     sample_en = f" on a {sample_size:,}-row sample" if sampled else ""
     sample_th = f" (สุ่มตัวอย่าง {sample_size:,} แถว)" if sampled else ""
+    # outlier ที่หายากจริง (สัดส่วนน้อย) → warning; ถ้า flag เป็นสัดส่วนมาก = หางการกระจาย ไม่ใช่ของหายาก → info
+    severity = "warning" if count / sample_size <= _ML_OUTLIER_WARNING_FRAC else "info"
     return AnomalyIssue(
         check_name="isolation_forest",
-        severity="warning",
+        severity=severity,
         column=col,
         anomaly_type="statistical",
         count=count,
@@ -588,9 +594,11 @@ def detect_lof(series: pd.Series) -> AnomalyIssue | None:
     ]
     sample_en = f" on a {sample_size:,}-row sample" if sampled else ""
     sample_th = f" (สุ่มตัวอย่าง {sample_size:,} แถว)" if sampled else ""
+    # outlier ที่หายากจริง (สัดส่วนน้อย) → warning; ถ้า flag เป็นสัดส่วนมาก = หางการกระจาย ไม่ใช่ของหายาก → info
+    severity = "warning" if count / sample_size <= _ML_OUTLIER_WARNING_FRAC else "info"
     return AnomalyIssue(
         check_name="local_outlier_factor",
-        severity="warning",
+        severity=severity,
         column=col,
         anomaly_type="statistical",
         count=count,
