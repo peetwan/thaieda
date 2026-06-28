@@ -38,6 +38,13 @@ _THAI_MONTH_DETECT_RE = re.compile("(?:" + "|".join(re.escape(k) for k in _THAI_
 _ENCODING_OPS = ("encoding", "zwspace", "whitespace", "unicode")
 _NUMERAL_OPS = ("numerals",)
 
+# Guardrail (v2.3): กันการทำความสะอาดทำลายข้อมูลแบบเงียบ ๆ
+#   - ถ้า numeric coercion (currency/coerce) ทำให้ค่าที่ไม่ว่างของคอลัมน์ "หาย" เกินสัดส่วนนี้
+#     ให้ย้อนคอลัมน์กลับ + เตือน (กันเคสคอลัมน์ข้อความถูกแปลงเป็น NaN ทั้งคอลัมน์)
+_MAX_VALUE_LOSS_RATIO = 0.30
+#   - ถ้าลบแถวซ้ำแล้วแถวหายเกินสัดส่วนนี้ ให้เตือนเด่นชัด (อาจ deduplicate ผิดพลาด/ข้อมูลผิดรูป)
+_HIGH_ROW_LOSS_RATIO = 0.50
+
 # คำใบ้ชื่อคอลัมน์ที่บ่งว่าเป็นวันที่ (ใช้คัดคอลัมน์สำหรับ normalize_dates)
 _DATE_NAME_HINTS = (
     "date",
@@ -172,28 +179,58 @@ def clean(
             out[col] = cleaned
             results.extend(r for r in op_results if r.rows_affected > 0)
 
-        # currency normalization (auto-detect >10% สัญลักษณ์สกุลเงิน)
+        # snapshot ก่อนการแปลงเป็นตัวเลข (currency/coerce) เพื่อใช้ guardrail ป้องกันข้อมูลหาย
+        col_snapshot = out[col].copy()
+        nonnull_before = int(col_snapshot.notna().sum())
+        coercion_results: list[CleaningResult] = []
+
+        # currency normalization (auto-detect: มีสัญญาณสกุลเงิน + เกือบทั้งคอลัมน์เป็นจำนวนเงินล้วน)
         out[col], cur_res = normalize_currency(out[col])
         if cur_res.rows_affected > 0:
-            results.append(cur_res)
+            coercion_results.append(cur_res)
 
         # dates — เฉพาะคอลัมน์ข้อความที่ยังเป็น object และ "ดูเหมือนวันที่"
         if fix_dates and _is_text_column(out[col]) and _is_datelike_column(out[col]):
             out[col], date_res = normalize_dates(out[col])
             if date_res.rows_affected > 0:
-                results.append(date_res)
+                coercion_results.append(date_res)
 
         # coerce numeric — แปลงคอลัมน์ข้อความที่ควรเป็นตัวเลข (เช่น เลขไทยที่ normalize แล้ว)
         if _is_text_column(out[col]):
             out[col], num_res = coerce_numeric_column(out[col])
             if num_res.rows_affected > 0:
-                results.append(num_res)
+                coercion_results.append(num_res)
+
+        # ----- guardrail: ถ้าการแปลงเป็นตัวเลขทำให้ค่าหายเกินเกณฑ์ ให้ย้อนกลับ + เตือน -----
+        nonnull_after = int(out[col].notna().sum())
+        lost = nonnull_before - nonnull_after
+        if (
+            coercion_results
+            and nonnull_before > 0
+            and lost / nonnull_before > _MAX_VALUE_LOSS_RATIO
+        ):
+            out[col] = col_snapshot
+            ops = ", ".join(r.operation for r in coercion_results)
+            warnings.append(
+                f"คอลัมน์ '{col}': ยกเลิกการแปลงเป็นตัวเลข ({ops}) เพราะจะทำให้ค่าหาย "
+                f"{lost:,}/{nonnull_before:,} ({lost / nonnull_before * 100:.0f}%) "
+                f"— คาดว่าเป็นคอลัมน์ข้อความ ไม่ใช่ตัวเลข"
+            )
+        else:
+            results.extend(coercion_results)
 
     # ----- 2. ลบแถวซ้ำ (หลังทำความสะอาดค่า — เผยให้เห็น dup ที่ซ่อนด้วย encoding/ช่องว่าง) -----
     if remove_duplicates:
         out, dup_res = remove_duplicate_rows(out)
         if dup_res.rows_affected > 0:
             results.append(dup_res)
+            # guardrail: ลบแถวซ้ำมากผิดปกติ → เตือน (อาจ deduplicate ผิดพลาด/ข้อมูลผิดรูป)
+            if rows_before > 0 and dup_res.rows_affected / rows_before > _HIGH_ROW_LOSS_RATIO:
+                pct = dup_res.rows_affected / rows_before * 100
+                warnings.append(
+                    f"ลบแถวซ้ำ {dup_res.rows_affected:,}/{rows_before:,} แถว ({pct:.0f}%) "
+                    f"— สูงผิดปกติ ควรตรวจสอบว่าข้อมูลซ้ำจริงหรือเกิดจากความผิดพลาด"
+                )
 
     # ----- 3. จัดการค่าว่าง -----
     if handle_missing == "drop":

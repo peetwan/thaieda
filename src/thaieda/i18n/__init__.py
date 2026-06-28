@@ -140,6 +140,7 @@ LABELS: dict[str, dict[str, str]] = {
     "check": {"en": "Check", "th": "การตรวจสอบ"},
     "column": {"en": "Column", "th": "คอลัมน์"},
     "count": {"en": "Count", "th": "จำนวน"},
+    "of_rows": {"en": "of rows", "th": "ของแถว"},
     "percentage": {"en": "Percentage", "th": "ร้อยละ"},
     "examples": {"en": "Examples", "th": "ตัวอย่าง"},
     "suggestion": {"en": "Suggestion", "th": "ข้อเสนอแนะ"},
@@ -169,6 +170,12 @@ LABELS: dict[str, dict[str, str]] = {
     # --- cleaning diff (การทำความสะอาดที่ดำเนินการจริง) ---
     "cleaning_diff": {"en": "Data Cleaning Applied", "th": "การทำความสะอาด"},
     "total_cells_changed": {"en": "Total cells changed", "th": "รวมเซลล์ที่เปลี่ยน"},
+    "values_changed": {"en": "Values changed", "th": "ค่าที่แก้ไข"},
+    "rows_removed": {"en": "Rows removed", "th": "แถวที่ถูกลบ"},
+    "high_row_loss_warn": {
+        "en": "high row loss — verify this was intended",
+        "th": "ลบแถวจำนวนมาก — ควรตรวจสอบว่าตั้งใจ",
+    },
     "most_impactful": {"en": "Most impactful", "th": "การดำเนินการที่มีผลมากสุด"},
     # --- text metrics ---
     "text_metrics": {"en": "Text Metrics", "th": "สถิติข้อความ"},
@@ -330,6 +337,7 @@ LABELS: dict[str, dict[str, str]] = {
     "show_details": {"en": "Show details", "th": "ดูเพิ่มเติม"},
     "hide_details": {"en": "Hide details", "th": "ซ่อน"},
     "show_more_insights": {"en": "Show more insights", "th": "แสดงข้อค้นพบเพิ่มเติม"},
+    "findings": {"en": "findings", "th": "ข้อค้นพบ"},
     "showing_top_of": {"en": "showing top", "th": "แสดง"},
     "of_total": {"en": "of", "th": "จาก"},
     "no_priority_actions": {

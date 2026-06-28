@@ -122,7 +122,8 @@ def test_all_fixtures_have_csv_and_golden() -> None:
 @pytest.mark.parametrize(
     "name,expected_improvement",
     [
-        ("thai_text_dirty", 50),
+        # เกณฑ์ปรับตาม scoring v2.3 (magnitude-weighted) — ยังต้องดีขึ้นชัดเจน (F→A)
+        ("thai_text_dirty", 40),
         ("full_dirty", 1),
         ("registry_dirty", 1),
     ],

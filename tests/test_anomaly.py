@@ -123,6 +123,19 @@ def test_fuzzy_duplicates_detected():
     assert fuzzy[0].severity == "warning"
 
 
+def test_fuzzy_duplicates_count_is_minority_rows_not_all_involved():
+    """count/percentage ต้องสะท้อน 'แถวที่จะถูกแก้' (ฝั่งส่วนน้อยของแต่ละ cluster)
+    ไม่ใช่ผลรวมทุกแถวของหมวดที่เกี่ยวข้อง ซึ่ง overclaim สัดส่วนที่กระทบ.
+    """
+    s = pd.Series(["กรุงเทพ"] * 970 + ["กรุงเทพฯ"] * 30)
+    issues = detect_categorical_anomalies(s)
+    fuzzy = [i for i in issues if i.check_name == "fuzzy_duplicates"]
+    assert fuzzy
+    # ค่ามาตรฐาน = 'กรุงเทพ' (970), ฝั่งส่วนน้อย = 'กรุงเทพฯ' (30) → กระทบ 30 แถว = 3%
+    assert fuzzy[0].count == 30
+    assert fuzzy[0].percentage == pytest.approx(3.0, abs=0.01)
+
+
 def test_fuzzy_duplicates_skips_distinct_codes():
     """รหัส/รุ่น (model/part number) ที่สตริงคล้ายกันสูงแต่เป็นคนละค่าจริง
 
@@ -273,6 +286,29 @@ def test_isolation_forest_detects_outliers():
     assert any(idx in issue.indices for idx in (n - 1, n - 2, n - 3))
     # คะแนนความผิดปกติถูกแนบในตัวอย่าง
     assert any("score=" in ex for ex in issue.examples)
+
+
+@requires_sklearn
+def test_ml_rare_outliers_are_warning():
+    # outlier หายากจริง (สัดส่วนน้อย ≤5%) → severity = warning
+    rng = np.random.default_rng(42)
+    s = pd.Series(list(rng.normal(50, 1.0, 1000)) + [500.0, -400.0, 1000.0])
+    issue = detect_lof(s)
+    assert issue is not None
+    assert issue.percentage <= 5.0
+    assert issue.severity == "warning"
+
+
+@requires_sklearn
+def test_isolation_forest_broad_flag_downgraded_to_info():
+    # การกระจายหางหนัก (lognormal): IF flag เป็นสัดส่วนมาก (~19%) = ไม่ใช่ของหายาก
+    # ต้องลด severity เป็น info (advisory) แทน warning เพื่อลด noise
+    rng = np.random.default_rng(0)
+    s = pd.Series(rng.lognormal(0, 1, 300))
+    issue = detect_isolation_forest(s)
+    assert issue is not None
+    assert issue.percentage > 5.0
+    assert issue.severity == "info"
 
 
 @requires_sklearn

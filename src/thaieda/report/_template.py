@@ -9,7 +9,7 @@ from __future__ import annotations
 REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
     <div class="issue {{ iss.severity }}">
       <div><span class="sev {{ iss.severity }}">{{ sev_icons[iss.severity] }} {{ L('severity_' ~ iss.severity) }}</span><b>{{ iss.column }}</b> · <span class="ng">{{ iss.check_name }}</span></div>
-      <div class="meta">{{ L('count') }}: {{ "{:,}".format(iss.count) }} ({{ iss.percentage }}%)</div>
+      <div class="meta">{{ L('rows_affected') }}: {{ "{:,}".format(iss.count) }} ({{ iss.percentage }}% {{ L('of_rows') }})</div>
       <div class="desc-th">{{ iss.description_th }}</div>
       {% if iss.examples %}<div class="examples">{% for ex in iss.examples[:5] %}<span class="ex mono">{{ ex }}</span>{% endfor %}</div>{% endif %}
       <div class="so-what"><span class="lbl">{{ L('so_what') }}</span> {{ iss.suggestion_th }}</div>
@@ -18,11 +18,27 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
 {% endmacro %}{% macro render_anomaly(an, sev_icons, L) %}
     <div class="issue {{ an.severity }}">
       <div><span class="sev {{ an.severity }}">{{ sev_icons[an.severity] }} {{ L('severity_' ~ an.severity) }}</span><b>{{ an.column }}</b> · <span class="ng">{{ an.check_name }}</span> <span class="badge">{{ an.type_label }}</span></div>
-      <div class="meta">{{ L('count') }}: {{ "{:,}".format(an.count) }} ({{ an.percentage }}%)</div>
+      <div class="meta">{{ L('rows_affected') }}: {{ "{:,}".format(an.count) }} ({{ an.percentage }}% {{ L('of_rows') }})</div>
       <div class="desc-th">{{ an.description_th }}</div>
       {% if an.examples %}<div class="examples">{% for ex in an.examples[:5] %}<span class="ex mono">{{ ex }}</span>{% endfor %}</div>{% endif %}
       <div class="so-what"><span class="lbl">{{ L('so_what') }}</span> {{ an.suggestion_th }}</div>
       <details><summary class="ng">{{ L('show_details') }}</summary><div class="desc-en">{{ an.description }} — {{ an.suggestion }}</div></details>
+    </div>
+{% endmacro %}{% macro render_insight_card(card, sev_icons, L) %}
+    <div class="issue insight {{ card.severity }}">
+      <div>
+        <span class="sev {{ card.severity }}">{{ sev_icons[card.severity] }} {{ L('severity_' ~ card.severity) }}</span>
+        {% if card.column %}<b>{{ card.column }}</b>{% endif %}
+        <span class="badge cat">{{ card.category_label }}</span>
+        {% if card.findings|length > 1 %}<span class="badge">{{ card.findings|length }} {{ L('findings') }}</span>{% endif %}
+      </div>
+      {% for f in card.findings %}
+      <div class="finding{% if not loop.first %} sub{% endif %}">
+        <div class="finding-head"><span class="sev {{ f.severity }}">{{ sev_icons[f.severity] }}</span> <b>{{ f.title_th }}</b></div>
+        <div class="desc-th">{{ f.description_th }}</div>
+        <div class="so-what"><span class="lbl">{{ L('so_what') }}</span> {{ f.recommendation_th }}</div>
+      </div>
+      {% endfor %}
     </div>
 {% endmacro %}<!DOCTYPE html>
 <html lang="{{ lang }}">
@@ -323,6 +339,8 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
   .examples .ex { display: block; margin: 5px 0; font-family: "Cascadia Code", Consolas, monospace; }
 
   .insight-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .finding.sub { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border); }
+  .finding-head { margin-bottom: 4px; }
   .watch-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; margin: 18px 0; }
   .watch { padding: 18px; background: var(--panel); border: 1px solid var(--border); border-left: 5px solid var(--warning); border-radius: 16px; box-shadow: var(--shadow); }
   .watch.critical { border-left-color: var(--critical); }
@@ -706,37 +724,22 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
   {% if insight_section.total_generated and insight_section.total_generated > insight_section.insights|length %}
   <div class="note">{{ L('showing_top_of') }} {{ insight_section.insights|length }} {{ L('of_total') }} {{ insight_section.total_generated }} {{ L('auto_insights') }}</div>
   {% endif %}
+  {# D1: การ์ดยุบต่อคอลัมน์ · D2: คงการ์ด critical/warning ไว้เสมอ แล้วยุบ info ลงกล่อง "ดูเพิ่ม" #}
+  {% set primary_cards = insight_section.cards | rejectattr('severity', 'equalto', 'info') | list %}
+  {% set info_cards = insight_section.cards | selectattr('severity', 'equalto', 'info') | list %}
   <div class="insight-grid">
-    {% for ins in insight_section.insights[:20] %}
-    <div class="issue insight {{ ins.severity }}">
-      <div>
-        <span class="sev {{ ins.severity }}">{{ sev_icons[ins.severity] }} {{ L('severity_' ~ ins.severity) }}</span>
-        <span class="badge cat">{{ ins.category_label }}</span>
-        <b>{{ ins.title_th }}</b>
-      </div>
-      <div class="desc-th">{{ ins.description_th }}</div>
-      <div class="so-what"><span class="lbl">{{ L('so_what') }}</span> {{ ins.recommendation_th }}</div>
-    </div>
-    {% endfor %}
+    {% for card in primary_cards %}{{ render_insight_card(card, sev_icons, L) }}{% endfor %}
+    {% if not primary_cards %}{% for card in info_cards[:12] %}{{ render_insight_card(card, sev_icons, L) }}{% endfor %}{% endif %}
   </div>
-  {% if insight_section.insights|length > 20 %}
+  {% if primary_cards and info_cards %}
   <details class="block">
-    <summary class="ng">{{ L('show_more_insights') }} <b>({{ insight_section.insights|length - 20 }})</b></summary>
-    <div class="body">
-      <div class="insight-grid">
-        {% for ins in insight_section.insights[20:] %}
-        <div class="issue insight {{ ins.severity }}">
-          <div>
-            <span class="sev {{ ins.severity }}">{{ sev_icons[ins.severity] }} {{ L('severity_' ~ ins.severity) }}</span>
-            <span class="badge cat">{{ ins.category_label }}</span>
-            <b>{{ ins.title_th }}</b>
-          </div>
-          <div class="desc-th">{{ ins.description_th }}</div>
-          <div class="so-what"><span class="lbl">{{ L('so_what') }}</span> {{ ins.recommendation_th }}</div>
-        </div>
-        {% endfor %}
-      </div>
-    </div>
+    <summary class="ng">{{ L('show_more_insights') }} <b>({{ info_cards|length }} {{ L('severity_info') }})</b></summary>
+    <div class="body"><div class="insight-grid">{% for card in info_cards %}{{ render_insight_card(card, sev_icons, L) }}{% endfor %}</div></div>
+  </details>
+  {% elif not primary_cards and info_cards|length > 12 %}
+  <details class="block">
+    <summary class="ng">{{ L('show_more_insights') }} <b>({{ info_cards|length - 12 }} {{ L('severity_info') }})</b></summary>
+    <div class="body"><div class="insight-grid">{% for card in info_cards[12:] %}{{ render_insight_card(card, sev_icons, L) }}{% endfor %}</div></div>
   </details>
   {% endif %}
   {% endif %}
@@ -864,7 +867,7 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
   <!-- ============ CLEANING APPLIED ============ -->
   {% if cleaning_diff %}
   <h2 id="cleaning">{{ L('cleaning_diff') }} <span class="ng">({{ cleaning_diff|length }})</span></h2>
-  {% if cleaning_diff_summary %}<div class="panel">{{ L('total_cells_changed') }}: <b>{{ "{:,}".format(cleaning_diff_summary.total_cells_changed) }}</b> · {{ L('most_impactful') }}: <b>{{ cleaning_diff_summary.most_impactful_op }}</b> <span class="ng">({{ cleaning_diff_summary.most_impactful_th }} — {{ "{:,}".format(cleaning_diff_summary.most_impactful_rows) }})</span></div>{% endif %}
+  {% if cleaning_diff_summary %}<div class="panel">{{ L('values_changed') }}: <b>{{ "{:,}".format(cleaning_diff_summary.values_changed) }}</b>{% if cleaning_diff_summary.rows_removed %} · {{ L('rows_removed') }}: <b{% if cleaning_diff_summary.high_row_loss %} class="sev warning"{% endif %}>{{ "{:,}".format(cleaning_diff_summary.rows_removed) }}</b> ({{ cleaning_diff_summary.rows_removed_pct }}% {{ L('of_rows') }}){% if cleaning_diff_summary.high_row_loss %} ⚠ <span class="ng">{{ L('high_row_loss_warn') }}</span>{% endif %}{% endif %} · {{ L('most_impactful') }}: <b>{{ cleaning_diff_summary.most_impactful_op }}</b> <span class="ng">({{ cleaning_diff_summary.most_impactful_th }} — {{ "{:,}".format(cleaning_diff_summary.most_impactful_rows) }})</span></div>{% endif %}
   <table><tr><th>{{ L('column') }}</th><th>{{ L('operation') }}</th><th>{{ L('rows_affected') }}</th><th>{{ L('before') }} → {{ L('after') }}</th></tr>{% for c in cleaning_diff %}<tr><td><b>{{ c.column }}</b></td><td>{{ c.operation }}<div class="ng">{{ c.description_th }}</div>{% if c.explanation %}<div class="ng">{{ L('explanation') }}: <span class="mono">{{ c.explanation }}</span></div>{% endif %}</td><td>{{ "{:,}".format(c.rows_affected) }}</td><td class="diff">{% for ex in c.before_examples %}<span class="row"><span class="b mono">{{ ex }}</span><span class="arrow">→</span><span class="a mono">{{ c.after_examples[loop.index0] }}</span></span>{% endfor %}</td></tr>{% endfor %}</table>
   {% endif %}
 

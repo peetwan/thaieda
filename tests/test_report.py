@@ -7,7 +7,84 @@ import json
 import pandas as pd
 import pytest
 
-from thaieda.report import ProfileReport, profile
+from thaieda.report import (
+    ProfileReport,
+    _group_insights_by_column,
+    _is_row_removing_op,
+    _space_thai_latin,
+    profile,
+)
+
+
+def test_group_insights_by_column_merges_and_orders_by_severity():
+    items = [
+        {
+            "severity": "info",
+            "description_th": "คอลัมน์ 'age': มีค่าผิดปกติเล็กน้อย",
+            "title_th": "outlier",
+            "category_label": "การกระจาย",
+        },
+        {
+            "severity": "critical",
+            "description_th": "คอลัมน์ 'age': ค่าหาย 60%",
+            "title_th": "missing",
+            "category_label": "ความสมบูรณ์",
+        },
+        {
+            "severity": "warning",
+            "description_th": "ภาพรวมชุดข้อมูลมีคอลัมน์ซ้ำ",
+            "title_th": "dup",
+            "category_label": "โครงสร้าง",
+        },
+    ]
+    cards = _group_insights_by_column(items)
+    # การ์ด 'age' รวม 2 ข้อค้นพบ และจัดเรียง critical ก่อน
+    age_card = next(c for c in cards if c["column"] == "age")
+    assert len(age_card["findings"]) == 2
+    assert age_card["severity"] == "critical"
+    assert age_card["findings"][0]["severity"] == "critical"
+    # คำนำ "คอลัมน์ 'age':" ถูกตัดออกจาก description
+    assert not age_card["findings"][0]["description_th"].startswith("คอลัมน์ 'age'")
+    # การ์ดวิกฤตอยู่ก่อนการ์ด warning (จัดเรียงตามความรุนแรง)
+    assert cards[0]["severity"] == "critical"
+    # ข้อค้นพบที่ไม่ผูกคอลัมน์เป็นการ์ดเดี่ยว
+    standalone = [c for c in cards if c["column"] == ""]
+    assert len(standalone) == 1
+
+
+def test_is_row_removing_op_distinguishes_rows_from_cells():
+    assert _is_row_removing_op("remove_duplicate_rows", "(entire df)") is True
+    # handle_missing_values ลบแถวเฉพาะตอน drop ทั้ง DataFrame
+    assert _is_row_removing_op("handle_missing_values", "(entire df)") is True
+    # รายคอลัมน์ = การเติมค่า (impute) ไม่ใช่การลบแถว
+    assert _is_row_removing_op("handle_missing_values", "age") is False
+    assert _is_row_removing_op("strip_whitespace", "name") is False
+
+
+def test_cleaning_summary_separates_rows_removed_from_values_changed():
+    df = pd.DataFrame({"name": ["  Alice ", "BOB", "  Alice ", "bob", "Carol"] * 4})
+    html = profile(df, clean=True, lang="th").to_html()
+    # หน่วยต้องแยกชัด: "ค่าที่แก้ไข" (เซลล์) กับ "แถวที่ถูกลบ" (แถว) — ไม่เรียกรวมว่า "เซลล์"
+    assert "ค่าที่แก้ไข" in html
+    assert "แถวที่ถูกลบ" in html
+
+
+def test_space_thai_latin_inserts_space_around_english():
+    # คำอังกฤษที่ติดอักษรไทยต้องถูกคั่นด้วยช่องว่างทั้งสองด้าน
+    assert _space_thai_latin("สหสัมพันธ์ Pearsonสูง") == "สหสัมพันธ์ Pearson สูง"
+    assert _space_thai_latin("ค่าPM25") == "ค่า PM25"
+
+
+def test_space_thai_latin_leaves_numbers_and_quoted_names():
+    # ตัวเลข/เครื่องหมาย และชื่อคอลัมน์ในเครื่องหมายคำพูด ต้องไม่ถูกแตะ
+    assert _space_thai_latin("r=0.95, n=1,234") == "r=0.95, n=1,234"
+    assert _space_thai_latin("คอลัมน์ 'col_a' ดี") == "คอลัมน์ 'col_a' ดี"
+
+
+def test_space_thai_latin_spaces_closing_bracket_before_thai():
+    # วงเล็บที่ปิดท้ายโทเคนอังกฤษและชนอักษรไทย ต้องถูกคั่นด้วยช่องว่าง
+    assert _space_thai_latin("Spearman (non-linear)สูง") == "Spearman (non-linear) สูง"
+    assert _space_thai_latin("(non-linear)เป็นลบ") == "(non-linear) เป็นลบ"
 
 
 @pytest.fixture

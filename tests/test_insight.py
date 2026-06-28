@@ -455,3 +455,52 @@ def test_insight_dataclass_to_dict():
         "description_th": "คำอธิบาย",
         "recommendation_th": "คำแนะนำ",
     }
+
+
+def test_geo_id_advisory_insights_for_nonmeasure_numeric_columns():
+    df = pd.DataFrame(
+        {
+            "id": range(1, 61),
+            "zip_code": [10100 + (i % 50) for i in range(60)],
+            "lat": [13.7 + i * 0.001 for i in range(60)],
+            "long": [100.5 + i * 0.001 for i in range(60)],
+            "value": np.random.RandomState(0).normal(size=60),
+        }
+    )
+    column_types = detect_all(df)
+    summary = generate_insights(
+        df,
+        quality_issues=[],
+        anomaly_issues=[],
+        text_metrics={},
+        column_types=column_types,
+    )
+    titles = [i.title_th for i in summary.insights]
+    geo = [i for i in summary.insights if "พิกัด" in i.title_th]
+    idi = [i for i in summary.insights if "ตัวระบุ" in i.title_th]
+    assert geo and idi, titles
+    # คำแนะนำต้องถูกบริบท: geo → เชิงพื้นที่, id → ใช้เป็นคีย์ (ไม่ใช่ log-transform/ฟีเจอร์)
+    assert "พื้นที่" in geo[0].recommendation_th
+    assert "คีย์" in idi[0].recommendation_th
+    assert all(i.severity == "info" for i in geo + idi)
+
+
+def test_geo_id_advisory_skips_non_numeric_identifier_columns():
+    # คอลัมน์ ID/รหัสที่เป็น "ข้อความ" ไม่เคยเป็นผู้สมัครของการวิเคราะห์เชิงปริมาณ
+    # จึงไม่ควรมีคำแนะนำว่า "ข้ามการวิเคราะห์เชิงปริมาณให้แล้ว" (ทำให้เข้าใจผิด)
+    df = pd.DataFrame(
+        {
+            "user_id": [f"u{i:03d}" for i in range(60)],
+            "value": np.random.RandomState(0).normal(size=60),
+        }
+    )
+    column_types = detect_all(df)
+    summary = generate_insights(
+        df,
+        quality_issues=[],
+        anomaly_issues=[],
+        text_metrics={},
+        column_types=column_types,
+    )
+    advisory = [i for i in summary.insights if "พิกัด" in i.title_th or "ตัวระบุ" in i.title_th]
+    assert advisory == [], [i.title_th for i in advisory]

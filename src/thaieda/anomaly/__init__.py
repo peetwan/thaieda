@@ -18,7 +18,12 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from thaieda.detect import ColumnType, detect_all, detect_column_type
+from thaieda.detect import (
+    ColumnType,
+    detect_all,
+    detect_column_type,
+    is_nonmeasure_numeric,
+)
 
 # ----------------------------------------------------------------------------
 # ค่าคงที่
@@ -43,6 +48,10 @@ _MAX_LOF_DUP_RATIO = 0.5
 # (contamination='auto' อาจ flag จำนวนมากบนการกระจายแบบ uniform/discrete ซึ่งไม่มี outlier จริง)
 # ความผิดปกติควรเป็นของหายาก จึงตัดผลที่กว้างเกินไปทิ้งเพื่อลด noise ในรายงาน
 _MAX_ML_OUTLIER_FRAC = 0.20
+# สัดส่วน outlier จากวิธี ML ที่ยังถือว่า "หายากพอจะเป็นความผิดปกติจริง" → severity = warning
+# เกินนี้ (เช่น IF/LOF flag 10–20% ของแถว) ไม่ใช่ของหายากแล้ว แต่เป็นการกระจายตามธรรมชาติของหาง
+# จึงลดเป็น info (advisory ให้ cross-check) แทน warning เพื่อลด false alarm/noise ในรายงาน
+_ML_OUTLIER_WARNING_FRAC = 0.05
 # จำนวนแถวขั้นต่ำสำหรับกฎ "หมวดหมู่หายาก <1%"
 _RARE_MIN_TOTAL = 100
 # จำนวน index ตัวอย่างสูงสุดที่เก็บต่อหนึ่ง issue
@@ -506,9 +515,11 @@ def detect_isolation_forest(series: pd.Series) -> AnomalyIssue | None:
     ]
     sample_en = f" on a {sample_size:,}-row sample" if sampled else ""
     sample_th = f" (สุ่มตัวอย่าง {sample_size:,} แถว)" if sampled else ""
+    # outlier ที่หายากจริง (สัดส่วนน้อย) → warning; ถ้า flag เป็นสัดส่วนมาก = หางการกระจาย ไม่ใช่ของหายาก → info
+    severity = "warning" if count / sample_size <= _ML_OUTLIER_WARNING_FRAC else "info"
     return AnomalyIssue(
         check_name="isolation_forest",
-        severity="warning",
+        severity=severity,
         column=col,
         anomaly_type="statistical",
         count=count,
@@ -583,9 +594,11 @@ def detect_lof(series: pd.Series) -> AnomalyIssue | None:
     ]
     sample_en = f" on a {sample_size:,}-row sample" if sampled else ""
     sample_th = f" (สุ่มตัวอย่าง {sample_size:,} แถว)" if sampled else ""
+    # outlier ที่หายากจริง (สัดส่วนน้อย) → warning; ถ้า flag เป็นสัดส่วนมาก = หางการกระจาย ไม่ใช่ของหายาก → info
+    severity = "warning" if count / sample_size <= _ML_OUTLIER_WARNING_FRAC else "info"
     return AnomalyIssue(
         check_name="local_outlier_factor",
-        severity="warning",
+        severity=severity,
         column=col,
         anomaly_type="statistical",
         count=count,
@@ -1085,13 +1098,38 @@ def _differs_by_distinct_word(a: str, b: str) -> bool:
     return has_distinct_word(only_a, tb) or has_distinct_word(only_b, ta)
 
 
+def _connected_components(pairs: list[tuple[str, str]]) -> list[set[str]]:
+    """จัดกลุ่มค่าที่เชื่อมโยงกันผ่านคู่ near-duplicate ให้เป็น cluster (connected components).
+
+    เช่น คู่ (A,B) และ (B,C) → cluster เดียว {A,B,C}. ใช้เพื่อคิด "จำนวนแถวที่จะถูกแก้"
+    เมื่อทำให้เป็นค่ามาตรฐานเดียว (ยุบทุกค่าในกลุ่มเข้าหาค่าที่พบบ่อยสุด).
+    """
+    parent: dict[str, str] = {}
+
+    def find(x: str) -> str:
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: str, b: str) -> None:
+        parent[find(a)] = find(b)
+
+    for a, b in pairs:
+        union(a, b)
+    groups: dict[str, set[str]] = {}
+    for node in parent:
+        groups.setdefault(find(node), set()).add(node)
+    return list(groups.values())
+
+
 def _fuzzy_duplicate_anomaly(
     counts: Counter[str], items: list[tuple[int, str]], col: str
 ) -> AnomalyIssue | None:
     """หมวดหมู่ที่คล้ายกันมาก (SequenceMatcher ratio > 0.8) แต่ไม่เหมือนกัน และไม่ใช่แค่ตัวพิมพ์ใหญ่/เล็ก."""
     cats = [c for c, _ in counts.most_common(300)]
     pairs: list[tuple[str, str]] = []
-    involved: set[str] = set()
     for i in range(len(cats)):
         for j in range(i + 1, len(cats)):
             a, b = cats[i], cats[j]
@@ -1109,7 +1147,6 @@ def _fuzzy_duplicate_anomaly(
                 ):
                     continue
                 pairs.append((a, b))
-                involved.update((a, b))
                 if len(pairs) >= _MAX_INDICES:
                     break
         if len(pairs) >= _MAX_INDICES:
@@ -1117,8 +1154,20 @@ def _fuzzy_duplicate_anomaly(
 
     if not pairs:
         return None
-    indices = [pos for pos, v in items if v in involved][:_MAX_INDICES]
-    count = sum(counts[c] for c in involved)
+    # "จำนวนแถวที่จะถูกแก้" = ทุกแถวในแต่ละ cluster ยกเว้นค่าที่พบบ่อยสุด (ถือเป็นค่ามาตรฐาน) —
+    # ไม่ใช่จำนวนแถวรวมของทุกหมวดที่เกี่ยวข้อง (ซึ่ง overclaim เช่น 'Married-civ-spouse' กับ
+    # 'Married-AF-spouse' ที่ต่างกันจริง จะดูเหมือนกระทบ 46% ทั้งที่ฝั่งส่วนน้อยมีไม่กี่แถว)
+    clusters = _connected_components(pairs)
+    affected = 0
+    minority: set[str] = set()
+    for cluster in clusters:
+        canonical = max(cluster, key=lambda c: counts[c])
+        for c in cluster:
+            if c != canonical:
+                affected += counts[c]
+                minority.add(c)
+    indices = [pos for pos, v in items if v in minority][:_MAX_INDICES]
+    count = affected
 
     examples = [f"{a} ↔ {b}" for a, b in pairs[:_MAX_INDICES]]
     return AnomalyIssue(
@@ -1441,7 +1490,9 @@ def _detect_anomalies_frame(
         series = df[col]
         ctype = column_types.get(col_name, ColumnType.EMPTY)
 
-        if ctype == ColumnType.NUMERIC:
+        # คอลัมน์ตัวเลขที่เป็น identifier/รหัส/พิกัด (id, *_id, lat/long, zip) ไม่ใช่ "ค่าวัด"
+        # การตรวจ outlier บนพิกัด/รหัสจึงไม่มีความหมาย (เช่น lat ที่ห่างจากค่าเฉลี่ย ไม่ใช่ค่าผิดปกติ)
+        if ctype == ColumnType.NUMERIC and not is_nonmeasure_numeric(series, ctype):
             if (issue := detect_numeric_outliers(series)) is not None:
                 issues.append(issue)
             # วิธี ML — เสริมวิธีเชิงสถิติเมื่อข้อมูลพอ (>100 แถว) และมี sklearn

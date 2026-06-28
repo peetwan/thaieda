@@ -23,9 +23,19 @@ from thaieda.clean import CleaningResult, clean_thai_text
 from thaieda.clean._pipeline import CleaningReport
 from thaieda.clean._pipeline import clean as clean_dataframe
 from thaieda.clean._smart import CleaningPlan, plan_cleaning
-from thaieda.detect import ColumnType, _detect_language, detect_all
+from thaieda.detect import (
+    ColumnType,
+    _detect_language,
+    detect_all,
+    is_nonmeasure_numeric,
+)
 from thaieda.i18n import TECHNICAL_TO_PLAIN, label
-from thaieda.insight import Insight, InsightSummary, generate_insights
+from thaieda.insight import (
+    Insight,
+    InsightSummary,
+    _column_from_description,
+    generate_insights,
+)
 from thaieda.insight_engine import InsightEngineResult, discover_insights
 from thaieda.insight_engine._leakage import detect_target_leakage
 from thaieda.ner import NERResult, extract_entities, ner_available
@@ -36,6 +46,7 @@ from thaieda.timeseries import (
     TimeseriesResult,
     analyze_timeseries,
     detect_timeseries_columns,
+    is_panel_time_axis,
 )
 
 # จำนวนกราฟต่อคอลัมน์สูงสุดที่สร้าง (กันรายงานใหญ่เกินไปบนชุดข้อมูลที่มีคอลัมน์ข้อความเยอะ)
@@ -270,6 +281,109 @@ _DATA_TYPE_GUIDANCE: dict[str, dict[str, Any]] = {
 }
 
 
+# สัดส่วนแถวที่ถูกลบซึ่งถือว่า "สูงผิดปกติ" → เด้งเตือนในสรุปการทำความสะอาด
+_HIGH_ROW_LOSS_PCT = 50.0
+
+# ลำดับความรุนแรง (น้อย = สำคัญกว่า) ใช้จัดเรียง insight/การ์ด
+_SEVERITY_RANK = {"critical": 0, "warning": 1, "info": 2}
+
+
+def _group_insights_by_column(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """รวมข้อค้นพบที่อ้างถึงคอลัมน์เดียวกันเป็น "การ์ดเดียว" จัดเรียงตามความรุนแรง (D1).
+
+    แต่ละคอลัมน์อาจมีหลายข้อค้นพบ (เบ้, ค่าผิดปกติ, ML flag, ค่าว่าง) — เดิมแสดงเป็นการ์ด
+    แยกหลายใบจนรก ที่นี่จึงยุบเป็นการ์ดเดียวต่อคอลัมน์ พร้อมรายการข้อค้นพบย่อย (findings)
+    เรียงวิกฤตก่อน. ข้อค้นพบที่ไม่ผูกกับคอลัมน์ (เช่น ภาพรวมชุดข้อมูล) เป็นการ์ดเดี่ยว.
+    การ์ดถูกจัดเรียงตามความรุนแรงสูงสุดภายในการ์ด โดยคงลำดับเดิมเมื่อเสมอกัน (stable).
+    """
+    order: list[str] = []
+    groups: dict[str, list[dict[str, Any]]] = {}
+    standalone: list[dict[str, Any]] = []
+    for it in items:
+        col = _column_from_description(it.get("description_th", ""))
+        if not col:
+            standalone.append(it)
+            continue
+        if col not in groups:
+            groups[col] = []
+            order.append(col)
+        groups[col].append(it)
+
+    def sev_rank(it: dict[str, Any]) -> int:
+        return _SEVERITY_RANK.get(it.get("severity", "info"), 3)
+
+    def strip_col_prefix(text: str, col: str) -> str:
+        # ตัดคำนำ "คอลัมน์ 'X':" ออก เพราะหัวการ์ดแสดงชื่อคอลัมน์อยู่แล้ว
+        for prefix in (f"คอลัมน์ '{col}': ", f"คอลัมน์ '{col}' ", f"คอลัมน์ '{col}'"):
+            if text.startswith(prefix):
+                return text[len(prefix) :].lstrip()
+        return text
+
+    cards: list[dict[str, Any]] = []
+    for col in order:
+        findings = sorted(groups[col], key=sev_rank)
+        findings = [
+            {**f, "description_th": strip_col_prefix(f.get("description_th", ""), col)}
+            for f in findings
+        ]
+        top = findings[0]
+        cards.append(
+            {
+                "column": col,
+                "severity": top["severity"],
+                "category_label": top.get("category_label", ""),
+                "findings": findings,
+            }
+        )
+    for it in standalone:
+        cards.append(
+            {
+                "column": "",
+                "severity": it["severity"],
+                "category_label": it.get("category_label", ""),
+                "findings": [it],
+            }
+        )
+    # จัดเรียงการ์ดตามความรุนแรงสูงสุด (stable: คงลำดับเดิมเมื่อเท่ากัน)
+    cards.sort(key=lambda c: _SEVERITY_RANK.get(c["severity"], 3))
+    return cards
+
+
+def _is_row_removing_op(op: str, column: str) -> bool:
+    """True ถ้า operation นี้ 'ลบแถว' (เปลี่ยนจำนวนแถว) ไม่ใช่การแก้ค่าระดับเซลล์ (D6).
+
+    remove_duplicate_rows ลบแถวเสมอ; ส่วน handle_missing_values จะลบแถวเฉพาะกรณี
+    drop ทั้ง DataFrame (column == '(entire df)') — ถ้าเป็นรายคอลัมน์คือการเติมค่า (impute)
+    ซึ่งนับเป็นการแก้ระดับเซลล์.
+    """
+    if op == "remove_duplicate_rows":
+        return True
+    return op == "handle_missing_values" and column == "(entire df)"
+
+
+# ขอบเขตอักษรไทย (U+0E00–U+0E7F) — ใช้เติมช่องว่างรอบคำอังกฤษที่ติดกับอักษรไทย
+_THAI_CHAR_RANGE = "\u0e00-\u0e7f"
+_THAI_THEN_LATIN_RE = re.compile(rf"([{_THAI_CHAR_RANGE}])([A-Za-z])")
+_LATIN_THEN_THAI_RE = re.compile(rf"([A-Za-z])([{_THAI_CHAR_RANGE}])")
+# วงเล็บปิดท้ายโทเคนอังกฤษ เช่น '(non-linear)' ก็เป็นขอบของโทเคนอังกฤษเช่นกัน —
+# เติมช่องว่างเมื่อชนกับอักษรไทย เพื่อกัน '(non-linear)สูง' (ไม่รวมเครื่องหมายคำพูด)
+_CLOSEBRACKET_THEN_THAI_RE = re.compile(rf"([)\]}}])([{_THAI_CHAR_RANGE}])")
+
+
+def _space_thai_latin(text: str) -> str:
+    """เติมช่องว่างตรงรอยต่อระหว่างอักษรไทยกับคำอังกฤษ เพื่อให้อ่านง่าย.
+
+    ไทยไม่เว้นวรรคระหว่างคำไทยด้วยกัน แต่ตามแบบแผนการพิมพ์ ควรมีช่องว่างคั่น
+    เมื่อมีคำ/โทเคนอังกฤษแทรก เช่น 'สหสัมพันธ์ Pearsonสูง' → 'สหสัมพันธ์ Pearson สูง'
+    รวมถึงวงเล็บที่ปิดท้ายโทเคนอังกฤษ เช่น 'Spearman (non-linear)สูง' → '... (non-linear) สูง'
+    (แตะเฉพาะรอยต่อ ไทย↔ตัวอักษรละติน/วงเล็บปิด — ไม่ยุ่งกับตัวเลข หรือชื่อคอลัมน์ในเครื่องหมายคำพูด)
+    """
+    out = _THAI_THEN_LATIN_RE.sub(r"\1 \2", str(text or ""))
+    out = _LATIN_THEN_THAI_RE.sub(r"\1 \2", out)
+    out = _CLOSEBRACKET_THEN_THAI_RE.sub(r"\1 \2", out)
+    return out
+
+
 def _plain_language(text: str) -> str:
     """แทนศัพท์เทคนิคในข้อความด้วยคำอธิบายภาษาคนอ่าน โดยคงคำเดิมไว้ในวงเล็บ."""
     out = str(text or "")
@@ -284,7 +398,7 @@ def _plain_language(text: str) -> str:
             return f"{_p} ({original})"
 
         out = pattern.sub(repl, out)
-    return out
+    return _space_thai_latin(out)
 
 
 def _detect_data_type(
@@ -1047,6 +1161,17 @@ class ProfileReport:
         valid = time_values.notna()
         if int(valid.sum()) < 5:
             return
+        # ข้อมูล panel/snapshot (หลายแถวใช้ timestamp เดียวกัน เช่น ค่าตรวจวัดหลายสถานี ณ เวลาเดียว)
+        # ไม่ใช่อนุกรมเวลารายแถว — วิเคราะห์ TS จะได้ trend/spike ปลอม จึงข้ามพร้อมแจ้งเหตุผล
+        if is_panel_time_axis(time_values[valid]):
+            self._notes.append(
+                "timeseries analysis skipped (time axis has many duplicate timestamps "
+                "— looks like panel/snapshot data, not a row-level time series)"
+                if self.lang == "en"
+                else "ข้าม timeseries (แกนเวลามีค่าซ้ำมาก — ดูเป็นข้อมูล panel/ภาพรวม ณ ช่วงเวลาเดียว "
+                "ไม่ใช่อนุกรมเวลารายแถว)"
+            )
+            return
         indexed = self.df.loc[valid].copy()
         indexed.index = pd.DatetimeIndex(time_values[valid])
         indexed = indexed.sort_index()
@@ -1058,8 +1183,10 @@ class ProfileReport:
             ctype = self._column_types.get(col)
             if col == str(time_col) or col in self._ignored_columns or ctype != ColumnType.NUMERIC:
                 continue
-            if _is_id_like_column(col, ctype) or _is_low_cardinality_code_or_boolean(
-                self.df[c], col
+            if (
+                _is_id_like_column(col, ctype)
+                or is_nonmeasure_numeric(self.df[c], ctype)
+                or _is_low_cardinality_code_or_boolean(self.df[c], col)
             ):
                 skipped_metric_cols.append(col)
                 continue
@@ -2352,12 +2479,20 @@ class ProfileReport:
         if self._insights is not None:
             insight_limit = 12 if self.report_mode == "blueprint" else len(self._insights.insights)
             insight_items = [
-                {**i.to_dict(), "category_label": L(f"icat_{i.category}")}
+                {
+                    **i.to_dict(),
+                    "category_label": L(f"icat_{i.category}"),
+                    # เติมช่องว่างรอยต่อ ไทย↔อังกฤษ ให้อ่านง่าย (เช่น 'Pearsonสูง' → 'Pearson สูง')
+                    "title_th": _space_thai_latin(i.title_th),
+                    "description_th": _space_thai_latin(i.description_th),
+                    "recommendation_th": _space_thai_latin(i.recommendation_th),
+                }
                 for i in self._insights.insights[:insight_limit]
             ]
             exec_summary = getattr(self._insights, "executive_summary_en", "") or ""
             if lang != "en" or not exec_summary.strip():
                 exec_summary = self._insights.executive_summary_th
+            exec_summary = _space_thai_latin(exec_summary)
             insight_section = {
                 "executive_summary": exec_summary,
                 "executive_summary_th": self._insights.executive_summary_th,
@@ -2368,6 +2503,8 @@ class ProfileReport:
                 "warning_count": self._insights.warning_count,
                 "info_count": self._insights.info_count,
                 "insights": insight_items,
+                # การ์ดยุบต่อคอลัมน์ จัดเรียงตามความรุนแรง (D1)
+                "cards": _group_insights_by_column(insight_items),
             }
 
         # cross-column insights (insight engine, v0.6) — แนบ label ของ pattern และกราฟ (v0.7)
@@ -2379,6 +2516,9 @@ class ProfileReport:
                     **c.to_dict(),
                     "pattern_label": L(f"pattern_{c.pattern}"),
                     "chart": self._insight_charts.get(i, ""),
+                    "title_th": _space_thai_latin(c.title_th),
+                    "description_th": _space_thai_latin(c.description_th),
+                    "recommendation_th": _space_thai_latin(c.recommendation_th),
                 }
                 for i, c in enumerate(self._insight_engine.cards)
             ]
@@ -2391,10 +2531,27 @@ class ProfileReport:
         cleaning_diff = [c.to_dict() for c in self._cleaning_diff]
         cleaning_diff_summary = None
         if self._cleaning_diff:
-            total_changed = sum(c.rows_affected for c in self._cleaning_diff)
+            # แยกหน่วยให้ชัด: การลบแถวอ้างอิงจากจำนวนแถวก่อน/หลังจริง (authoritative)
+            # ส่วน "ค่าที่แก้ไข" นับเฉพาะการแก้ระดับเซลล์ (ไม่รวมการลบแถวซ้ำ/แถวว่าง และ downcast)
+            rows_removed = max(self._rows_before_cleaning - self._rows_after_cleaning, 0)
+            values_changed = sum(
+                c.rows_affected
+                for c in self._cleaning_diff
+                if not _is_row_removing_op(c.operation, c.column)
+                and c.operation != "downcast_dtypes"
+            )
+            rows_removed_pct = round(
+                (rows_removed / self._rows_before_cleaning * 100.0)
+                if self._rows_before_cleaning
+                else 0.0,
+                2,
+            )
             top = max(self._cleaning_diff, key=lambda c: c.rows_affected)
             cleaning_diff_summary = {
-                "total_cells_changed": total_changed,
+                "values_changed": values_changed,
+                "rows_removed": rows_removed,
+                "rows_removed_pct": rows_removed_pct,
+                "high_row_loss": rows_removed_pct >= _HIGH_ROW_LOSS_PCT,
                 "most_impactful_op": top.operation,
                 "most_impactful_th": top.description_th,
                 "most_impactful_rows": top.rows_affected,

@@ -14,6 +14,7 @@ from thaieda.timeseries import (
     analyze_dataframe_timeseries,
     analyze_timeseries,
     detect_timeseries_columns,
+    is_panel_time_axis,
 )
 
 
@@ -211,6 +212,29 @@ def test_analyze_dataframe_timeseries_explicit_col():
     results = analyze_dataframe_timeseries(df, time_col="ts", engine="basic")
     assert "y" in results
     assert results["y"].trend_direction == "decreasing"
+
+
+# --------------------------------------------------------------- panel/snapshot gate
+def test_is_panel_time_axis_true_for_snapshot():
+    # 100 แถว แต่มีเพียง 3 ช่วงเวลา (panel/snapshot ของหลายสถานี) → ไม่ใช่ TS รายแถว
+    stamps = pd.to_datetime(["2026-06-28"] * 40 + ["2026-06-29"] * 40 + ["2026-06-30"] * 20)
+    assert is_panel_time_axis(stamps) is True
+
+
+def test_is_panel_time_axis_false_for_real_series():
+    stamps = pd.date_range("2024-01-01", periods=60, freq="D")
+    assert is_panel_time_axis(stamps) is False
+
+
+def test_analyze_dataframe_timeseries_skips_panel_data():
+    # ข้อมูล snapshot: หลายสถานี ณ เวลาเดียว → ไม่ควรวิเคราะห์เป็นอนุกรมเวลา
+    df = pd.DataFrame(
+        {
+            "date": ["2026-06-28"] * 30 + ["2026-06-29"] * 30,
+            "pm25": [float(i % 7) for i in range(60)],
+        }
+    )
+    assert analyze_dataframe_timeseries(df, engine="basic") == {}
 
 
 def test_result_dataclass_basic_shape():

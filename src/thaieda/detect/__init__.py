@@ -505,6 +505,48 @@ def _name_hints_id(series: pd.Series) -> bool:
     return any(kw in name for kw in _ID_LIKE_KEYWORDS)
 
 
+# ชื่อคอลัมน์พิกัดภูมิศาสตร์ (lat/long) — เป็นค่าพิกัด ไม่ใช่ "ค่าวัด" เชิงปริมาณ
+# จึงไม่ควรนำไปทำ skew/transform, outlier, correlation หรือ time series
+_GEO_NAME_RE = re.compile(
+    r"(^|[_\s])(lat|latitude|lon|lng|longitude|geolat|geolong)([_\s]|$)",
+    re.IGNORECASE,
+)
+# 'long' เป็นคำอังกฤษทั่วไป (long_term_debt, long_position) — รับเป็นพิกัดเฉพาะเมื่อเป็น
+# โทเคนเต็ม ('long' ทั้งชื่อ หรือเป็นส่วนท้าย เช่น 'geo_long') ไม่ใช่คำนำหน้า ('long_term')
+_GEO_LONG_RE = re.compile(r"(^|[_\s])long$", re.IGNORECASE)
+# identifier/รหัส แบบ snake_case (เช่น color_id, area_code) และ camelCase (เช่น stationID)
+_NONMEASURE_SUFFIX_RE = re.compile(r"(_id|_ids|_code|_codes)$", re.IGNORECASE)
+_NONMEASURE_CAMEL_RE = re.compile(r"[a-z0-9](ID|IDs|Code|Codes)$")
+
+
+def _name_hints_geo(series: pd.Series) -> bool:
+    """ชื่อคอลัมน์บอกใบ้ว่าเป็นพิกัดภูมิศาสตร์ (lat/long) หรือไม่."""
+    name = str(series.name) if series.name is not None else ""
+    return bool(_GEO_NAME_RE.search(name) or _GEO_LONG_RE.search(name))
+
+
+def is_nonmeasure_numeric(series: pd.Series, ctype: ColumnType | None = None) -> bool:
+    """คอลัมน์ตัวเลขนี้เป็น identifier/รหัส/พิกัด หรือไม่ (ไม่ใช่ "ค่าวัด" เชิงปริมาณ).
+
+    คอลัมน์เช่น id, *_id, *_code, zip/postal, lat/long แม้จะเก็บเป็นตัวเลข
+    แต่ค่าทางสถิติ (skew, outlier, correlation, trend ตามเวลา) ไม่มีความหมาย
+    จึงควรถูกข้ามจากการวิเคราะห์เชิงปริมาณเหล่านั้น เพื่อกัน insight/แนะนำที่ผิดบริบท
+    (เช่น "log-transform latitude", "zip_code มีแนวโน้มเพิ่มตามเวลา").
+    """
+    if ctype in (ColumnType.ID, ColumnType.PHONE_NUMBER):
+        return True
+    name = str(series.name) if series.name is not None else ""
+    if _name_hints_geo(series):
+        return True
+    if _NONMEASURE_SUFFIX_RE.search(name) or _NONMEASURE_CAMEL_RE.search(name):
+        return True
+    # ชื่อ identifier แบบคำเดี่ยว/มีตัวคั่น (id, zip, postal code) — ใช้เกณฑ์เดิม
+    name_l = name.lower()
+    if name_l == "id" or _name_is_id_or_fk(series):
+        return True
+    return any(kw in name_l for kw in _ID_LIKE_KEYWORDS)
+
+
 def _looks_like_id(series: pd.Series, non_null: pd.Series) -> bool:
     """เดาว่าเป็นคอลัมน์ตัวระบุ (ID/FK) เชิงตัวเลข.
 
@@ -944,6 +986,7 @@ __all__ = [
     "_detect_language",
     "detect_column_type",
     "detect_all",
+    "is_nonmeasure_numeric",
     "normalize_phone_number",
     "is_phone_number",
     "clean_phone_string",

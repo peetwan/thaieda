@@ -2,10 +2,10 @@
   "name": "registry_dirty",
   "rows_before_cleaning": 10,
   "rows_after_cleaning": 9,
-  "score_before": 56,
-  "score_after": 66,
+  "score_before": 0,
+  "score_after": 4,
   "grade_before": "F",
-  "grade_after": "D",
+  "grade_after": "F",
   "before_counts": {
     "critical_count": 1,
     "warning_count": 1,

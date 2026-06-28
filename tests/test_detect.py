@@ -9,6 +9,7 @@ import pytest
 from thaieda.detect import (
     ColumnType,
     detect_column_type,
+    is_nonmeasure_numeric,
     is_phone_number,
     is_thai_text,
     normalize_phone_number,
@@ -260,3 +261,20 @@ def test_is_phone_number_true():
 def test_is_phone_number_false():
     assert is_phone_number("12345") is False
     assert is_phone_number("hello") is False
+
+
+# ------------------------------------------------ geo coordinate name hints
+@pytest.mark.parametrize("name", ["long", "lat", "longitude", "latitude", "geo_long", "lng"])
+def test_is_nonmeasure_numeric_geo_coordinate_columns(name):
+    """คอลัมน์พิกัด (รวม 'long' ที่เป็นโทเคนเต็ม) ต้องถูกมองว่าไม่ใช่ค่าวัดเชิงปริมาณ"""
+    s = pd.Series([100.5 + i * 0.001 for i in range(60)], name=name)
+    assert is_nonmeasure_numeric(s) is True
+
+
+@pytest.mark.parametrize(
+    "name", ["long_term_debt", "long_position", "long_short_ratio", "belong", "duration_long_ms"]
+)
+def test_is_nonmeasure_numeric_keeps_long_prefixed_business_columns(name):
+    """'long' ที่เป็นคำนำหน้า/อยู่กลางคำ (long_term_debt ฯลฯ) ไม่ใช่พิกัด — ต้องคงเป็นค่าวัด"""
+    s = pd.Series(np.random.RandomState(0).normal(size=60), name=name)
+    assert is_nonmeasure_numeric(s) is False
