@@ -423,7 +423,7 @@ src/thaieda/
 python -m pytest tests/ -q
 ```
 
-ชุดทดสอบภายในระบบมีมากกว่า **990+ เคสทดสอบ (tests)** ครอบคลุมทั้งขั้นตอนการทำความสะอาดข้อมูล (Cleaning Pipeline), รูปแบบการค้นพบข้อค้นพบเชิงลึก (Insight Patterns), โหมดวิเคราะห์พิมพ์เขียว (Blueprint Mode), การตรวจจับข้อมูลรั่วไหล (Leakage Detection), การกันผลบวกลวง (false-positive regression tests) ตลอดจนการทดสอบกับชุดข้อมูลจริงที่มีจุดผิดพลาดในโครงสร้างใน `tests/fixtures/dirty_datasets/`
+ชุดทดสอบภายในระบบมีมากกว่า **1,000 เคสทดสอบ (tests)** ครอบคลุมทั้งขั้นตอนการทำความสะอาดข้อมูล (Cleaning Pipeline), รูปแบบการค้นพบข้อค้นพบเชิงลึก (Insight Patterns), โหมดวิเคราะห์พิมพ์เขียว (Blueprint Mode), การตรวจจับข้อมูลรั่วไหล (Leakage Detection), การกันผลบวกลวง (false-positive regression tests) ตลอดจนการทดสอบกับชุดข้อมูลจริงที่มีจุดผิดพลาดในโครงสร้างใน `tests/fixtures/dirty_datasets/`
 
 ---
 
