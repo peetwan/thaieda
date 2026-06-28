@@ -187,7 +187,13 @@ def create_wordcloud(
         font_path = get_thai_font_path()
 
     # ตัดคำก่อน แล้วต่อด้วยช่องว่างให้ wordcloud นับเป็นคำ
-    tokens = [t for t in tokenizer.tokenize(text) if t.strip()]
+    # ตัดทีละ segment ที่คั่นด้วยช่องว่าง (≈ ทีละเอกสาร) แทนการตัดสตริงก้อนเดียวที่ยาวมาก —
+    # tokenizer แบบ dictionary (เช่น newmm) ช้าแบบ superlinear กับสตริงยาว การป้อนสตริงที่ต่อ
+    # หลายพันเอกสารเข้าด้วยกันจึงช้ากว่าการตัดทีละ segment หลายสิบเท่า (ช่องว่างเป็นขอบเขตคำ
+    # อยู่แล้ว ผลลัพธ์ token จึงเทียบเท่ากัน)
+    tokens: list[str] = []
+    for segment in text.split():
+        tokens.extend(t for t in tokenizer.tokenize(segment) if t.strip())
     joined = " ".join(tokens) if tokens else text
 
     wc_kwargs = dict(
