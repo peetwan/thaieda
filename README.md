@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/og-image.png" alt="ThaiEDA — AutoEDA & Smart Data Cleaning for Thai Data" width="100%" />
+</p>
+
 # ThaiEDA
 
 > **AutoEDA และเครื่องมือทำความสะอาดข้อมูลอัจฉริยะสำหรับข้อมูลภาษาไทยและข้อมูลผสมภาษา**
