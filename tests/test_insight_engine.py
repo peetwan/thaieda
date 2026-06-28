@@ -392,3 +392,33 @@ def test_card_to_dict_fields():
         "evidence",
     ):
         assert key in d
+
+
+def test_outlier_insight_uses_robust_method_on_skewed_data():
+    """outlier insight ต้องเลือกวิธีตามการกระจาย (สอดคล้องกับโมดูล anomaly):
+
+    คอลัมน์เบ้มาก mean/std ถูกบิดด้วย outlier เอง → z-score ปกตินับ outlier ต่ำผิด
+    จึงต้องใช้วิธี robust (MAD/IQR) ส่วนคอลัมน์ใกล้ปกติยังใช้ z-score/GESD ตามเดิม
+    """
+    rng = np.random.default_rng(0)
+    n = 600
+    skewed = np.concatenate([rng.exponential(1.0, n - 30), rng.uniform(50, 100, 30)])
+    df = pd.DataFrame(
+        {
+            "grp": (["a", "b", "c"] * (n // 3))[:n],
+            "skewed_amount": skewed,
+        }
+    )
+    result = discover_insights(df, detect_all(df))
+    cards = [
+        c
+        for c in result.cards
+        if c.pattern == "outlier" and c.evidence.get("column") == "skewed_amount"
+    ]
+    assert cards, "ควรพบ outlier insight บนคอลัมน์เบ้"
+    method = cards[0].evidence["method"]
+    # เบ้มาก → ต้องเป็นวิธี robust ไม่ใช่ mean/std z-score ล้วน
+    assert method != "z_score"
+    assert "MAD" in method or "IQR" in method
+    # title ต้องไม่ผูกกับ z-score แบบ hardcode อีกต่อไป
+    assert "z-score ≥" not in (cards[0].title_th or "")

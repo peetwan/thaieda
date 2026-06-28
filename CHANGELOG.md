@@ -34,6 +34,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   การพิมพ์ผิด — ตัด false positive บนคอลัมน์ `model`/`manufacturer`/`type` (เครื่องบิน
   nycflights13) และ `Ticket` (titanic) ส่วน typo จริงของ label ข้อความ (เช่น
   `กรุงเทพ` vs `กรุงเทพฯ`, `San Francisco` vs `San Fransisco`) ยังถูกตรวจจับตามเดิม.
+- insight engine ตรวจ `outlier` ด้วยวิธีที่ "เลือกตามการกระจาย" (z-score / modified
+  z-score (MAD) / IQR / GESD) สอดคล้องกับโมดูล `anomaly` แทนที่จะใช้ mean/std z-score
+  อย่างเดียวเสมอ — บนคอลัมน์ที่เบ้มาก (เช่น `dep_delay`, `fare`, `price`, `Fare`) mean/std
+  ถูกบิดด้วย outlier เอง ทำให้ z-score นับ outlier ผิดอย่างมาก (เช่น flights `dep_delay`
+  z-score≈7.9k เทียบกับวิธี robust ≈65k; titanic `Fare` 20 เทียบกับ 160) ตอนนี้รายงานจำนวน
+  และวิธีที่ใช้ตรงกับการกระจายจริง ส่วนคอลัมน์ใกล้ปกติยังใช้ z-score/GESD ตามเดิม และหัวข้อ
+  insight แสดงชื่อวิธี + ความเบ้แทนการ hardcode "(z-score ≥ 3.0)".
 - การจำแนกประเภทคอลัมน์รู้จัก "ดัชนีแถว/ตัวนับเชิงตัวเลข" (row index / serial) ที่ชื่อ
   ตามแบบแผน (`rownames`, `index`, `idx`, `#`, `seq`, `serial`, ...) และค่าเป็นลำดับ
   จำนวนเต็มที่เติมช่วงเกือบครบ(complete enumeration) ว่าเป็น `ID` ไม่ใช่ `NUMERIC` —
@@ -52,6 +59,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   พร้อมยืนยันว่า typo จริงของข้อความยังถูกตรวจจับ
 - เพิ่ม regression test การจำแนกดัชนีแถว/serial (`rownames`, `#`) เป็น `ID` พร้อมยืนยันว่า
   ตัวแปรลำดับที่ใช้ correlation (`x`), ค่าวัดครบช่วง, และ float ที่ลงตัว ยังเป็น `NUMERIC`
+- เพิ่ม regression test ว่า outlier insight บนคอลัมน์เบ้ใช้วิธี robust (MAD/IQR) ไม่ใช่
+  mean/std z-score และหัวข้อไม่ hardcode "z-score ≥"
 
 ## [2.2.0] - 2026-06-27
 
