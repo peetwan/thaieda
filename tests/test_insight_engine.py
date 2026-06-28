@@ -36,6 +36,23 @@ def test_outstanding_value():
     assert "A" in outstanding[0].description_th
 
 
+def test_near_constant_breakdown_is_ignored():
+    """คอลัมน์ breakdown ที่แทบคงที่ (ค่าเดียวครอบ >97% ของแถว) ต้องไม่ผลิต insight.
+
+    การ groupby ด้วยคอลัมน์แบบนี้ได้กลุ่มเด่นแบบ tautology (เช่น 999 vs 1 แถว)
+    ซึ่งไม่ใช่ข้อค้นพบที่มีความหมาย — เคยทำให้เกิด business insight "โดดเด่น ... เท่า"
+    ปลอมบนคอลัมน์ timestamp ที่แทบคงที่ (created_at/updated_at).
+    """
+    df = pd.DataFrame(
+        {
+            "near_const": ["2019-08-09"] * 999 + ["2025-11-15"],
+            "value": list(range(1000)),
+        }
+    )
+    result = discover_insights(df, detect_all(df))
+    assert not any(c.breakdown == "near_const" for c in result.cards)
+
+
 # ----------------------------------------------------------------------------
 # 2. Attribution (share > 50%)
 # ----------------------------------------------------------------------------

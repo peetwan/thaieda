@@ -104,6 +104,9 @@ _STRONG_CORR = 0.5
 
 # จำนวนค่าขั้นต่ำที่ทำให้สถิติการกระจาย (skew/kurtosis/bimodal) มีความหมาย
 _MIN_DISTRIBUTION_SAMPLE = 20
+# จำนวนค่าไม่ซ้ำขั้นต่ำที่ทำให้การตรวจ bimodal (อิงฮิสโทแกรม) มีความหมาย — คอลัมน์ที่
+# มีค่าไม่ซ้ำน้อยกว่านี้มักเป็นรหัส/หมวดที่เข้ารหัสเป็นเลข ไม่ใช่การแจกแจงต่อเนื่อง
+_BIMODAL_MIN_DISTINCT = 10
 # เกณฑ์ความเบ้ (|skewness|) ที่ถือว่า "เบ้มาก" — ควรพิจารณา log/transform
 _SKEW_THRESHOLD = 1.0
 # เกณฑ์ความโด่งส่วนเกิน (excess kurtosis) ที่ถือว่า "หางหนัก" — มี outlier มาก
@@ -692,6 +695,11 @@ def _is_bimodal(values: np.ndarray) -> bool:
     แล้วตรวจว่าระหว่างจุดยอดสองอันที่สูงสุดมี "หุบเขา" ที่ลึกพอหรือไม่ (กัน false positive)
     """
     if values.size < 2 * _MIN_DISTRIBUTION_SAMPLE:
+        return False
+    # bimodal เป็นคุณสมบัติของการแจกแจงแบบต่อเนื่อง — คอลัมน์ตัวเลขที่มีค่าไม่ซ้ำน้อย
+    # (เช่น รหัส/หมวดที่เข้ารหัสเป็นเลข Pclass=1/2/3, cylinders) จะมี bin ว่างคั่นระหว่าง
+    # ค่าจำนวนเต็มจนเกิด "หุบเขา" ปลอม — ข้ามเพื่อกัน false positive
+    if np.unique(values).size < _BIMODAL_MIN_DISTINCT:
         return False
     hist, _ = np.histogram(values, bins=20)
     if hist.max() == 0:

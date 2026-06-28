@@ -54,6 +54,9 @@ _OUTLIER_Z_THRESHOLD = 3.0
 # cardinality ของ breakdown ที่ใช้ได้ (น้อยไป=ไม่มีอะไรให้เทียบ, มากไป=ไม่ใช่หมวดหมู่)
 _MIN_BREAKDOWN_CARD = 2
 _MAX_BREAKDOWN_CARD = 50
+# breakdown ที่ค่าเดียวครอบเกือบทั้งชุด (>97%) = แทบคงที่ ไม่มีอำนาจจำแนกกลุ่ม —
+# การ groupby จะได้กลุ่มเด่นแบบ tautology (เช่น 929 vs 1 แถว) → ตัดทิ้งทุก pattern
+_MAX_BREAKDOWN_DOMINANCE = 0.97
 # เกณฑ์ Kendall-τ (ขนาด) ที่ถือว่ามีแนวโน้มชัด
 _TREND_TAU_MIN = 0.3
 # จำนวน bucket ขั้นต่ำสำหรับตรวจ trend (ต้องมีจุดพอจะเห็นทิศทาง)
@@ -341,6 +344,20 @@ _NON_BREAKDOWN_TYPES = {
 }
 
 
+def _is_near_constant_key(key: pd.Series) -> bool:
+    """True ถ้า breakdown key มีค่าเดียวครอบ >97% ของแถวที่ไม่ว่าง (แทบคงที่).
+
+    การ groupby ด้วยคอลัมน์แบบนี้ให้กลุ่มเด่นแบบ tautology (เช่น 929 vs 1 แถว)
+    ซึ่งไม่ใช่ข้อค้นพบเชิงธุรกิจที่มีความหมาย จึงควรตัด breakdown นี้ทิ้ง
+    """
+    valid = key.dropna()
+    n = int(len(valid))
+    if n == 0:
+        return True
+    top = int(valid.value_counts().iloc[0])
+    return top / n > _MAX_BREAKDOWN_DOMINANCE
+
+
 def _select_breakdowns(
     df: pd.DataFrame, column_types: dict[str, ColumnType], notes: list[str]
 ) -> list[_Breakdown]:
@@ -355,7 +372,7 @@ def _select_breakdowns(
             continue
         if ctype == ColumnType.DATETIME:
             bucketed = _bucket_datetime(df[col])
-            if bucketed is not None:
+            if bucketed is not None and not _is_near_constant_key(bucketed[0]):
                 out.append(
                     _Breakdown(col, "datetime", ordinal=True, freq_th=_FREQ_TH.get(bucketed[1], ""))
                 )
@@ -364,7 +381,9 @@ def _select_breakdowns(
             continue
         if ctype == ColumnType.CATEGORICAL:
             nunique = int(df[col].dropna().nunique())
-            if _MIN_BREAKDOWN_CARD <= nunique <= _MAX_BREAKDOWN_CARD:
+            if _MIN_BREAKDOWN_CARD <= nunique <= _MAX_BREAKDOWN_CARD and not _is_near_constant_key(
+                df[col]
+            ):
                 out.append(_Breakdown(col, "categorical", ordinal=False))
     # จัดลำดับ: breakdown ที่มีหลายกลุ่มขึ้นก่อน (boolean = 2 ค่า ลงหลัง) — ให้ categorical จริงได้โอกาสก่อน
     out.sort(key=lambda b: _breakdown_cardinality(df, b), reverse=True)

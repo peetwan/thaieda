@@ -15,9 +15,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   จะไม่ถูก flag — ตัด warning เท็จออกจากชุดข้อมูลจริง (mpg, ที่อยู่ไทย ฯลฯ) ส่วนการยืดเสียง
   จริง (ซ้ำ 4+ ตัว), ไม้ยมก `ๆ` ซ้ำ และหัวเราะ `555` ยังถูกตรวจจับตามเดิม สอดคล้องกับ
   `fix_repeated_chars` ที่ยอมให้ซ้ำได้ถึง `max_repeat=3`.
+- insight การกระจาย `bimodal` ไม่ flag คอลัมน์ตัวเลขที่เป็นรหัส/หมวดซึ่งมีค่าไม่ซ้ำน้อย
+  (เช่น `Pclass`=1/2/3, `cylinders`) อีกต่อไป — bin ว่างคั่นระหว่างค่าจำนวนเต็มทำให้เกิด
+  "หุบเขา" ปลอมจน heuristic เข้าใจผิดว่าเป็น 2 จุดยอด ตอนนี้ต้องมีค่าไม่ซ้ำ ≥10 จึงตรวจ
+  ส่วนการแจกแจงต่อเนื่องที่ bimodal จริง (เช่น `displacement`, `flipper_length_mm`)
+  ยังถูกตรวจจับตามเดิม.
+- cross-column insight engine ไม่ผลิตข้อค้นพบบนคอลัมน์ breakdown ที่ "แทบคงที่"
+  (ค่าเดียวครอบ >97% ของแถว เช่น timestamp `created_at`/`updated_at` ที่มีค่าเดียวกันเกือบ
+  ทั้งชุด) อีกต่อไป — เดิมให้ business insight แบบ tautology ("กลุ่ม X โดดเด่น ... 929 เท่า"
+  จากกลุ่ม 929 แถวเทียบกับ 1 แถว) ซึ่งไม่มีความหมายเชิงวิเคราะห์.
 
 ### Tests
 - เพิ่ม regression test กัน false positive ของ repeated-char spam บนตัวเลข/ขอบเขตคำ
+- เพิ่ม regression test กัน bimodal false positive บนคอลัมน์รหัส/หมวด (Pclass/cylinders)
+- เพิ่ม regression test กัน insight บน breakdown ที่แทบคงที่ (near-constant)
 
 ## [2.2.0] - 2026-06-27
 
