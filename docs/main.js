@@ -35,7 +35,7 @@
 
   // ---- Copy buttons ----
   var copyTargets = {
-    cli: "pip install thaieda\nthaieda data.csv -o report.html",
+    cli: "pip install thaieda\nthaieda data.csv -o report.html\nthaieda data.csv --target clicked\nthaieda data.csv --explore\nthaieda data.csv --columns",
     py: 'import thaieda\n\nresult = thaieda.run("data.csv", target_column="clicked")\nprint(result.quality_score)\nresult.to_html("report.html")',
     cta: "pip install thaieda"
   };
@@ -44,10 +44,9 @@
       var key = btn.getAttribute("data-copy");
       var text = copyTargets[key] || "";
       var done = function () {
-        var prev = btn.textContent;
         btn.textContent = "Copied!";
         btn.classList.add("copied");
-        setTimeout(function () { btn.textContent = prev; btn.classList.remove("copied"); }, 1500);
+        setTimeout(function () { btn.textContent = "Copy"; btn.classList.remove("copied"); }, 1500);
       };
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text).then(done).catch(done);
