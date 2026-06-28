@@ -13,6 +13,7 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-yellow.svg)](https://opensource.org/licenses/Apache-2.0)
 [![CI](https://github.com/peetwan/thaieda/actions/workflows/ci.yml/badge.svg)](https://github.com/peetwan/thaieda/actions/workflows/ci.yml)
 [![Code Style: ruff](https://img.shields.io/badge/code%20style-ruff-261230.svg)](https://docs.astral.sh/ruff/)
+[![Website](https://img.shields.io/badge/Website-peetwan.github.io%2Fthaieda-0a0a0b.svg)](https://peetwan.github.io/thaieda/)
 
 **ThaiEDA** ออกแบบมาเพื่อตอบคำถามเดียว: *"ชุดข้อมูลนี้มีความน่าเชื่อถือเพียงใด และควรเริ่มต้นสำรวจจุดไหนก่อน?"*
 
@@ -20,6 +21,7 @@
 
 ThaiEDA answers one simple question: **"Can I trust this dataset, and what should I explore first?"** It treats Thai-specific data issues — Buddhist Era dates, Thai numerals, zero-width spaces, encoding errors, local phone formats, and chart fonts — as normal problems to fix automatically.
 
+- **Website:** [peetwan.github.io/thaieda](https://peetwan.github.io/thaieda/)
 - **Repository:** [github.com/peetwan/thaieda](https://github.com/peetwan/thaieda)
 - **PyPI:** [pypi.org/project/thaieda](https://pypi.org/project/thaieda/)
 - **License:** Apache-2.0
