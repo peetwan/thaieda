@@ -34,7 +34,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `plan_cleaning` (smart cleaning) converts text columns to string once and
   reuses them across all detectors, instead of re-running
   `select_dtypes` + `astype(str)` six times per call.
->>>>>>> origin/devin/1782610195-clean-pipeline-optimizations
 
 ## [2.2.0] - 2026-06-27
 
