@@ -41,6 +41,23 @@ def test_dedup_does_not_merge_bool_and_int() -> None:
     assert out["mixed"].tolist()[-1] is True
 
 
+def test_dedup_mixed_native_and_object_key_path() -> None:
+    # คอลัมน์ตัวเลข (hash แบบ native) + คอลัมน์ object (tokenize ทีละค่า) ต้องทำงานร่วมกัน
+    # ได้ถูกต้อง: แถวที่ทุกคอลัมน์เท่ากันจริงเท่านั้นที่เป็นแถวซ้ำ
+    df = pd.DataFrame(
+        {
+            "num": [1, 1, 1, 2],
+            "obj": ["1", 1, "1", "1"],  # str "1" vs int 1 ต้องไม่ถือว่าซ้ำกัน
+        }
+    )
+
+    out, result = remove_duplicate_rows(df)
+
+    # แถว 0 และ 2 เหมือนกันทุกคอลัมน์ (num=1, obj="1") → ซ้ำ 1 แถว; แถว 1 (obj=int 1) ต่างชนิด
+    assert result.rows_affected == 1
+    assert len(out) == 3
+
+
 def test_dedup_preserves_all_nan_rows() -> None:
     df = pd.DataFrame({"a": [np.nan] * 100})
 

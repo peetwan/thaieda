@@ -459,25 +459,6 @@ def _should_skip_repeated_char_fix(
     return False
 
 
-def _vec_fix_repeated(
-    s: pd.Series,
-    max_repeat: int,
-    skip_id_like: bool = True,
-    column_name: str | None = None,
-    column_type: str | None = None,
-) -> pd.Series:
-    """รุ่นเวกเตอร์ของ _fix_repeated_str — ยุบไม้ยมกซ้ำ แล้วยุบอักขระซ้ำเกิน max_repeat."""
-    return s.map(
-        lambda val: _fix_repeated_str(
-            val,
-            max_repeat,
-            skip_id_like=skip_id_like,
-            column_name=column_name,
-            column_type=column_type,
-        )
-    )
-
-
 def fix_repeated_chars(
     series: pd.Series,
     max_repeat: int = 3,
@@ -488,6 +469,10 @@ def fix_repeated_chars(
     if max_repeat < 1:
         raise ValueError("max_repeat must be >= 1")
     col_name = str(series.name) if series.name is not None else ""
+    # ใช้ func path (memoized) ไม่ส่ง vectorized: _fix_repeated_str มีค่าใช้จ่ายต่อค่าสูง
+    # (split + _id_likeness_score ต่อ token) แต่เป็นฟังก์ชันบริสุทธิ์ของค่าเซลล์ จึง memoize
+    # ตามค่าที่ไม่ซ้ำได้ — เร็วขึ้นมากบนคอลัมน์ข้อความที่มีค่าซ้ำเยอะ (รุ่น vectorized เดิม
+    # เป็นแค่ s.map(...) ที่วน Python ทุกแถวโดยไม่ memoize จึงช้ากว่า)
     return _apply_str_transform(
         series,
         lambda s: _fix_repeated_str(
@@ -499,13 +484,6 @@ def fix_repeated_chars(
         ),
         operation="fix_repeated_chars",
         description_th=f"ลดการซ้ำอักขระที่เกิน {max_repeat} ตัว (เช่น 55555 → 555, ๆๆๆ → ๆ)",
-        vectorized=lambda s: _vec_fix_repeated(
-            s,
-            max_repeat,
-            skip_id_like=skip_id_like,
-            column_name=col_name,
-            column_type=column_type,
-        ),
     )
 
 
@@ -1193,9 +1171,17 @@ def remove_duplicate_rows(df: pd.DataFrame) -> tuple[pd.DataFrame, CleaningResul
             description_th="ไม่พบแถวซ้ำ",
         )
 
+    # คอลัมน์ที่มี dtype ชัดเจน (numeric/bool/datetime/category) ค่าในคอลัมน์เป็นชนิดเดียวกัน
+    # อยู่แล้ว จึงปล่อยให้ pandas hash ระดับ C ได้เลย — เร็วกว่ามาก
+    # เฉพาะคอลัมน์ object (อาจปนชนิด เช่น int 1 / str "1" / True) เท่านั้นที่ต้อง tokenize
+    # ทีละค่าเพื่อแยกชนิดให้ถูกต้อง
     key_frame = pd.DataFrame(index=df.index)
     for idx in range(df.shape[1]):
-        key_frame[idx] = df.iloc[:, idx].astype(object).map(_typed_dedup_token)
+        col = df.iloc[:, idx]
+        if pd.api.types.is_object_dtype(col):
+            key_frame[idx] = col.map(_typed_dedup_token)
+        else:
+            key_frame[idx] = col
 
     # แถวที่ว่างทั้งแถวอาจเป็น record ที่ต่างกันแต่ข้อมูลยังไม่สมบูรณ์ จึงไม่ยุบรวมกัน
     all_missing_rows = df.isna().all(axis=1)

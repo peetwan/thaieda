@@ -21,6 +21,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the underlying `torch` DLL fails to load) instead of crashing, matching the
   documented "degrade gracefully" behavior.
 
+### Performance
+- `fix_repeated_chars` now uses the memoized per-unique-value path instead of a
+  non-memoized vectorized `Series.map`. `_fix_repeated_str` is a pure, relatively
+  expensive function (token split + `_id_likeness_score` per token); memoizing by
+  unique value makes it ~15× faster on duplicate-heavy text columns
+  (e.g. 200k rows / few unique values: 3.3s → 0.2s) with identical output.
+- `remove_duplicate_rows` only applies the per-cell typed-token map to `object`
+  columns (where mixed Python types can occur); numeric/bool/datetime/category
+  columns are hashed natively by pandas. This preserves the exact type-aware
+  dedup semantics while running ~20× faster on numeric-heavy frames.
+- `plan_cleaning` (smart cleaning) converts text columns to string once and
+  reuses them across all detectors, instead of re-running
+  `select_dtypes` + `astype(str)` six times per call.
+>>>>>>> origin/devin/1782610195-clean-pipeline-optimizations
+
 ## [2.2.0] - 2026-06-27
 
 ### Changed
