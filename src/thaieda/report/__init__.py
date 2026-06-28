@@ -276,6 +276,24 @@ _DATA_TYPE_GUIDANCE: dict[str, dict[str, Any]] = {
 }
 
 
+# ขอบเขตอักษรไทย (U+0E00–U+0E7F) — ใช้เติมช่องว่างรอบคำอังกฤษที่ติดกับอักษรไทย
+_THAI_CHAR_RANGE = "\u0e00-\u0e7f"
+_THAI_THEN_LATIN_RE = re.compile(rf"([{_THAI_CHAR_RANGE}])([A-Za-z])")
+_LATIN_THEN_THAI_RE = re.compile(rf"([A-Za-z])([{_THAI_CHAR_RANGE}])")
+
+
+def _space_thai_latin(text: str) -> str:
+    """เติมช่องว่างตรงรอยต่อระหว่างอักษรไทยกับคำอังกฤษ เพื่อให้อ่านง่าย.
+
+    ไทยไม่เว้นวรรคระหว่างคำไทยด้วยกัน แต่ตามแบบแผนการพิมพ์ ควรมีช่องว่างคั่น
+    เมื่อมีคำ/โทเคนอังกฤษแทรก เช่น 'สหสัมพันธ์ Pearsonสูง' → 'สหสัมพันธ์ Pearson สูง'
+    (แตะเฉพาะรอยต่อ ไทย↔ตัวอักษรละติน — ไม่ยุ่งกับตัวเลข เครื่องหมาย หรือชื่อคอลัมน์ในเครื่องหมายคำพูด)
+    """
+    out = _THAI_THEN_LATIN_RE.sub(r"\1 \2", str(text or ""))
+    out = _LATIN_THEN_THAI_RE.sub(r"\1 \2", out)
+    return out
+
+
 def _plain_language(text: str) -> str:
     """แทนศัพท์เทคนิคในข้อความด้วยคำอธิบายภาษาคนอ่าน โดยคงคำเดิมไว้ในวงเล็บ."""
     out = str(text or "")
@@ -290,7 +308,7 @@ def _plain_language(text: str) -> str:
             return f"{_p} ({original})"
 
         out = pattern.sub(repl, out)
-    return out
+    return _space_thai_latin(out)
 
 
 def _detect_data_type(
@@ -2371,12 +2389,20 @@ class ProfileReport:
         if self._insights is not None:
             insight_limit = 12 if self.report_mode == "blueprint" else len(self._insights.insights)
             insight_items = [
-                {**i.to_dict(), "category_label": L(f"icat_{i.category}")}
+                {
+                    **i.to_dict(),
+                    "category_label": L(f"icat_{i.category}"),
+                    # เติมช่องว่างรอยต่อ ไทย↔อังกฤษ ให้อ่านง่าย (เช่น 'Pearsonสูง' → 'Pearson สูง')
+                    "title_th": _space_thai_latin(i.title_th),
+                    "description_th": _space_thai_latin(i.description_th),
+                    "recommendation_th": _space_thai_latin(i.recommendation_th),
+                }
                 for i in self._insights.insights[:insight_limit]
             ]
             exec_summary = getattr(self._insights, "executive_summary_en", "") or ""
             if lang != "en" or not exec_summary.strip():
                 exec_summary = self._insights.executive_summary_th
+            exec_summary = _space_thai_latin(exec_summary)
             insight_section = {
                 "executive_summary": exec_summary,
                 "executive_summary_th": self._insights.executive_summary_th,
@@ -2398,6 +2424,9 @@ class ProfileReport:
                     **c.to_dict(),
                     "pattern_label": L(f"pattern_{c.pattern}"),
                     "chart": self._insight_charts.get(i, ""),
+                    "title_th": _space_thai_latin(c.title_th),
+                    "description_th": _space_thai_latin(c.description_th),
+                    "recommendation_th": _space_thai_latin(c.recommendation_th),
                 }
                 for i, c in enumerate(self._insight_engine.cards)
             ]

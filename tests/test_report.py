@@ -7,7 +7,19 @@ import json
 import pandas as pd
 import pytest
 
-from thaieda.report import ProfileReport, profile
+from thaieda.report import ProfileReport, _space_thai_latin, profile
+
+
+def test_space_thai_latin_inserts_space_around_english():
+    # คำอังกฤษที่ติดอักษรไทยต้องถูกคั่นด้วยช่องว่างทั้งสองด้าน
+    assert _space_thai_latin("สหสัมพันธ์ Pearsonสูง") == "สหสัมพันธ์ Pearson สูง"
+    assert _space_thai_latin("ค่าPM25") == "ค่า PM25"
+
+
+def test_space_thai_latin_leaves_numbers_and_quoted_names():
+    # ตัวเลข/เครื่องหมาย และชื่อคอลัมน์ในเครื่องหมายคำพูด ต้องไม่ถูกแตะ
+    assert _space_thai_latin("r=0.95, n=1,234") == "r=0.95, n=1,234"
+    assert _space_thai_latin("คอลัมน์ 'col_a' ดี") == "คอลัมน์ 'col_a' ดี"
 
 
 @pytest.fixture
