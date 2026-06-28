@@ -141,11 +141,19 @@ def get_tokenizer(engine: str = "auto") -> Tokenizer:
         ValueError: เมื่อระบุชื่อ engine ที่ไม่รู้จัก.
     """
     if engine in _AUTO_MODES:
+        last_error: Exception | None = None
         for candidate in _AUTO_MODES[engine]:
-            if _engine_available(candidate):
+            if not _engine_available(candidate):
+                continue
+            try:
                 return _FACTORIES[candidate]()
-        # ไม่มี engine เลย — fail loudly ตามหลักการ
-        raise ImportError(_NO_ENGINE_MESSAGE)
+            except (ImportError, OSError) as exc:
+                # ติดตั้งไว้แต่ import/โหลดไม่ได้ (เช่น attacut ที่ torch DLL พัง) —
+                # degrade อย่างสุภาพไป engine ตัวถัดไป แทนที่จะล้มทั้ง pipeline
+                last_error = exc
+                continue
+        # ไม่มี engine ที่ใช้งานได้เลย — fail loudly ตามหลักการ
+        raise ImportError(_NO_ENGINE_MESSAGE) from last_error
 
     if engine not in _FACTORIES:
         raise ValueError(

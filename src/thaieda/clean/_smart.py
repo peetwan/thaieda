@@ -63,61 +63,27 @@ def plan_cleaning(df: pd.DataFrame) -> CleaningPlan:
     """
     plan = CleaningPlan()
 
-    # 1. encoding — ตรวจ mojibake (replacement char, TIS-620 artifacts)
-    encoding_count = _count_mojibake(df)
-    if encoding_count > 0:
-        plan.actions.append("encoding")
-        plan.details["encoding"] = encoding_count
-    else:
-        plan.skipped.append("encoding")
+    # แปลงคอลัมน์ข้อความเป็น str เพียงครั้งเดียว แล้วใช้ซ้ำในทุก check ด้านล่าง —
+    # เดิมแต่ละ _count_* เรียก select_dtypes + .dropna().astype(str) ของตัวเอง ทำให้
+    # คอลัมน์ข้อความเดียวกันถูกแปลงซ้ำ 6 รอบบน DataFrame ที่มีคอลัมน์ข้อความเยอะ
+    text_series = _text_str_series(df)
 
-    # 2. zwspace — ตรวจ zero-width space (\u200b, \u200c, \u200d, \ufeff)
-    zw_count = _count_zwspace(df)
-    if zw_count > 0:
-        plan.actions.append("zwspace")
-        plan.details["zwspace"] = zw_count
-    else:
-        plan.skipped.append("zwspace")
-
-    # 3. numerals — ตรวจเลขไทย ๐-๙ ในคอลัมน์ object
-    numeral_count = _count_thai_numerals(df)
-    if numeral_count > 0:
-        plan.actions.append("numerals")
-        plan.details["numerals"] = numeral_count
-    else:
-        plan.skipped.append("numerals")
-
-    # 4. whitespace — ตรวจ whitespace ซ้ำหรือหน้าหลัง
-    ws_count = _count_extra_whitespace(df)
-    if ws_count > 0:
-        plan.actions.append("whitespace")
-        plan.details["whitespace"] = ws_count
-    else:
-        plan.skipped.append("whitespace")
-
-    # 5. buddhist_era — ตรวจปี พ.ศ. ในคอลัมน์ที่ดูเหมือนวันที่
-    be_count = _count_buddhist_era(df)
-    if be_count > 0:
-        plan.actions.append("buddhist_era")
-        plan.details["buddhist_era"] = be_count
-    else:
-        plan.skipped.append("buddhist_era")
-
-    # 6. duplicates — ตรวจแถวซ้ำ
-    dup_count = int(df.duplicated().sum())
-    if dup_count > 0:
-        plan.actions.append("duplicates")
-        plan.details["duplicates"] = dup_count
-    else:
-        plan.skipped.append("duplicates")
-
-    # 7. missing placeholders — ตรวจ placeholder values
-    placeholder_count = _count_placeholders(df)
-    if placeholder_count > 0:
-        plan.actions.append("missing")
-        plan.details["missing"] = placeholder_count
-    else:
-        plan.skipped.append("missing")
+    # (action, จำนวนที่ตรวจพบ) — เรียงลำดับเดิมไว้เพื่อความเสถียรของรายงาน
+    checks: list[tuple[str, int]] = [
+        ("encoding", _count_mojibake(text_series)),
+        ("zwspace", _count_zwspace(text_series)),
+        ("numerals", _count_thai_numerals(text_series)),
+        ("whitespace", _count_extra_whitespace(text_series)),
+        ("buddhist_era", _count_buddhist_era(text_series)),
+        ("duplicates", int(df.duplicated().sum())),
+        ("missing", _count_placeholders(text_series)),
+    ]
+    for action, count in checks:
+        if count > 0:
+            plan.actions.append(action)
+            plan.details[action] = count
+        else:
+            plan.skipped.append(action)
 
     return plan
 
@@ -133,38 +99,31 @@ _MOJIBAKE_PATTERNS = ["Ã", "Â¸", "Ã©", "Ã§", "â€", "\ufffd"]
 _MOJIBAKE_PATTERN = "|".join(re.escape(p) for p in _MOJIBAKE_PATTERNS)
 
 
-def _count_zwspace(df: pd.DataFrame) -> int:
+def _text_str_series(df: pd.DataFrame) -> list[pd.Series]:
+    """คืนรายการ Series ของคอลัมน์ข้อความ (object/string) ที่ dropna + astype(str) แล้ว.
+
+    แปลงครั้งเดียวเพื่อให้ทุก _count_* ใช้ซ้ำได้ — เลี่ยงการ astype(str) คอลัมน์เดิมหลายรอบ.
+    """
+    text_cols = df.select_dtypes(include=["object", "string"])
+    return [text_cols[col].dropna().astype(str) for col in text_cols.columns]
+
+
+def _count_zwspace(series_list: list[pd.Series]) -> int:
     """นับจำนวน zero-width space ในคอลัมน์ object (vectorized)."""
-    text_cols = df.select_dtypes(include=["object", "string"])
-    if text_cols.empty:
-        return 0
-    count = 0
-    for col in text_cols.columns:
-        s = text_cols[col].dropna().astype(str)
-        count += s.str.contains(_ZWSPACE_PATTERN, regex=True, na=False).sum()
-    return int(count)
+    return int(
+        sum(s.str.contains(_ZWSPACE_PATTERN, regex=True, na=False).sum() for s in series_list)
+    )
 
 
-def _count_thai_numerals(df: pd.DataFrame) -> int:
+def _count_thai_numerals(series_list: list[pd.Series]) -> int:
     """นับจำนวนเซลล์ที่มีเลขไทย ๐-๙ (vectorized)."""
-    text_cols = df.select_dtypes(include=["object", "string"])
-    if text_cols.empty:
-        return 0
-    count = 0
-    for col in text_cols.columns:
-        s = text_cols[col].dropna().astype(str)
-        count += s.str.contains(r"[๐-๙]", regex=True, na=False).sum()
-    return int(count)
+    return int(sum(s.str.contains(r"[๐-๙]", regex=True, na=False).sum() for s in series_list))
 
 
-def _count_extra_whitespace(df: pd.DataFrame) -> int:
+def _count_extra_whitespace(series_list: list[pd.Series]) -> int:
     """นับเซลล์ที่มี whitespace ซ้ำหรือหน้าหลัง (vectorized)."""
-    text_cols = df.select_dtypes(include=["object", "string"])
-    if text_cols.empty:
-        return 0
     count = 0
-    for col in text_cols.columns:
-        s = text_cols[col].dropna().astype(str)
+    for s in series_list:
         # whitespace ซ้ำ (2 ขึ้นไป)
         count += s.str.contains(r"  +", regex=True, na=False).sum()
         # หน้าหรือหลัง whitespace
@@ -172,41 +131,24 @@ def _count_extra_whitespace(df: pd.DataFrame) -> int:
     return int(count)
 
 
-def _count_mojibake(df: pd.DataFrame) -> int:
+def _count_mojibake(series_list: list[pd.Series]) -> int:
     """นับเซลล์ที่มี mojibake (replacement char, Ã, Â¸, เป็นต้น) (vectorized)."""
-    text_cols = df.select_dtypes(include=["object", "string"])
-    if text_cols.empty:
-        return 0
-    count = 0
-    for col in text_cols.columns:
-        s = text_cols[col].dropna().astype(str)
-        count += s.str.contains(_MOJIBAKE_PATTERN, regex=True, na=False).sum()
-    return int(count)
+    return int(
+        sum(s.str.contains(_MOJIBAKE_PATTERN, regex=True, na=False).sum() for s in series_list)
+    )
 
 
-def _count_buddhist_era(df: pd.DataFrame) -> int:
+def _count_buddhist_era(series_list: list[pd.Series]) -> int:
     """นับเซลล์ที่มีปี พ.ศ. (> 2400) ในคอลัมน์ object (vectorized)."""
-    text_cols = df.select_dtypes(include=["object", "string"])
-    if text_cols.empty:
-        return 0
-    count = 0
-    for col in text_cols.columns:
-        s = text_cols[col].dropna().astype(str)
-        # ปี พ.ศ. มักอยู่ในช่วง 2400-2699
-        count += s.str.contains(r"\b2[4-6]\d{2}\b", regex=True, na=False).sum()
-    return int(count)
+    # ปี พ.ศ. มักอยู่ในช่วง 2400-2699
+    return int(
+        sum(s.str.contains(r"\b2[4-6]\d{2}\b", regex=True, na=False).sum() for s in series_list)
+    )
 
 
-def _count_placeholders(df: pd.DataFrame) -> int:
+def _count_placeholders(series_list: list[pd.Series]) -> int:
     """นับเซลล์ที่มี placeholder values (vectorized)."""
-    text_cols = df.select_dtypes(include=["object", "string"])
-    if text_cols.empty:
-        return 0
-    count = 0
-    for col in text_cols.columns:
-        s = text_cols[col].dropna().astype(str)
-        count += s.isin(_PLACEHOLDERS).sum()
-    return int(count)
+    return int(sum(s.isin(_PLACEHOLDERS).sum() for s in series_list))
 
 
 __all__ = ["CleaningPlan", "plan_cleaning"]

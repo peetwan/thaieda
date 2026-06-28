@@ -129,6 +129,19 @@ def test_ner_available_returns_false_without_pythainlp(monkeypatch):
     assert ner_available() is False
 
 
+def test_ner_available_returns_false_when_corpus_missing(monkeypatch):
+    # backend ตดตงแตโหลด corpus ไมได (offline / ยงไมดาวนโหลด) -> ตองคน False ไมใช crash
+    import thaieda.ner as ner_mod
+
+    monkeypatch.setattr(ner_mod, "_NER_CACHE", {})
+
+    def _raise_corpus_missing(engine=None):
+        raise FileNotFoundError("corpus-not-found name='thainer-1.4'")
+
+    monkeypatch.setattr(ner_mod, "_get_ner", _raise_corpus_missing)
+    assert ner_available() is False
+
+
 # --------------------------------------------------------- real extraction (needs backend)
 @requires_ner
 def test_extract_entities_real():
