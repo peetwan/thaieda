@@ -508,9 +508,12 @@ def _name_hints_id(series: pd.Series) -> bool:
 # ชื่อคอลัมน์พิกัดภูมิศาสตร์ (lat/long) — เป็นค่าพิกัด ไม่ใช่ "ค่าวัด" เชิงปริมาณ
 # จึงไม่ควรนำไปทำ skew/transform, outlier, correlation หรือ time series
 _GEO_NAME_RE = re.compile(
-    r"(^|[_\s])(lat|latitude|lon|lng|long|longitude|geolat|geolong)([_\s]|$)",
+    r"(^|[_\s])(lat|latitude|lon|lng|longitude|geolat|geolong)([_\s]|$)",
     re.IGNORECASE,
 )
+# 'long' เป็นคำอังกฤษทั่วไป (long_term_debt, long_position) — รับเป็นพิกัดเฉพาะเมื่อเป็น
+# โทเคนเต็ม ('long' ทั้งชื่อ หรือเป็นส่วนท้าย เช่น 'geo_long') ไม่ใช่คำนำหน้า ('long_term')
+_GEO_LONG_RE = re.compile(r"(^|[_\s])long$", re.IGNORECASE)
 # identifier/รหัส แบบ snake_case (เช่น color_id, area_code) และ camelCase (เช่น stationID)
 _NONMEASURE_SUFFIX_RE = re.compile(r"(_id|_ids|_code|_codes)$", re.IGNORECASE)
 _NONMEASURE_CAMEL_RE = re.compile(r"[a-z0-9](ID|IDs|Code|Codes)$")
@@ -519,7 +522,7 @@ _NONMEASURE_CAMEL_RE = re.compile(r"[a-z0-9](ID|IDs|Code|Codes)$")
 def _name_hints_geo(series: pd.Series) -> bool:
     """ชื่อคอลัมน์บอกใบ้ว่าเป็นพิกัดภูมิศาสตร์ (lat/long) หรือไม่."""
     name = str(series.name) if series.name is not None else ""
-    return bool(_GEO_NAME_RE.search(name))
+    return bool(_GEO_NAME_RE.search(name) or _GEO_LONG_RE.search(name))
 
 
 def is_nonmeasure_numeric(series: pd.Series, ctype: ColumnType | None = None) -> bool:
