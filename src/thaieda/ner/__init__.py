@@ -154,8 +154,9 @@ def _get_ner(engine: str | None = None) -> tuple[object, str]:
             return _NER_CACHE[name], name
         try:
             obj = NER(engine=name)
-        except ImportError as exc:
-            # backend ของ engine นี้ไม่ได้ติดตั้ง — ลองตัวถัดไป
+        except (ImportError, OSError) as exc:
+            # backend ไม่ได้ติดตั้ง (ImportError) หรือโหลด/ดาวน์โหลด corpus ไม่ได้
+            # (FileNotFoundError/OSError เช่น ไม่มี thainer corpus หรือออฟไลน์) — ลองตัวถัดไป
             last_error = exc
             continue
         _NER_CACHE[name] = obj
@@ -168,10 +169,12 @@ def ner_available() -> bool:
     """คืน True ถ้ามี NER engine ที่ใช้งานได้ (pythainlp + backend) — ใช้ตัดสินใจในรายงาน.
 
     หมายเหตุ: การเรียกครั้งแรกอาจโหลด/ดาวน์โหลดโมเดล NER (ถ้ามี backend ติดตั้ง)
+    เป็น capability check ล้วน ๆ — ความล้มเหลวใด ๆ (ไม่มี backend, corpus หาย, ออฟไลน์)
+    ต้องคืน False ไม่ใช่โยน exception ขึ้นไปล้มทั้ง pipeline
     """
     try:
         _get_ner()
-    except ImportError:
+    except Exception:  # noqa: BLE001 — guard ล้วน ๆ: ทุกความล้มเหลว = ไม่พร้อมใช้งาน
         return False
     return True
 
