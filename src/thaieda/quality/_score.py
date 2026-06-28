@@ -3,17 +3,19 @@
 ให้คะแนนเดียวที่สรุปคุณภาพของ dataset โดยรวม พร้อมเกรด (A/B/C/D/F)
 และรายละเอียดการให้คะแนน (breakdown) เพื่อใช้ในรายงานและ UI
 
-หลักการให้คะแนน:
+หลักการให้คะแนน (v2.3):
   - ถ่วงน้ำหนักตาม severity: critical ×3, warning ×1, info ×0.2
-  - normalize ตามขนาด dataset (จำนวนคอลัมน์ × sqrt(จำนวนแถว))
-    เพื่อให้ dataset ใหญ่ยอมรับปัญหาได้มากกว่า dataset เล็ก
-  - คะแนน 100 = ไม่มีปัญหาเลย, 0 = มีปัญหารุนแรงมาก
+  - **ถ่วงน้ำหนักตามขนาดของปัญหา (magnitude)**: penalty ของแต่ละ issue
+    = น้ำหนัก severity × สัดส่วนที่กระทบ (percentage / 100)
+    → คอลัมน์ว่าง 100% หรือค่าหาย 77% หักคะแนนมากกว่าปัญหาเล็ก ๆ มาก
+  - normalize ด้วย "จำนวนคอลัมน์" เท่านั้น (ไม่หารด้วย sqrt(จำนวนแถว) อีกต่อไป)
+    เพราะวัดปัญหาเป็นสัดส่วน (intensive) แล้ว — dataset ใหญ่จึงไม่ได้คะแนนสูงฟรี ๆ
+  - คะแนน 100 = ไม่มีปัญหาเลย, 0 = มีปัญหารุนแรงครอบคลุมทั้ง dataset
   - เกรด: A ≥90, B ≥80, C ≥70, D ≥60, F <60
 """
 
 from __future__ import annotations
 
-import math
 from typing import TypedDict
 
 from thaieda.quality import QualityIssue
@@ -80,10 +82,9 @@ def compute_quality_score(
 ) -> QualityScoreResult:
     """คำนวณคะแนนคุณภาพข้อมูลแบบ composite (0–100).
 
-    ใช้น้ำหนัก severity (critical ×3, warning ×1, info ×0.2)
-    ปรับ normalize ตามจำนวนคอลัมน์และจำนวนแถว เพื่อให้ dataset ใหญ่
-    ยอมรับปัญหาได้มากกว่า dataset เล็ก
-    คืน 100 ถ้าไม่มีปัญหา และเข้าใกล้ 0 ถ้ามีปัญหารุนแรงมาก
+    ใช้น้ำหนัก severity (critical ×3, warning ×1, info ×0.2) คูณด้วยสัดส่วน
+    ที่ปัญหากระทบ (percentage/100) แล้ว normalize ด้วยจำนวนคอลัมน์
+    คืน 100 ถ้าไม่มีปัญหา และเข้าใกล้ 0 ถ้ามีปัญหารุนแรงครอบคลุมทั้ง dataset
 
     Args:
         quality_issues: รายการ QualityIssue ที่พบจาก ``run_quality_checks``
@@ -106,41 +107,39 @@ def compute_quality_score(
             f"n_columns และ n_rows ต้องไม่ติดลบ (ได้ n_columns={n_columns}, n_rows={n_rows})"
         )
 
-    # นับตาม severity พร้อมตรวจสอบประเภทและค่า severity
+    # นับตาม severity + รวม penalty ที่ถ่วงน้ำหนักด้วยขนาดของปัญหา (magnitude)
     critical_count = 0
     warning_count = 0
     info_count = 0
+    weighted_count = 0.0  # ผลรวมน้ำหนัก severity (นับ issue — ใช้รายงานใน breakdown)
+    magnitude_penalty = 0.0  # ผลรวม penalty = น้ำหนัก × สัดส่วนที่กระทบ (ใช้คิดคะแนน)
     for issue in quality_issues:
         if not isinstance(issue, QualityIssue):
             raise TypeError(
                 f"สมาชิกใน quality_issues ต้องเป็น QualityIssue ไม่ใช่ {type(issue).__name__}"
             )
         sev = issue.severity
+        if sev not in _SEVERITY_WEIGHTS:
+            raise ValueError(f"severity ไม่รู้จัก: {sev!r} (ต้องเป็น critical / warning / info)")
         if sev == "critical":
             critical_count += 1
         elif sev == "warning":
             warning_count += 1
-        elif sev == "info":
-            info_count += 1
         else:
-            raise ValueError(f"severity ไม่รู้จัก: {sev!r} (ต้องเป็น critical / warning / info)")
+            info_count += 1
+        weight = _SEVERITY_WEIGHTS[sev]
+        weighted_count += weight
+        # สัดส่วนที่กระทบ 0–1 (clamp percentage ให้อยู่ในช่วง [0,100])
+        impact = min(max(issue.percentage, 0.0), 100.0) / 100.0
+        magnitude_penalty += weight * impact
 
-    # คะแนนถ่วงน้ำหนัก (ก่อน normalize)
-    weighted_score = (
-        critical_count * _SEVERITY_WEIGHTS["critical"]
-        + warning_count * _SEVERITY_WEIGHTS["warning"]
-        + info_count * _SEVERITY_WEIGHTS["info"]
-    )
+    weighted_score = weighted_count
 
-    # คำนวณคะแนน normalized
-    if weighted_score == 0.0:
+    # คำนวณคะแนน normalized — หารด้วยจำนวนคอลัมน์เท่านั้น (penalty เป็นสัดส่วนแล้ว)
+    if magnitude_penalty == 0.0:
         score = 100
     else:
-        # capacity แปรผันตามขนาด dataset:
-        #   จำนวนคอลัมน์ × sqrt(จำนวนแถว)
-        # dataset ใหญ่ยอมรับปัญหาได้มากกว่า → penalty น้อยกว่า
-        capacity = max(n_columns, 1) * max(math.sqrt(max(n_rows, 0)), 1.0)
-        ratio = weighted_score / capacity
+        ratio = magnitude_penalty / max(n_columns, 1)
         # score = 100 × (1 − ratio) แต่ไม่ต่ำกว่า 0 และไม่เกิน 100
         raw = 100.0 * max(0.0, 1.0 - ratio)
         score = int(round(raw))

@@ -57,8 +57,8 @@ def test_all_critical_low_score():
     """ปัญหา critical ทั้งหมด → คะแนนต่ำ, เกรด F."""
     issues = [_issue("critical") for _ in range(5)]
     result = compute_quality_score(issues, n_columns=2, n_rows=10)
-    # weighted = 15, capacity = 2*sqrt(10) ≈ 6.32, ratio ≈ 2.37 → score 0
-    assert result["score"] == 0
+    # magnitude penalty = 5 × 3 × (10/100) = 1.5, ratio = 1.5/2 = 0.75 → score 25
+    assert result["score"] < 60
     assert result["grade"] == "F"
     assert result["breakdown"]["critical_count"] == 5
     assert result["breakdown"]["weighted_score"] == 15.0
@@ -72,7 +72,7 @@ def test_mixed_issues_middle_score():
         + [_issue("info") for _ in range(5)]
     )
     result = compute_quality_score(issues, n_columns=5, n_rows=100)
-    # weighted = 6 + 3 + 1.0 = 10.0, capacity = 5*10 = 50, ratio = 0.2 → score 80
+    # penalty = (2×3 + 3×1 + 5×0.2) × (10/100) = 1.0, ratio = 1.0/5 = 0.2 → score 80
     assert 60 <= result["score"] <= 90
     assert result["breakdown"]["critical_count"] == 2
     assert result["breakdown"]["warning_count"] == 3
@@ -83,7 +83,7 @@ def test_info_only_high_score():
     """ปัญหา info อย่างเดียว → คะแนนใกล้เคียง 100."""
     issues = [_issue("info") for _ in range(5)]
     result = compute_quality_score(issues, n_columns=10, n_rows=100)
-    # weighted = 1.0, capacity = 10*10 = 100, ratio = 0.01 → score 99
+    # penalty = 5×0.2×(10/100) = 0.1, ratio = 0.1/10 = 0.01 → score 99
     assert result["score"] >= 90
     assert result["grade"] == "A"
 
@@ -112,21 +112,21 @@ def test_zero_columns_no_issues():
 
 
 def test_zero_columns_with_issues():
-    """ไม่มีคอลัมน์ แต่มีปัญหา → คะแนน 0, เกรด F (input ไม่สอดคล้องกัน)."""
+    """ไม่มีคอลัมน์ แต่มีปัญหา → คะแนนถูกหัก (capacity คอลัมน์ขั้นต่ำ = 1)."""
     issues = [_issue("critical")]
     result = compute_quality_score(issues, n_columns=0, n_rows=0)
-    # weighted = 3, capacity = 1, ratio = 3 → score 0
-    assert result["score"] == 0
-    assert result["grade"] == "F"
+    # magnitude penalty = 3 × (10/100) = 0.3, ratio = 0.3/max(0,1) = 0.3 → score 70
+    assert result["score"] == 70
+    assert result["grade"] == "C"
 
 
 def test_zero_rows_with_issues():
-    """ไม่มีแถว แต่มีปัญหา → penalty เต็มที่ (capacity ต่ำ)."""
+    """คะแนนเป็นสัดส่วน (intensive) — ไม่ขึ้นกับจำนวนแถว."""
     issues = [_issue("critical")]
     result = compute_quality_score(issues, n_columns=5, n_rows=0)
-    # weighted = 3, capacity = 5*1 = 5, ratio = 0.6 → score 40
-    assert result["score"] == 40
-    assert result["grade"] == "F"
+    # magnitude penalty = 3 × (10/100) = 0.3, ratio = 0.3/5 = 0.06 → score 94
+    assert result["score"] == 94
+    assert result["grade"] == "A"
 
 
 def test_negative_columns_raises_value_error():

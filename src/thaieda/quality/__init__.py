@@ -741,7 +741,7 @@ _YEAR_TYPES = {ColumnType.NUMERIC, ColumnType.DATETIME}
 
 
 def check_missing_values(series: pd.Series, column: str) -> QualityIssue | None:
-    """รายงานค่าว่างแยกตามคอลัมน์เมื่อเกิน threshold: info >1%, warning >5%."""
+    """รายงานค่าว่างแยกตามคอลัมน์ตามขนาดปัญหา: info >1%, warning >5%, critical ≥50%."""
     total = len(series)
     if total == 0:
         return None
@@ -749,7 +749,15 @@ def check_missing_values(series: pd.Series, column: str) -> QualityIssue | None:
     percentage = _pct(count, total)
     if percentage < 1.0:
         return None
-    severity = "warning" if percentage > 5.0 else "info"
+    # คอลัมน์ว่างทั้งหมดให้ check_schema_hints (empty_column) รายงานแทน — กันนับซ้ำ
+    if count >= total:
+        return None
+    if percentage >= 50.0:
+        severity = "critical"
+    elif percentage > 5.0:
+        severity = "warning"
+    else:
+        severity = "info"
     return QualityIssue(
         check_name="missing_values",
         severity=severity,
@@ -856,7 +864,7 @@ def check_schema_hints(
     if series.isna().all():
         return QualityIssue(
             check_name="empty_column",
-            severity="info",
+            severity="critical",
             column=column,
             count=total,
             percentage=100.0,

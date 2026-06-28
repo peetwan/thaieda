@@ -2,8 +2,8 @@
   "name": "mixed_locale",
   "rows_before_cleaning": 4,
   "rows_after_cleaning": 4,
-  "score_before": 80,
-  "score_after": 97,
+  "score_before": 85,
+  "score_after": 93,
   "grade_before": "B",
   "grade_after": "A",
   "before_counts": {
