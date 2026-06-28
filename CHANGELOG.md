@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Performance
+- `create_wordcloud` ตัดคำทีละ segment (คั่นด้วยช่องว่าง ≈ ทีละเอกสาร) แทนการตัดสตริง
+  ก้อนเดียวที่ต่อหลายพันเอกสารเข้าด้วยกัน — tokenizer แบบ dictionary (newmm) ช้าแบบ
+  superlinear กับสตริงยาว ทำให้การสร้างกราฟ word cloud เป็นคอขวดหลักของ pipeline บน
+  คอลัมน์ข้อความเยอะ ๆ บน Wisesight (24k แถวข้อความไทย) `thaieda.run(make_charts=True)`
+  เร็วขึ้นจาก ~68s เหลือ ~14s (ตัวฟังก์ชัน word cloud เอง ~63s → ~0.7s, ~89×) โดยผลลัพธ์
+  token เทียบเท่าเดิม (ช่องว่างเป็นขอบเขตคำอยู่แล้ว)
+
+### Tests
+- เพิ่ม regression test ยืนยันว่า `create_wordcloud` ไม่ตัดคำสตริงก้อนเดียวที่ยาวมาก
+
 ## [2.2.0] - 2026-06-27
 
 ### Changed
