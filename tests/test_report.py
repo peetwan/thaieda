@@ -9,10 +9,47 @@ import pytest
 
 from thaieda.report import (
     ProfileReport,
+    _group_insights_by_column,
     _is_row_removing_op,
     _space_thai_latin,
     profile,
 )
+
+
+def test_group_insights_by_column_merges_and_orders_by_severity():
+    items = [
+        {
+            "severity": "info",
+            "description_th": "คอลัมน์ 'age': มีค่าผิดปกติเล็กน้อย",
+            "title_th": "outlier",
+            "category_label": "การกระจาย",
+        },
+        {
+            "severity": "critical",
+            "description_th": "คอลัมน์ 'age': ค่าหาย 60%",
+            "title_th": "missing",
+            "category_label": "ความสมบูรณ์",
+        },
+        {
+            "severity": "warning",
+            "description_th": "ภาพรวมชุดข้อมูลมีคอลัมน์ซ้ำ",
+            "title_th": "dup",
+            "category_label": "โครงสร้าง",
+        },
+    ]
+    cards = _group_insights_by_column(items)
+    # การ์ด 'age' รวม 2 ข้อค้นพบ และจัดเรียง critical ก่อน
+    age_card = next(c for c in cards if c["column"] == "age")
+    assert len(age_card["findings"]) == 2
+    assert age_card["severity"] == "critical"
+    assert age_card["findings"][0]["severity"] == "critical"
+    # คำนำ "คอลัมน์ 'age':" ถูกตัดออกจาก description
+    assert not age_card["findings"][0]["description_th"].startswith("คอลัมน์ 'age'")
+    # การ์ดวิกฤตอยู่ก่อนการ์ด warning (จัดเรียงตามความรุนแรง)
+    assert cards[0]["severity"] == "critical"
+    # ข้อค้นพบที่ไม่ผูกคอลัมน์เป็นการ์ดเดี่ยว
+    standalone = [c for c in cards if c["column"] == ""]
+    assert len(standalone) == 1
 
 
 def test_is_row_removing_op_distinguishes_rows_from_cells():

@@ -24,6 +24,22 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
       <div class="so-what"><span class="lbl">{{ L('so_what') }}</span> {{ an.suggestion_th }}</div>
       <details><summary class="ng">{{ L('show_details') }}</summary><div class="desc-en">{{ an.description }} — {{ an.suggestion }}</div></details>
     </div>
+{% endmacro %}{% macro render_insight_card(card, sev_icons, L) %}
+    <div class="issue insight {{ card.severity }}">
+      <div>
+        <span class="sev {{ card.severity }}">{{ sev_icons[card.severity] }} {{ L('severity_' ~ card.severity) }}</span>
+        {% if card.column %}<b>{{ card.column }}</b>{% endif %}
+        <span class="badge cat">{{ card.category_label }}</span>
+        {% if card.findings|length > 1 %}<span class="badge">{{ card.findings|length }} {{ L('findings') }}</span>{% endif %}
+      </div>
+      {% for f in card.findings %}
+      <div class="finding{% if not loop.first %} sub{% endif %}">
+        <div class="finding-head"><span class="sev {{ f.severity }}">{{ sev_icons[f.severity] }}</span> <b>{{ f.title_th }}</b></div>
+        <div class="desc-th">{{ f.description_th }}</div>
+        <div class="so-what"><span class="lbl">{{ L('so_what') }}</span> {{ f.recommendation_th }}</div>
+      </div>
+      {% endfor %}
+    </div>
 {% endmacro %}<!DOCTYPE html>
 <html lang="{{ lang }}">
 <head>
@@ -323,6 +339,8 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
   .examples .ex { display: block; margin: 5px 0; font-family: "Cascadia Code", Consolas, monospace; }
 
   .insight-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .finding.sub { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border); }
+  .finding-head { margin-bottom: 4px; }
   .watch-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; margin: 18px 0; }
   .watch { padding: 18px; background: var(--panel); border: 1px solid var(--border); border-left: 5px solid var(--warning); border-radius: 16px; box-shadow: var(--shadow); }
   .watch.critical { border-left-color: var(--critical); }
@@ -706,37 +724,22 @@ REPORT_TEMPLATE = r"""{% macro render_issue(iss, sev_icons, L) %}
   {% if insight_section.total_generated and insight_section.total_generated > insight_section.insights|length %}
   <div class="note">{{ L('showing_top_of') }} {{ insight_section.insights|length }} {{ L('of_total') }} {{ insight_section.total_generated }} {{ L('auto_insights') }}</div>
   {% endif %}
+  {# D1: การ์ดยุบต่อคอลัมน์ · D2: คงการ์ด critical/warning ไว้เสมอ แล้วยุบ info ลงกล่อง "ดูเพิ่ม" #}
+  {% set primary_cards = insight_section.cards | rejectattr('severity', 'equalto', 'info') | list %}
+  {% set info_cards = insight_section.cards | selectattr('severity', 'equalto', 'info') | list %}
   <div class="insight-grid">
-    {% for ins in insight_section.insights[:20] %}
-    <div class="issue insight {{ ins.severity }}">
-      <div>
-        <span class="sev {{ ins.severity }}">{{ sev_icons[ins.severity] }} {{ L('severity_' ~ ins.severity) }}</span>
-        <span class="badge cat">{{ ins.category_label }}</span>
-        <b>{{ ins.title_th }}</b>
-      </div>
-      <div class="desc-th">{{ ins.description_th }}</div>
-      <div class="so-what"><span class="lbl">{{ L('so_what') }}</span> {{ ins.recommendation_th }}</div>
-    </div>
-    {% endfor %}
+    {% for card in primary_cards %}{{ render_insight_card(card, sev_icons, L) }}{% endfor %}
+    {% if not primary_cards %}{% for card in info_cards[:12] %}{{ render_insight_card(card, sev_icons, L) }}{% endfor %}{% endif %}
   </div>
-  {% if insight_section.insights|length > 20 %}
+  {% if primary_cards and info_cards %}
   <details class="block">
-    <summary class="ng">{{ L('show_more_insights') }} <b>({{ insight_section.insights|length - 20 }})</b></summary>
-    <div class="body">
-      <div class="insight-grid">
-        {% for ins in insight_section.insights[20:] %}
-        <div class="issue insight {{ ins.severity }}">
-          <div>
-            <span class="sev {{ ins.severity }}">{{ sev_icons[ins.severity] }} {{ L('severity_' ~ ins.severity) }}</span>
-            <span class="badge cat">{{ ins.category_label }}</span>
-            <b>{{ ins.title_th }}</b>
-          </div>
-          <div class="desc-th">{{ ins.description_th }}</div>
-          <div class="so-what"><span class="lbl">{{ L('so_what') }}</span> {{ ins.recommendation_th }}</div>
-        </div>
-        {% endfor %}
-      </div>
-    </div>
+    <summary class="ng">{{ L('show_more_insights') }} <b>({{ info_cards|length }} {{ L('severity_info') }})</b></summary>
+    <div class="body"><div class="insight-grid">{% for card in info_cards %}{{ render_insight_card(card, sev_icons, L) }}{% endfor %}</div></div>
+  </details>
+  {% elif not primary_cards and info_cards|length > 12 %}
+  <details class="block">
+    <summary class="ng">{{ L('show_more_insights') }} <b>({{ info_cards|length - 12 }} {{ L('severity_info') }})</b></summary>
+    <div class="body"><div class="insight-grid">{% for card in info_cards[12:] %}{{ render_insight_card(card, sev_icons, L) }}{% endfor %}</div></div>
   </details>
   {% endif %}
   {% endif %}

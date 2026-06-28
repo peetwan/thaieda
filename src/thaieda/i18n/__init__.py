@@ -337,6 +337,7 @@ LABELS: dict[str, dict[str, str]] = {
     "show_details": {"en": "Show details", "th": "ดูเพิ่มเติม"},
     "hide_details": {"en": "Hide details", "th": "ซ่อน"},
     "show_more_insights": {"en": "Show more insights", "th": "แสดงข้อค้นพบเพิ่มเติม"},
+    "findings": {"en": "findings", "th": "ข้อค้นพบ"},
     "showing_top_of": {"en": "showing top", "th": "แสดง"},
     "of_total": {"en": "of", "th": "จาก"},
     "no_priority_actions": {

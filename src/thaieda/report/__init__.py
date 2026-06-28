@@ -30,7 +30,12 @@ from thaieda.detect import (
     is_nonmeasure_numeric,
 )
 from thaieda.i18n import TECHNICAL_TO_PLAIN, label
-from thaieda.insight import Insight, InsightSummary, generate_insights
+from thaieda.insight import (
+    Insight,
+    InsightSummary,
+    _column_from_description,
+    generate_insights,
+)
 from thaieda.insight_engine import InsightEngineResult, discover_insights
 from thaieda.insight_engine._leakage import detect_target_leakage
 from thaieda.ner import NERResult, extract_entities, ner_available
@@ -278,6 +283,70 @@ _DATA_TYPE_GUIDANCE: dict[str, dict[str, Any]] = {
 
 # สัดส่วนแถวที่ถูกลบซึ่งถือว่า "สูงผิดปกติ" → เด้งเตือนในสรุปการทำความสะอาด
 _HIGH_ROW_LOSS_PCT = 50.0
+
+# ลำดับความรุนแรง (น้อย = สำคัญกว่า) ใช้จัดเรียง insight/การ์ด
+_SEVERITY_RANK = {"critical": 0, "warning": 1, "info": 2}
+
+
+def _group_insights_by_column(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """รวมข้อค้นพบที่อ้างถึงคอลัมน์เดียวกันเป็น "การ์ดเดียว" จัดเรียงตามความรุนแรง (D1).
+
+    แต่ละคอลัมน์อาจมีหลายข้อค้นพบ (เบ้, ค่าผิดปกติ, ML flag, ค่าว่าง) — เดิมแสดงเป็นการ์ด
+    แยกหลายใบจนรก ที่นี่จึงยุบเป็นการ์ดเดียวต่อคอลัมน์ พร้อมรายการข้อค้นพบย่อย (findings)
+    เรียงวิกฤตก่อน. ข้อค้นพบที่ไม่ผูกกับคอลัมน์ (เช่น ภาพรวมชุดข้อมูล) เป็นการ์ดเดี่ยว.
+    การ์ดถูกจัดเรียงตามความรุนแรงสูงสุดภายในการ์ด โดยคงลำดับเดิมเมื่อเสมอกัน (stable).
+    """
+    order: list[str] = []
+    groups: dict[str, list[dict[str, Any]]] = {}
+    standalone: list[dict[str, Any]] = []
+    for it in items:
+        col = _column_from_description(it.get("description_th", ""))
+        if not col:
+            standalone.append(it)
+            continue
+        if col not in groups:
+            groups[col] = []
+            order.append(col)
+        groups[col].append(it)
+
+    def sev_rank(it: dict[str, Any]) -> int:
+        return _SEVERITY_RANK.get(it.get("severity", "info"), 3)
+
+    def strip_col_prefix(text: str, col: str) -> str:
+        # ตัดคำนำ "คอลัมน์ 'X':" ออก เพราะหัวการ์ดแสดงชื่อคอลัมน์อยู่แล้ว
+        for prefix in (f"คอลัมน์ '{col}': ", f"คอลัมน์ '{col}' ", f"คอลัมน์ '{col}'"):
+            if text.startswith(prefix):
+                return text[len(prefix) :].lstrip()
+        return text
+
+    cards: list[dict[str, Any]] = []
+    for col in order:
+        findings = sorted(groups[col], key=sev_rank)
+        findings = [
+            {**f, "description_th": strip_col_prefix(f.get("description_th", ""), col)}
+            for f in findings
+        ]
+        top = findings[0]
+        cards.append(
+            {
+                "column": col,
+                "severity": top["severity"],
+                "category_label": top.get("category_label", ""),
+                "findings": findings,
+            }
+        )
+    for it in standalone:
+        cards.append(
+            {
+                "column": "",
+                "severity": it["severity"],
+                "category_label": it.get("category_label", ""),
+                "findings": [it],
+            }
+        )
+    # จัดเรียงการ์ดตามความรุนแรงสูงสุด (stable: คงลำดับเดิมเมื่อเท่ากัน)
+    cards.sort(key=lambda c: _SEVERITY_RANK.get(c["severity"], 3))
+    return cards
 
 
 def _is_row_removing_op(op: str, column: str) -> bool:
@@ -2429,6 +2498,8 @@ class ProfileReport:
                 "warning_count": self._insights.warning_count,
                 "info_count": self._insights.info_count,
                 "insights": insight_items,
+                # การ์ดยุบต่อคอลัมน์ จัดเรียงตามความรุนแรง (D1)
+                "cards": _group_insights_by_column(insight_items),
             }
 
         # cross-column insights (insight engine, v0.6) — แนบ label ของ pattern และกราฟ (v0.7)
