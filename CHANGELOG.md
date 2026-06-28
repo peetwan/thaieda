@@ -34,6 +34,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   การพิมพ์ผิด — ตัด false positive บนคอลัมน์ `model`/`manufacturer`/`type` (เครื่องบิน
   nycflights13) และ `Ticket` (titanic) ส่วน typo จริงของ label ข้อความ (เช่น
   `กรุงเทพ` vs `กรุงเทพฯ`, `San Francisco` vs `San Fransisco`) ยังถูกตรวจจับตามเดิม.
+- การจำแนกประเภทคอลัมน์รู้จัก "ดัชนีแถว/ตัวนับเชิงตัวเลข" (row index / serial) ที่ชื่อ
+  ตามแบบแผน (`rownames`, `index`, `idx`, `#`, `seq`, `serial`, ...) และค่าเป็นลำดับ
+  จำนวนเต็มที่เติมช่วงเกือบครบ(complete enumeration) ว่าเป็น `ID` ไม่ใช่ `NUMERIC` —
+  เดิมคอลัมน์อย่าง `rownames` (1..N) หรือ Pokédex `#` (1..721) ถูกนำไปคำนวณสถิติ/
+  correlation/เทียบกลุ่ม ทำให้เกิดข้อค้นพบไร้ความหมาย (เช่น "ผลรวม `rownames` ตามกลุ่ม",
+  "`#` สหสัมพันธ์กับ `Generation` r=0.98" ซึ่งเป็น tautology). การจำแนกต้องครบทั้ง
+  *ชื่อดัชนี* และ *ค่าที่เป็นลำดับจริง* เพื่อกัน false positive ฝั่งกลับ — ตัวแปรลำดับ
+  ที่ใช้วิเคราะห์จริง (เช่น `x = arange(n)` สำหรับ correlation/แนวโน้ม), ค่าวัดที่บังเอิญ
+  ครบช่วงแต่ซ้ำเยอะ (เดือน/นาที), และ float ที่ลงตัว ยังคงเป็น `NUMERIC` ตามเดิม.
 
 ### Tests
 - เพิ่ม regression test กัน false positive ของ repeated-char spam บนตัวเลข/ขอบเขตคำ
@@ -41,6 +50,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - เพิ่ม regression test กัน insight บน breakdown ที่แทบคงที่ (near-constant)
 - เพิ่ม regression test กัน fuzzy-duplicate false positive บนรหัส/รุ่นและวลีต่างคำ
   พร้อมยืนยันว่า typo จริงของข้อความยังถูกตรวจจับ
+- เพิ่ม regression test การจำแนกดัชนีแถว/serial (`rownames`, `#`) เป็น `ID` พร้อมยืนยันว่า
+  ตัวแปรลำดับที่ใช้ correlation (`x`), ค่าวัดครบช่วง, และ float ที่ลงตัว ยังเป็น `NUMERIC`
 
 ## [2.2.0] - 2026-06-27
 

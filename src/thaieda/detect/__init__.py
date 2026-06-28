@@ -517,9 +517,78 @@ def _looks_like_id(series: pd.Series, non_null: pd.Series) -> bool:
     n = len(non_null)
     if n < 5:
         return False
-    if non_null.nunique() / n < 0.95:
+    if non_null.nunique() / n >= 0.95 and _name_hints_id(series):
+        return True
+    # ดัชนีแถว/ตัวนับ: ชื่อเป็นชื่อดัชนีตามแบบแผน (rownames, index, '#', seq, ...)
+    # *และ* ค่ายืนยันว่าเป็นลำดับ/ครบช่วงจริง — ต้องครบทั้งสองเพื่อกัน false positive
+    # บนค่าวัดที่บังเอิญเป็นลำดับ (เช่น x = arange(n) ที่ใช้ทำ correlation)
+    return _name_is_index_like(series) and _looks_like_numeric_serial(non_null)
+
+
+# เกณฑ์ระบุ "คอลัมน์ตัวเลขที่เป็นตัวระบุลำดับ/ดัชนีแถว" จากค่า (ไม่พึ่งชื่อคอลัมน์)
+_MIN_SERIAL_ROWS = 50  # ต้องมีแถวพอจึงมั่นใจว่าเป็นตัวระบุ ไม่ใช่ค่าวัดช่วงสั้น
+_MIN_SERIAL_DISTINCT = 50  # ค่าไม่ซ้ำต้องมากพอ กันคอลัมน์หมวด/ช่วงเล็ก (เดือน 1–12, นาที 0–59)
+_SERIAL_CONTIGUITY = 0.97  # ค่าไม่ซ้ำต้องเติมช่วง [min..max] เกือบครบ (complete enumeration)
+_SERIAL_UNIQUE_RATIO = 0.5  # และส่วนใหญ่ต้องไม่ซ้ำ กันค่าวัดที่บังเอิญครบช่วงแต่ซ้ำเยอะ
+
+
+# ชื่อคอลัมน์ตามแบบแผนที่สื่อถึง "ดัชนีแถว/ลำดับ" (match แบบตรงตัวเพื่อกัน substring เช่น
+# 'no' ใน 'income'/'notes') — เป็นชื่อตามขนบทั่วไป ไม่ผูกกับชุดข้อมูลใดชุดหนึ่ง
+_INDEX_NAME_HINTS = frozenset(
+    {
+        "rownames",
+        "rowname",
+        "rownum",
+        "row_number",
+        "row_id",
+        "rowid",
+        "index",
+        "idx",
+        "#",
+        "seq",
+        "seqno",
+        "serial",
+        "sn",
+        "s/n",
+    }
+)
+
+
+def _name_is_index_like(series: pd.Series) -> bool:
+    """ชื่อคอลัมน์เป็นชื่อ 'ดัชนีแถว/ลำดับ' ตามแบบแผน (rownames, index, '#', seq, ...)."""
+    name = str(series.name).strip().lower() if series.name is not None else ""
+    return name in _INDEX_NAME_HINTS
+
+
+def _looks_like_numeric_serial(non_null: pd.Series) -> bool:
+    """เดาว่าคอลัมน์ตัวเลขเป็น 'ตัวระบุลำดับ/ดัชนีแถว' (serial/row index) จาก *ค่า* ไม่ใช่ชื่อ.
+
+    จับเฉพาะกรณีที่เป็นการแจกแจงครบช่วง (complete enumeration) — จำนวนเต็มไม่ติดลบที่ค่า
+    ไม่ซ้ำเติมช่วง [min..max] เกือบครบและส่วนใหญ่ไม่ซ้ำ เช่น ``rownames`` = 1..N
+    หรือ Pokédex ``#`` = 1..721 — เป็นดัชนี/ตัวนับ ไม่ใช่ค่าวัดทางสถิติ จึงไม่ควรนำไปทำ
+    correlation/สรุป/เทียบกลุ่ม (ได้ insight ที่ไม่มีความหมาย เช่น ผลรวม rownames ตามกลุ่ม).
+
+    เกณฑ์ตั้งใจให้แคบเพื่อกัน false positive บนค่าวัดจริง: ค่าวัดที่ครบช่วง (เดือน 1–12,
+    นาที 0–59) จะไม่ผ่านเพราะค่าไม่ซ้ำน้อยหรือซ้ำเยอะ และค่าวัดที่ไม่ซ้ำสูง (เช่น
+    flipper_length_mm) จะไม่เติมช่วงครบ.
+    """
+    n = len(non_null)
+    if n < _MIN_SERIAL_ROWS:
         return False
-    return _name_hints_id(series)
+    # ต้องเป็น integer dtype จริง ๆ — ตัวระบุเก็บเป็นจำนวนเต็ม ส่วนค่าวัดต่อเนื่องมักเป็น float
+    # (จึงไม่จับ float ที่บังเอิญลงตัว เช่น sales=0.0..59.0 ซึ่งเป็นค่าวัด ไม่ใช่ดัชนี)
+    if not pd.api.types.is_integer_dtype(non_null):
+        return False
+    vmin = non_null.min()
+    if vmin < 0:
+        return False
+    nunique = non_null.nunique()
+    if nunique < _MIN_SERIAL_DISTINCT:
+        return False
+    span = int(non_null.max()) - int(vmin) + 1
+    if span <= 0:
+        return False
+    return nunique / span >= _SERIAL_CONTIGUITY and nunique / n >= _SERIAL_UNIQUE_RATIO
 
 
 def _looks_like_string_id(series: pd.Series, non_null: pd.Series, str_sample: list[str]) -> bool:
